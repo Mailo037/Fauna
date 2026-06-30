@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flora</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <header class="mobile-header">
+        <button class="icon-btn sidebar-toggle-btn" aria-label="Toggle Sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+        <div class="mobile-logo">
+            <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+            Flora
+        </div>
+        <div style="width: 40px;"></div>
+    </header>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="logo">
+            <span class="logo-icon">
+                <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+            </span>
+            <span class="logo-text">Flora Playground</span>
+        </div>
+
+        <div class="nav-links">
+            <div class="nav-item active">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                <span class="nav-text">Playground</span>
+                <svg class="chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+            </div>
+        </div>
+
+        <div class="history">
+            <div class="history-label">Geskiedenis</div>
+            <div id="newChat" class="history-item">
+                <svg class="history-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                <span class="chat-label">Nuwe Klets</span>
+            </div>
+            <div class="history-item active">
+                <div class="dot"></div>
+                <span class="chat-label">Huidige Sessie</span>
+            </div>
+        </div>
+        
+        <div class="sidebar-footer">
+            <div class="user-profile">
+                <div class="user-avatar">DEV</div>
+                <div class="user-info">
+                    <span class="user-name">Local Workspace</span>
+                    <span class="user-status">Online</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <main class="main-content">
+        <header class="main-header">
+            <div class="header-left">
+                <button class="icon-btn sidebar-toggle-btn header-toggle-btn" aria-label="Toggle Sidebar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
+                <div class="breadcrumb">
+                    <div class="breadcrumb-icon-wrapper">
+                        <svg class="breadcrumb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                    </div>
+                    <span class="breadcrumb-text">Playground</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <span class="status-pill"><span class="pulse-dot"></span> Ollama</span>
+            </div>
+        </header>
+
+        <div id="welcome" class="welcome-container">
+            <div class="welcome-badge">STELSEL AANLYN</div>
+            <div class="welcome-logo-glow">
+                <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+            </div>
+            <div class="welcome-hero">
+                <h1 id="timeGreeting">It's late-night flere</h1>
+                <p>Jou plaaslike modelle is gereed en gesinkroniseer.</p>
+            </div>
+            
+            <div class="suggestion-grid">
+                <div class="suggestion-card" onclick="document.getElementById('prompt').value = 'Skryf \'n vinnige Python skrip om data te sorteer...'; document.getElementById('prompt').focus();">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    </div>
+                    <h3>Optimiseer Kode</h3>
+                    <p>Refaktor of verduidelik ingewikkelde algoritmes vinnig.</p>
+                </div>
+                <div class="suggestion-card" onclick="document.getElementById('prompt').value = 'Ontwerp \'n moderne CSS uitleg vir \'n dashboard...'; document.getElementById('prompt').focus();">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="0.5" fill="currentColor"/><circle cx="17.5" cy="10.5" r="0.5" fill="currentColor"/><circle cx="8.5" cy="7.5" r="0.5" fill="currentColor"/><circle cx="6.5" cy="12.5" r="0.5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+                    </div>
+                    <h3>Moderne UI / UX</h3>
+                    <p>Skep skoon, responsiewe en bobaas koppelvlakke.</p>
+                </div>
+                <div class="suggestion-card" onclick="document.getElementById('prompt').value = 'Help me learn something new about local AI...'; document.getElementById('prompt').focus();">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+                    </div>
+                    <h3>Write</h3>
+                    <p>Draft, polish, or reshape text.</p>
+                </div>
+                <div class="suggestion-card" onclick="document.getElementById('prompt').value = 'Find useful links about running AI models locally...'; document.getElementById('prompt').focus();">
+                    <div class="card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5Z"></path><path d="m2 17 10 5 10-5"></path><path d="m2 12 10 5 10-5"></path></svg>
+                    </div>
+                    <h3>Learn</h3>
+                    <p>Explore topics with sources.</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="chat" class="chat-stream"></div>
+
+        <footer class="input-wrapper">
+            <div class="input-container-floating">
+                <div id="previewContainer" class="preview-container"></div>
+                <input type="file" id="fileInput" multiple style="display: none;" />
+
+                <textarea id="prompt" rows="1" placeholder="Start typing a prompt..."></textarea>
+
+                <div class="input-action-bar">
+                    <div class="action-bar-left">
+                        <button id="uploadButton" class="action-circle-btn" aria-label="Attach Files">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        </button>
+                        <div class="tools-container">
+                            <button id="toolsBtn" class="action-pill-btn" type="button">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="3" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="14" width="7" height="7"></rect>
+                                    <rect x="3" y="14" width="7" height="7"></rect>
+                                </svg>
+                                <span>Tools</span>
+                            </button>
+                            <div id="toolsDropdown" class="tools-dropdown">
+                                <div class="tools-header">Agentic Settings</div>
+                                <div class="tools-section">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Code Sandbox</span>
+                                            <span class="setting-desc">Preview HTML, CSS & JS in interactive sandbox</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="toggleSandbox" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Web Search</span>
+                                            <span class="setting-desc">Find current information and useful links online</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="toggleWebSearch" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Grounding</span>
+                                            <span class="setting-desc">Anchor web answers to sources and cite links</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="toggleGrounding" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Google Grounding</span>
+                                            <span class="setting-desc">Add a Google results link to grounded answers</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="toggleGoogleGrounding" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="tools-section">
+                                    <div class="setting-item flex-column">
+                                        <div class="setting-header-row">
+                                            <span class="setting-title">Temperature</span>
+                                            <span id="tempValue" class="setting-value">0.7</span>
+                                        </div>
+                                        <input type="range" id="paramTemp" min="0" max="1.5" step="0.1" value="0.7" class="param-slider">
+                                    </div>
+                                </div>
+                                <div class="tools-section">
+                                    <div class="setting-item flex-column">
+                                        <div class="setting-header-row">
+                                            <span class="setting-title">Wan 2.2 Video</span>
+                                            <span id="wanStatus" class="setting-value">Not set</span>
+                                        </div>
+                                        <input id="wanEndpointInput" class="settings-input" type="text" value="http://localhost:8188" aria-label="Wan ComfyUI endpoint">
+                                        <textarea id="wanWorkflowInput" class="settings-textarea" rows="4" placeholder="Paste ComfyUI API workflow JSON with {{PROMPT}} here"></textarea>
+                                        <div class="settings-button-row">
+                                            <button id="wanSaveBtn" class="tools-action-btn" type="button">Save Wan</button>
+                                            <button id="wanTestBtn" class="tools-action-btn" type="button">Test</button>
+                                            <button id="wanClearBtn" class="tools-action-btn" type="button">Clear</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="tools-footer">
+                                    <button id="exportChatBtn" class="tools-action-btn" type="button">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                        <span>Export (.md)</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="action-bar-right">
+                        <div class="model-switcher">
+                            <button id="modelBtn" class="model-current" type="button">
+                                <span id="modelLabel">qwen3:8b</span>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </button>
+                            <div id="modelDropdown" class="model-dropdown"></div>
+                        </div>
+                        <button id="sendButton" class="run-btn" aria-label="Send Message">
+                            <span>Run</span>
+                            <span class="shortcut-badge">Ctrl ↵</span>
+                        </button>
+                        <button id="voiceButton" class="voice-btn" aria-label="Voice Input" type="button">
+                            <svg id="voiceBtnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                <line x1="12" y1="19" x2="12" y2="23"></line>
+                                <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="input-footer-text">
+                Flora AI Hardloop 100% plaaslik via Ollama <span style="margin:0 6px; opacity:0.3;">|</span> <span id="tokenCounter">0 Tokens (Sessie)</span>
+            </div>
+        </footer>
+    </main>
+
+    <div id="imageLightbox" class="image-lightbox" hidden aria-hidden="true">
+        <button class="image-lightbox-close" type="button" aria-label="Close">&times;</button>
+        <img class="image-lightbox-img" alt="Full size image" />
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
