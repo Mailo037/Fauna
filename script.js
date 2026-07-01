@@ -5588,6 +5588,14 @@ openAiSaveBtn?.addEventListener("click", () => {
     saveOpenAiSettings();
 });
 
+document.getElementById("providerKeyReveal")?.addEventListener("click", function() {
+    const input = document.getElementById("openAiApiKeyInput");
+    if (!input) return;
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    this.classList.toggle("revealed", show);
+});
+
 openAiClearBtn?.addEventListener("click", () => {
     safeLocalStorageRemove(OPENAI_API_KEY_STORAGE_KEY);
     safeLocalStorageRemove(OPENAI_CHAT_MODEL_STORAGE_KEY);

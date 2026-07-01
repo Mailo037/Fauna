@@ -138,42 +138,67 @@
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="provider" hidden>
+
+                <!-- Provider toggle -->
                 <div class="settings-row">
                     <div class="setting-info">
                         <span class="setting-title">AI provider</span>
                         <span id="openAiStatus" class="setting-desc">Local</span>
                     </div>
                     <div class="provider-segment" role="radiogroup" aria-label="AI provider">
-                        <button class="provider-choice" type="button" data-ai-provider="local" role="radio" aria-checked="true">Ollama</button>
-                        <button class="provider-choice" type="button" data-ai-provider="openai" role="radio" aria-checked="false">OpenAI</button>
+                        <button class="provider-choice" type="button" data-ai-provider="local" role="radio" aria-checked="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                            Ollama
+                        </button>
+                        <button class="provider-choice" type="button" data-ai-provider="openai" role="radio" aria-checked="false">
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.28 9.98a5.82 5.82 0 0 0-.5-4.79 5.9 5.9 0 0 0-6.35-2.83A5.87 5.87 0 0 0 11.03 1a5.9 5.9 0 0 0-5.63 4.1 5.87 5.87 0 0 0-3.92 2.85 5.9 5.9 0 0 0 .73 6.92 5.82 5.82 0 0 0 .5 4.79 5.9 5.9 0 0 0 6.35 2.83A5.85 5.85 0 0 0 12.97 23a5.9 5.9 0 0 0 5.63-4.1 5.87 5.87 0 0 0 3.92-2.85 5.9 5.9 0 0 0-.24-6.07ZM12.97 21.5a4.38 4.38 0 0 1-2.82-1.02l.14-.08 4.68-2.7a.77.77 0 0 0 .39-.67v-6.6l1.98 1.14a.07.07 0 0 1 .04.06v5.46a4.4 4.4 0 0 1-4.41 4.41Zm-9.47-4.05a4.37 4.37 0 0 1-.52-2.96l.14.08 4.68 2.7c.24.14.54.14.78 0l5.71-3.3v2.27a.08.08 0 0 1-.03.06l-4.73 2.73a4.4 4.4 0 0 1-6.03-1.58Zm-1.24-10.2a4.37 4.37 0 0 1 2.3-1.92v5.52c0 .27.14.52.38.66l5.7 3.29-1.97 1.14a.08.08 0 0 1-.07 0L4.27 13.1a4.4 4.4 0 0 1-1.01-5.85ZM19.4 13l-5.71-3.3 1.97-1.14a.08.08 0 0 1 .08 0l4.72 2.73a4.39 4.39 0 0 1-.68 7.92v-5.54a.77.77 0 0 0-.38-.67Zm1.97-3-.14-.08-4.67-2.72a.78.78 0 0 0-.78 0L10.07 10.5V8.23a.07.07 0 0 1 .03-.06l4.72-2.72a4.39 4.39 0 0 1 6.55 4.55Zm-12.36 4.07-1.97-1.14a.08.08 0 0 1-.04-.06V7.4a4.39 4.39 0 0 1 7.2-3.37l-.14.08-4.67 2.7a.77.77 0 0 0-.39.67L9 14.06Zm1.07-2.31 2.54-1.47 2.54 1.47v2.93l-2.54 1.47-2.54-1.47V11.76Z"/></svg>
+                            OpenAI
+                        </button>
                     </div>
                 </div>
+
+                <!-- API Key -->
                 <div class="settings-row settings-row-stacked">
                     <div class="setting-info">
                         <span class="setting-title">OpenAI API key</span>
-                        <span class="setting-desc">Saved in this browser only. Use a device you trust.</span>
+                        <span class="setting-desc">Stored in this browser only. Use a device you trust.</span>
                     </div>
-                    <input id="openAiApiKeyInput" class="settings-input" type="password" autocomplete="off" placeholder="OpenAI API key" aria-label="OpenAI API key">
+                    <div class="provider-key-wrap">
+                        <input id="openAiApiKeyInput" class="settings-input provider-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" aria-label="OpenAI API key">
+                        <button class="provider-key-reveal" id="providerKeyReveal" type="button" aria-label="Toggle key visibility" tabindex="-1">
+                            <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg class="eye-off-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                        </button>
+                    </div>
                 </div>
-                <div class="openai-model-grid">
-                    <label class="settings-field-label">
-                        <span>Chat model</span>
-                        <input id="openAiChatModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false">
-                    </label>
-                    <label class="settings-field-label">
-                        <span>Image model</span>
-                        <input id="openAiImageModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false">
-                    </label>
-                    <label class="settings-field-label">
-                        <span>Transcribe</span>
-                        <input id="openAiTranscriptionModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false">
-                    </label>
+
+                <!-- Models -->
+                <div class="provider-model-section">
+                    <p class="provider-section-label">Models</p>
+                    <div class="provider-model-grid">
+                        <label class="settings-field-label">
+                            <span>Chat</span>
+                            <input id="openAiChatModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini">
+                        </label>
+                        <label class="settings-field-label">
+                            <span>Image</span>
+                            <input id="openAiImageModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-image-1">
+                        </label>
+                        <label class="settings-field-label">
+                            <span>Transcription</span>
+                            <input id="openAiTranscriptionModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini-transcribe">
+                        </label>
+                    </div>
                 </div>
-                <div class="settings-button-row">
-                    <button id="openAiSaveBtn" class="tools-action-btn" type="button">Save OpenAI</button>
-                    <button id="openAiTestBtn" class="tools-action-btn" type="button">Test</button>
-                    <button id="openAiClearBtn" class="tools-action-btn" type="button">Clear</button>
+
+                <!-- Actions -->
+                <div class="provider-actions">
+                    <button id="openAiSaveBtn" class="provider-btn provider-btn-primary" type="button">Save</button>
+                    <button id="openAiTestBtn" class="provider-btn provider-btn-secondary" type="button">Test connection</button>
+                    <span class="provider-actions-spacer"></span>
+                    <button id="openAiClearBtn" class="provider-btn provider-btn-ghost" type="button">Clear</button>
                 </div>
+
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="personalization" hidden>
