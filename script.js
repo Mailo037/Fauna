@@ -124,25 +124,25 @@ const OPENAI_VOICE_MONITOR_INTERVAL_MS = 70;
 const OPENAI_VOICE_RELISTEN_DELAY_MS = 450;
 const TIME_GREETING_GROUPS = {
     morning: [
-        "Good morning, Flora is ready",
+        "Good morning, Fauna is ready",
         "Morning, what are we building?",
         "Fresh start, models ready",
         "Morning workspace, clean slate"
     ],
     afternoon: [
-        "Good afternoon, Flora is ready",
+        "Good afternoon, Fauna is ready",
         "Afternoon flow, models synced",
         "Ready for the next idea",
         "Local workspace, wide awake"
     ],
     evening: [
-        "Good evening, Flora is ready",
+        "Good evening, Fauna is ready",
         "Evening mode, calm and ready",
         "Quiet evening, models synced",
-        "Settle in, Flora is ready"
+        "Settle in, Fauna is ready"
     ],
     night: [
-        "Late-night mode, Flora is ready",
+        "Late-night mode, Fauna is ready",
         "Night shift, models ready",
         "Still awake, still ready",
         "Midnight workspace, ready when you are"
@@ -426,7 +426,7 @@ function getFriendlyError(error, fallbackTitle = "Something went wrong") {
     if (/No available model|Failed to fetch|Ollama|models? (?:is|are) loaded|localhost:11434/i.test(rawMessage)) {
         return {
             title: "Ollama is not reachable",
-            message: "Start Ollama, make sure the selected model is installed, or switch Flora to OpenAI in Settings.",
+            message: "Start Ollama, make sure the selected model is installed, or switch Fauna to OpenAI in Settings.",
             detail: rawMessage,
             canCheckOllama: true
         };
@@ -470,7 +470,7 @@ function getFriendlyError(error, fallbackTitle = "Something went wrong") {
 
     return {
         title: fallbackTitle,
-        message: "Flora could not complete this request.",
+        message: "Fauna could not complete this request.",
         detail: rawMessage,
         canCheckOllama: false
     };
@@ -505,7 +505,7 @@ function renderErrorCard(target, error, options = {}) {
 
     const message = document.createElement("div");
     message.className = "error-card-message";
-    message.textContent = info.message || "Flora could not complete this request.";
+    message.textContent = info.message || "Fauna could not complete this request.";
 
     body.appendChild(title);
     body.appendChild(message);
@@ -1203,7 +1203,7 @@ const THEME_STORAGE_KEY = "floraTheme";
 const ACCENT_STORAGE_KEY = "floraAccent";
 const LOCAL_TOOL_CALL_RE = /<flora_tool_call>\s*([\s\S]*?)\s*<\/flora_tool_call>/i;
 const LOCAL_TOOL_RESULT_MAX_CHARS = 14000;
-const LOCAL_TOOL_SYSTEM_PROMPT = `You can use Flora local workspace tools when the user asks about local files, this project, or terminal commands. To request a tool, respond with exactly one XML block and no other text: <flora_tool_call>{"tool":"workspace_tree","path":".","depth":2}</flora_tool_call>, <flora_tool_call>{"tool":"read_file","path":"script.js"}</flora_tool_call>, or <flora_tool_call>{"tool":"run_command","command":"git status --short","cwd":".","timeout":20}</flora_tool_call>. Commands run only inside the configured workspace and may be blocked by bridge safety rules. After Flora returns a tool result, answer the user normally.`;
+const LOCAL_TOOL_SYSTEM_PROMPT = `You can use Fauna local workspace tools when the user asks about local files, this project, or terminal commands. To request a tool, respond with exactly one XML block and no other text: <flora_tool_call>{"tool":"workspace_tree","path":".","depth":2}</flora_tool_call>, <flora_tool_call>{"tool":"read_file","path":"script.js"}</flora_tool_call>, or <flora_tool_call>{"tool":"run_command","command":"git status --short","cwd":".","timeout":20}</flora_tool_call>. Commands run only inside the configured workspace and may be blocked by bridge safety rules. After Fauna returns a tool result, answer the user normally.`;
 const CLARIFYING_QUESTION_RE = /<flora_question>\s*([\s\S]*?)\s*<\/flora_question>/i;
 const CLARIFYING_QUESTION_SYSTEM_PROMPT = `When you need user input before continuing, ask the question in your normal response and append one hidden JSON block at the end using this exact format: <flora_question>{"questions":[{"question":"What should I know?","options":["Option A","Option B"],"allowCustom":true,"placeholder":"Type your answer..."}]}</flora_question>. Use 1-3 concise questions. Each question may include 2-5 short options. Do not mention the XML block to the user. If you can answer well without more information, do not use this block.`;
 const CODE_BLOCK_SYSTEM_PROMPT = `When you include a fenced code block, always add the best language identifier after the opening fence, such as \`\`\`python, \`\`\`javascript, \`\`\`html, \`\`\`css, \`\`\`json, \`\`\`bash, or \`\`\`powershell.`;
@@ -1447,7 +1447,7 @@ function readStoredChatSessions() {
         if (!Array.isArray(parsed)) return [];
         return parsed.map(normalizeStoredChatSession).filter(Boolean);
     } catch (err) {
-        console.warn("Could not parse saved Flora chats:", err);
+        console.warn("Could not parse saved Fauna chats:", err);
         return [];
     }
 }
@@ -1481,7 +1481,7 @@ function updateActiveChatTitle() {
     const title = session?.title || "Current Session";
     if (chatTitle) chatTitle.textContent = title;
     if (chatTitleInput && !isChatTitleEditing) chatTitleInput.value = title;
-    document.title = title === "Current Session" ? "Flora" : `${title} - Flora`;
+    document.title = title === "Current Session" ? "Fauna" : `${title} - Fauna`;
 }
 
 function setChatTitleEditing(editing) {
@@ -2507,7 +2507,7 @@ function parseClarifyingQuestionRequest(content) {
         const payload = JSON.parse(match[1]);
         return normalizeClarifyingQuestionPayload(payload);
     } catch (err) {
-        console.warn("Could not parse Flora question request:", err);
+        console.warn("Could not parse Fauna question request:", err);
         return null;
     }
 }
@@ -2559,7 +2559,7 @@ function normalizeClarifyingQuestionPayload(payload) {
 
     if (questions.length === 0) return null;
     return {
-        title: String(payload.title || "Flora needs one detail").trim(),
+            title: String(payload.title || "Fauna needs one detail").trim(),
         questions
     };
 }
@@ -2791,7 +2791,7 @@ function buildClarifyingAnswerPayload(state) {
         const answer = state.answers[index]?.value || "";
         return `Question: ${question.question}\nAnswer: ${answer}`;
     });
-    return `[Answer to Flora's clarifying question]\n${lines.join("\n\n")}\n\nContinue the original task using this answer.`;
+    return `[Answer to Fauna's clarifying question]\n${lines.join("\n\n")}\n\nContinue the original task using this answer.`;
 }
 
 function buildClarifyingAnswerDisplay(state) {
@@ -3279,7 +3279,7 @@ async function processWorkspaceEntry() {
                             title: err.name === "AbortError" ? "Image upload stopped" : "Image upload failed",
                             message: err.name === "AbortError"
                                 ? "Your prompt is safe to edit and run again."
-                                : "Flora could not upload the image to OpenAI. Check the API key, file type, and file size."
+                                : "Fauna could not upload the image to OpenAI. Check the API key, file type, and file size."
                         });
                         return;
                     }
@@ -3476,8 +3476,8 @@ async function processImageGeneration(prompt, currentFiles, signal = null) {
             message: e.name === "AbortError"
                 ? "Your prompt is safe to edit and run again."
                 : isOpenAiProvider()
-                    ? "Flora could not create the image through OpenAI. Check the key, image model, and account limits."
-                    : "Flora could not create the image. Check your connection and try again."
+            ? "Fauna could not create the image through OpenAI. Check the key, image model, and account limits."
+            : "Fauna could not create the image. Check your connection and try again."
         });
     }
 }
@@ -3487,7 +3487,7 @@ async function processImageEdit(requestText, currentFiles, signal = null) {
         const errorBubble = addRenderNode("__thinking__", "output");
         renderErrorCard(errorBubble, new Error("Tell me what to change in the attached image."), {
             title: "Edit instruction missing",
-            message: "Describe the change you want Flora to make to the attached image."
+            message: "Describe the change you want Fauna to make to the attached image."
         });
         return;
     }
@@ -3553,8 +3553,8 @@ async function processImageEdit(requestText, currentFiles, signal = null) {
             message: e.name === "AbortError"
                 ? "Your edit request is safe to adjust and run again."
                 : isOpenAiProvider()
-                    ? "Flora could not edit the image through OpenAI. Check the key, image model, and attached image."
-                    : `Flora could not prepare the edit. Make sure Ollama is running and "${IMAGE_EDIT_MODEL}" is installed.`
+            ? "Fauna could not edit the image through OpenAI. Check the key, image model, and attached image."
+            : `Fauna could not prepare the edit. Make sure Ollama is running and "${IMAGE_EDIT_MODEL}" is installed.`
         });
     }
 }
@@ -3640,7 +3640,7 @@ async function processVideoGeneration(prompt, currentFiles, signal = null) {
             return;
         }
         try {
-            const fallbackNote = `${e.message}. Falling back to Flora's local animated clip generator.`;
+            const fallbackNote = `${e.message}. Falling back to Fauna's local animated clip generator.`;
             renderCreationProgress(aiBubble, {
                 kind: "video",
                 title: "Creating fallback clip",
@@ -3658,7 +3658,7 @@ async function processVideoGeneration(prompt, currentFiles, signal = null) {
             renderGeneratedVideo(aiBubble, prompt, videoResult.url, videoResult.extension, "Fallback animated clip");
             conversationHistory.push({
                 role: "assistant",
-                content: `Wan was unavailable, so Flora generated a fallback 10 second animated clip for: ${prompt}\n\n${videoResult.url}`
+                content: `Wan was unavailable, so Fauna generated a fallback 10 second animated clip for: ${prompt}\n\n${videoResult.url}`
             });
             setupCopyFeature(aiBubble.parentElement, videoResult.url);
         } catch (fallbackError) {
@@ -3666,7 +3666,7 @@ async function processVideoGeneration(prompt, currentFiles, signal = null) {
                 title: fallbackError.name === "AbortError" ? "Video generation stopped" : "Video generation failed",
                 message: fallbackError.name === "AbortError"
                     ? "Your video prompt is safe to edit and run again."
-                    : "Flora could not complete the Wan request or the local fallback clip."
+                    : "Fauna could not complete the Wan request or the local fallback clip."
             });
         }
     }
@@ -4249,7 +4249,7 @@ function renderGeneratedVideo(container, prompt, videoUrl, extension = "mp4", la
     const download = document.createElement("a");
     download.className = "generated-video-download";
     download.href = videoUrl;
-    download.download = `flora-clip.${extension}`;
+    download.download = `fauna-clip.${extension}`;
     download.textContent = "Download clip";
 
     videoWrap.appendChild(video);
@@ -4268,7 +4268,7 @@ function addRenderNode(text, type, fileArray = []) {
         avatar.textContent = "U";
     } else {
         avatar.innerHTML = `<svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>`;
-        avatar.setAttribute("aria-label", "Flora");
+        avatar.setAttribute("aria-label", "Fauna");
     }
     node.appendChild(avatar);
 
@@ -4279,10 +4279,13 @@ function addRenderNode(text, type, fileArray = []) {
     bubble.className = "bubble markdown";
     if (text === "__thinking__") {
         bubble.innerHTML = `
-            <div class="skeleton-block" aria-label="Flora is thinking">
+            <div class="skeleton-block" role="status" aria-label="Fauna is thinking">
                 <div class="skeleton-header">
                     <span class="skeleton-orb" aria-hidden="true"></span>
-                    <span class="skeleton-line skeleton-line-meta"></span>
+                    <span class="thinking-label">
+                        Thinking
+                        <span class="thinking-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                    </span>
                 </div>
                 <div class="skeleton-paragraph">
                     <div class="skeleton-line skeleton-line-wide"></div>
@@ -4683,7 +4686,7 @@ function getCodeDownloadExtension(lang, kind) {
     return CODE_DOWNLOAD_EXTENSIONS[normalized] || CODE_DOWNLOAD_EXTENSIONS[kind] || "txt";
 }
 
-function getCodeDownloadName(lang, kind, prefix = "flora-code") {
+    function getCodeDownloadName(lang, kind, prefix = "fauna-code") {
     return `${prefix}.${getCodeDownloadExtension(lang, kind)}`;
 }
 
@@ -4851,7 +4854,7 @@ function openCodeWorkbench({
     initialMode = "preview",
     copyText = "",
     downloadText = "",
-    downloadName = "flora-code.txt",
+            downloadName = "fauna-code.txt",
     downloadMime = "text/plain;charset=utf-8"
 } = {}) {
     const elements = ensureCodeWorkbench();
@@ -4955,7 +4958,7 @@ function addCombinedPreviewBar(container, blocks) {
             documentHtml,
             initialMode: "preview",
             downloadText: documentHtml,
-            downloadName: "flora-preview.html",
+            downloadName: "fauna-preview.html",
             downloadMime: "text/html;charset=utf-8"
         });
     };
@@ -6055,7 +6058,7 @@ async function startOpenAiVoiceRecording({ rearm = false } = {}) {
     voiceMediaRecorder.onstart = () => {
         setSpeechRecognitionState(true);
         startOpenAiVoiceMonitor();
-        if (!rearm) showToast("Listening. Flora will send when you pause.", "info");
+        if (!rearm) showToast("Listening. Fauna will send when you pause.", "info");
     };
 
     voiceMediaRecorder.onstop = async () => {
@@ -6177,7 +6180,7 @@ async function transcribeOpenAiAudio(blob, signal = null) {
     const extension = blob.type.includes("mp4") ? "mp4" : "webm";
     const formData = new FormData();
     formData.append("model", getOpenAiTranscriptionModel());
-    formData.append("file", new File([blob], `flora-voice.${extension}`, { type: blob.type || "audio/webm" }));
+        formData.append("file", new File([blob], `fauna-voice.${extension}`, { type: blob.type || "audio/webm" }));
 
     const res = await openAiFetch("/audio/transcriptions", {
         method: "POST",
