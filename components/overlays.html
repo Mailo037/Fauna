@@ -105,7 +105,15 @@
                         </button>
                     </div>
                     <input id="openAiVoiceInput" type="hidden" value="alloy">
-                    <div id="voiceChoiceList" class="voice-choice-list" role="radiogroup" aria-label="Available OpenAI voices"></div>
+                    <div class="voice-choice-wrap" id="voiceChoiceWrap">
+                        <div id="voiceChoiceList" class="voice-choice-list" role="radiogroup" aria-label="Available OpenAI voices"></div>
+                        <div class="voice-show-more-fade" aria-hidden="true">
+                            <button id="voiceShowMoreBtn" class="voice-show-more-btn" type="button">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                                Show all voices
+                            </button>
+                        </div>
+                    </div>
                 </section>
                 <div class="settings-row">
                     <div class="setting-info">

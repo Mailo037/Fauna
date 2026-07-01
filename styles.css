@@ -7450,3 +7450,124 @@ body.app-ready .suggestion-card:nth-child(4) { animation-delay: 0.38s; }
     border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
 }
 
+
+/* ═══════════════════════════════════════════════════════
+   Voice picker: collapsed grid with gradient + show-more
+   ═══════════════════════════════════════════════════════ */
+
+/* Wrapper holds the list + the fade/button overlay */
+.voice-choice-wrap {
+    position: relative;
+    width: 100%;
+}
+
+/* Collapsed: clip to exactly 2 rows (48px × 2 + 8px gap) */
+.voice-choice-wrap:not(.expanded) .voice-choice-list {
+    max-height: 108px;
+    overflow: hidden;
+}
+
+/* Gradient + button overlay — sits over the bottom of the list */
+.voice-show-more-fade {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 92px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: 6px;
+    /* gradient from transparent → settings-modal bg */
+    background: linear-gradient(
+        to bottom,
+        rgba(32, 32, 32, 0) 0%,
+        rgba(32, 32, 32, 0.88) 52%,
+        #202020 100%
+    );
+    pointer-events: none;
+    transition: opacity 0.22s var(--ease);
+}
+
+/* Hide the fade once expanded */
+.voice-choice-wrap.expanded .voice-show-more-fade {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Also un-clip the list when expanded, with smooth height animation */
+.voice-choice-wrap.expanded .voice-choice-list {
+    max-height: 600px;
+    overflow: visible;
+    animation: voiceGridExpand 0.32s var(--ease) both;
+}
+
+@keyframes voiceGridExpand {
+    from { max-height: 108px; }
+    to   { max-height: 600px; }
+}
+
+/* Show-more button */
+.voice-show-more-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    pointer-events: auto;
+    padding: 6px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: rgba(40, 40, 44, 0.92);
+    color: #d8d8d8;
+    font-size: 12px;
+    font-weight: 650;
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    transition: background-color 0.16s var(--ease), border-color 0.16s var(--ease),
+                color 0.16s var(--ease), transform 0.16s var(--ease);
+}
+
+.voice-show-more-btn:hover,
+.voice-show-more-btn:focus-visible {
+    background: rgba(56, 56, 62, 0.96);
+    border-color: rgba(255, 255, 255, 0.24);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.voice-show-more-btn svg {
+    width: 14px;
+    height: 14px;
+    opacity: 0.7;
+    transition: transform 0.2s var(--ease);
+}
+
+.voice-show-more-btn:hover svg {
+    transform: translateY(2px);
+    opacity: 1;
+}
+
+/* After expanded: hide the button itself (fade handled above) */
+.voice-choice-wrap.expanded .voice-show-more-btn {
+    display: none;
+}
+
+/* Newly revealed rows animate in */
+.voice-choice-wrap.expanded .voice-choice:nth-child(n+7) {
+    animation: voiceCardReveal 0.26s var(--ease) both;
+}
+
+.voice-choice-wrap.expanded .voice-choice:nth-child(7)  { animation-delay: 0.02s; }
+.voice-choice-wrap.expanded .voice-choice:nth-child(8)  { animation-delay: 0.05s; }
+.voice-choice-wrap.expanded .voice-choice:nth-child(9)  { animation-delay: 0.08s; }
+.voice-choice-wrap.expanded .voice-choice:nth-child(10) { animation-delay: 0.11s; }
+.voice-choice-wrap.expanded .voice-choice:nth-child(11) { animation-delay: 0.14s; }
+.voice-choice-wrap.expanded .voice-choice:nth-child(12) { animation-delay: 0.17s; }
+.voice-choice-wrap.expanded .voice-choice:nth-child(13) { animation-delay: 0.20s; }
+
+@keyframes voiceCardReveal {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* Re-collapse if the user re-opens the pane (reset via JS is not needed;
+   just ensure a fresh open shows collapsed state — handled by class absence) */

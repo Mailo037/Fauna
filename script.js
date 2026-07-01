@@ -5518,6 +5518,11 @@ voiceNextBtn?.addEventListener("click", () => cycleOpenAiVoice(1));
 renderVoiceChoices();
 renderVoiceQuickSettings();
 
+document.getElementById("voiceShowMoreBtn")?.addEventListener("click", () => {
+    const wrap = document.getElementById("voiceChoiceWrap");
+    if (wrap) wrap.classList.add("expanded");
+});
+
 function setOpenAiSettingsStatus(text, state = "missing") {
     if (!openAiStatus) return;
     openAiStatus.textContent = text;
