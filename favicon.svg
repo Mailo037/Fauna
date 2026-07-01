@@ -4,7 +4,27 @@
       <stop offset="0" stop-color="#6d8bff"/>
       <stop offset="1" stop-color="#4868dc"/>
     </linearGradient>
+    <!-- F letterform clip path -->
+    <clipPath id="fClip">
+      <path d="M5 5H24V12H13V16H21V22H13V27H5Z"/>
+    </clipPath>
   </defs>
+  <!-- Background rounded square -->
   <rect width="32" height="32" rx="8" fill="url(#faunaBg)"/>
-  <path transform="translate(4 4)" fill="#ffffff" d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/>
+  <!-- Botanical leaves clipped to the F shape -->
+  <g clip-path="url(#fClip)">
+    <!-- Large leaf sweeping through top bar -->
+    <ellipse cx="16" cy="9" rx="14" ry="5.5" fill="#5de88a" opacity="0.92" transform="rotate(-18 16 9)"/>
+    <!-- Leaf in the middle bar area -->
+    <ellipse cx="15" cy="19" rx="11" ry="4.5" fill="#3dd672" opacity="0.88" transform="rotate(22 15 19)"/>
+    <!-- Leaf along the vertical stem -->
+    <ellipse cx="9" cy="16" rx="5" ry="12" fill="#4de882" opacity="0.78" transform="rotate(-8 9 16)"/>
+    <!-- Small accent leaf in top-right -->
+    <ellipse cx="20" cy="7" rx="7" ry="3" fill="#72f4a4" opacity="0.72" transform="rotate(-40 20 7)"/>
+    <!-- Bottom stem leaf -->
+    <ellipse cx="9" cy="24" rx="5" ry="3.5" fill="#3bc96a" opacity="0.82" transform="rotate(12 9 24)"/>
+    <!-- Subtle vein lines -->
+    <line x1="7" y1="5" x2="8" y2="27" stroke="#1a9e50" stroke-width="0.8" opacity="0.45"/>
+    <line x1="13" y1="5" x2="16" y2="22" stroke="#22b85c" stroke-width="0.6" opacity="0.38"/>
+  </g>
 </svg>

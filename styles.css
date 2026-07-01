@@ -6125,8 +6125,7 @@ body.app-ready .input-wrapper {
 .settings-dialog {
     position: relative;
     width: min(680px, calc(100vw - 32px));
-    min-height: min(600px, calc(100vh - 44px));
-    max-height: min(760px, calc(100vh - 44px));
+    height: min(680px, calc(100vh - 44px));
     display: grid;
     grid-template-columns: 210px minmax(0, 1fr);
     overflow: hidden;
@@ -6575,8 +6574,7 @@ body.settings-modal-open {
 
     .settings-dialog {
         width: 100%;
-        min-height: 0;
-        max-height: min(720px, calc(100vh - 24px));
+        height: min(720px, calc(100vh - 24px));
         grid-template-columns: 1fr;
         grid-template-rows: auto minmax(0, 1fr);
         border-radius: 16px;
@@ -6627,5 +6625,221 @@ body.settings-modal-open {
 
     .settings-theme-toggle {
         align-self: flex-start;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Fauna refinements: animations, welcome, composer, menus, a11y
+   ═══════════════════════════════════════════════════════════════ */
+
+/* --- Geometry token --- */
+:root {
+    --radius-composer: 22px;
+}
+
+/* --- Welcome screen: less clutter --- */
+.welcome-logo-glow {
+    display: none;
+}
+
+.welcome-container {
+    padding-top: clamp(32px, 8vh, 84px);
+}
+
+.welcome-hero {
+    text-align: center;
+}
+
+.welcome-hero h1 {
+    font-size: clamp(22px, 3.8vw, 30px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.18;
+}
+
+.welcome-hero p {
+    margin-top: 6px;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* --- Welcome entrance animations --- */
+@keyframes welcomeHeroIn {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+}
+
+@keyframes suggestionCardIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+}
+
+body.app-ready .welcome-hero h1 {
+    animation: welcomeHeroIn 0.52s var(--ease) both;
+    animation-delay: 0.08s;
+}
+
+body.app-ready .welcome-hero p {
+    animation: welcomeHeroIn 0.52s var(--ease) both;
+    animation-delay: 0.15s;
+}
+
+body.app-ready .suggestion-card {
+    animation: suggestionCardIn 0.48s var(--ease) both;
+}
+
+body.app-ready .suggestion-card:nth-child(1) { animation-delay: 0.20s; }
+body.app-ready .suggestion-card:nth-child(2) { animation-delay: 0.26s; }
+body.app-ready .suggestion-card:nth-child(3) { animation-delay: 0.32s; }
+body.app-ready .suggestion-card:nth-child(4) { animation-delay: 0.38s; }
+
+/* --- Suggestion cards: hover lift + glow --- */
+.suggestion-card {
+    transition: background-color 0.2s var(--ease), border-color 0.2s var(--ease),
+                transform 0.22s var(--ease), box-shadow 0.22s var(--ease);
+}
+
+.suggestion-card:hover,
+.suggestion-card:focus-visible {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.suggestion-card:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* --- Composer: rounder, polished --- */
+.input-container-floating {
+    border-radius: var(--radius-composer);
+    transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.input-container-floating:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* --- Clarifying question: match composer radius --- */
+.clarifying-question-card {
+    border-radius: var(--radius-composer);
+}
+
+/* --- Dropdowns: rounder + entrance animation --- */
+.model-dropdown,
+.tools-dropdown {
+    border-radius: var(--radius-composer);
+    overflow: hidden;
+}
+
+.model-dropdown.open,
+.tools-dropdown.open {
+    animation: dropdownIn 0.16s var(--ease) both;
+}
+
+@keyframes dropdownIn {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* --- Voice quick panel: composer radius --- */
+.voice-quick-panel {
+    border-radius: var(--radius-composer);
+}
+
+/* --- Status pill & settings button: micro-lift on hover --- */
+.status-pill,
+.theme-toggle {
+    transition: background-color 0.18s var(--ease), color 0.18s var(--ease),
+                border-color 0.18s var(--ease), transform 0.18s var(--ease);
+}
+
+.status-pill:hover,
+.theme-toggle:hover {
+    transform: translateY(-1px);
+}
+
+/* --- Action circle buttons: scale on hover --- */
+.action-circle-btn,
+.voice-btn {
+    transition: background-color 0.18s var(--ease), color 0.18s var(--ease),
+                transform 0.18s var(--ease);
+}
+
+.action-circle-btn:hover,
+.voice-btn:hover:not(:disabled) {
+    transform: scale(1.06);
+}
+
+/* --- Run button: spring press --- */
+.run-btn {
+    transition: background-color 0.18s var(--ease), border-color 0.18s var(--ease),
+                transform 0.15s var(--ease);
+}
+
+.run-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+.run-btn:active:not(:disabled) {
+    transform: translateY(0) scale(0.97);
+}
+
+/* --- Chat message entrance: refined --- */
+@keyframes messageInRefined {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+}
+
+.message-node {
+    animation: messageInRefined 0.3s var(--ease) both;
+}
+
+/* --- Nav items: smoother sidebar animations --- */
+.nav-item,
+.history-item,
+.chat-session-row {
+    transition: background-color 0.18s var(--ease), border-color 0.18s var(--ease),
+                color 0.18s var(--ease), box-shadow 0.18s var(--ease),
+                transform 0.18s var(--ease);
+}
+
+/* --- Toast: composer radius for consistency --- */
+.toast {
+    border-radius: var(--radius-xl);
+}
+
+/* --- Personalization pane: extra spacing --- */
+.settings-pane[data-settings-pane-panel="personalization"] .settings-row {
+    padding: 14px 0;
+}
+
+/* --- Settings modal: fixed height to prevent resize --- */
+/* (already set via direct rule edit in .settings-dialog) */
+
+/* --- Reduced motion: skip all new animations --- */
+@media (prefers-reduced-motion: reduce) {
+    body.app-ready .welcome-hero h1,
+    body.app-ready .welcome-hero p,
+    body.app-ready .suggestion-card {
+        animation: none;
+        opacity: 1;
+        transform: none;
+    }
+
+    .model-dropdown.open,
+    .tools-dropdown.open {
+        animation: none;
+    }
+
+    .suggestion-card:hover,
+    .suggestion-card:focus-visible,
+    .status-pill:hover,
+    .theme-toggle:hover,
+    .action-circle-btn:hover,
+    .voice-btn:hover:not(:disabled),
+    .run-btn:hover:not(:disabled) {
+        transform: none;
     }
 }

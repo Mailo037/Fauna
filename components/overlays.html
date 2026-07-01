@@ -28,6 +28,10 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path><circle cx="8" cy="6" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="10" cy="18" r="1"></circle></svg>
                     <span>Local Services</span>
                 </button>
+                <button class="settings-nav-item" type="button" data-settings-pane="personalization" aria-selected="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"></path></svg>
+                    <span>Personalization</span>
+                </button>
             </nav>
         </aside>
 
@@ -155,6 +159,47 @@
                     <button id="openAiSaveBtn" class="tools-action-btn" type="button">Save OpenAI</button>
                     <button id="openAiTestBtn" class="tools-action-btn" type="button">Test</button>
                     <button id="openAiClearBtn" class="tools-action-btn" type="button">Clear</button>
+                </div>
+            </div>
+
+            <div class="settings-pane" data-settings-pane-panel="personalization" hidden>
+                <div class="settings-row settings-row-stacked">
+                    <div class="setting-info">
+                        <span class="setting-title">Display name</span>
+                        <span class="setting-desc">How Fauna addresses you in greetings and responses.</span>
+                    </div>
+                    <input id="personaDisplayNameInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" maxlength="40" placeholder="Your name" aria-label="Display name">
+                </div>
+                <div class="settings-row settings-row-stacked">
+                    <div class="setting-info">
+                        <span class="setting-title">Custom instructions</span>
+                        <span class="setting-desc">Prepended to every chat. Describe your role, preferences, or how you'd like responses formatted.</span>
+                    </div>
+                    <textarea id="personaCustomInstructionsInput" class="settings-textarea" rows="5" placeholder="e.g. I'm a developer who prefers concise answers with code examples. Always use TypeScript." aria-label="Custom instructions"></textarea>
+                    <div class="settings-button-row">
+                        <button id="personaSaveBtn" class="tools-action-btn" type="button">Save</button>
+                        <button id="personaClearBtn" class="tools-action-btn" type="button">Clear</button>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="setting-info">
+                        <span class="setting-title">Show suggestions</span>
+                        <span class="setting-desc">Display prompt suggestions on the home screen.</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="personaShowSuggestions" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="settings-row">
+                    <div class="setting-info">
+                        <span class="setting-title">Compact welcome</span>
+                        <span class="setting-desc">Show a minimal greeting without the subtitle line.</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="personaCompactWelcome">
+                        <span class="toggle-slider"></span>
+                    </label>
                 </div>
             </div>
 
