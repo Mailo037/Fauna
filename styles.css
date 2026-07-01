@@ -7571,3 +7571,23 @@ body.app-ready .suggestion-card:nth-child(4) { animation-delay: 0.38s; }
 
 /* Re-collapse if the user re-opens the pane (reset via JS is not needed;
    just ensure a fresh open shows collapsed state — handled by class absence) */
+
+/* --- Show less button row --- */
+.voice-show-less-row {
+    display: none;
+    justify-content: center;
+    padding-top: 10px;
+}
+
+.voice-choice-wrap.expanded .voice-show-less-row {
+    display: flex;
+}
+
+.voice-show-less-btn svg {
+    transition: transform 0.2s var(--ease);
+}
+
+.voice-show-less-btn:hover svg {
+    transform: translateY(-2px);
+    opacity: 1;
+}

@@ -5519,8 +5519,10 @@ renderVoiceChoices();
 renderVoiceQuickSettings();
 
 document.getElementById("voiceShowMoreBtn")?.addEventListener("click", () => {
-    const wrap = document.getElementById("voiceChoiceWrap");
-    if (wrap) wrap.classList.add("expanded");
+    document.getElementById("voiceChoiceWrap")?.classList.add("expanded");
+});
+document.getElementById("voiceShowLessBtn")?.addEventListener("click", () => {
+    document.getElementById("voiceChoiceWrap")?.classList.remove("expanded");
 });
 
 function setOpenAiSettingsStatus(text, state = "missing") {
