@@ -14,7 +14,7 @@ function createBootLoader() {
         <div class="app-boot-loader-mark" aria-hidden="true">
             <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.09 6.26 6.73.92-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
         </div>
-        <div class="app-boot-loader-text">Starting Flora</div>
+        <div class="app-boot-loader-text">Starting Fauna</div>
         <div class="app-boot-loader-bar" aria-hidden="true"><span></span></div>
     `;
     document.body.appendChild(loader);
@@ -66,8 +66,8 @@ function getStartupErrorInfo(error) {
 
     if (/before initialization|Cannot access .* before initialization/i.test(message)) {
         return {
-            title: "Flora hit a startup snag",
-            message: "One app setting loaded before the rest of Flora was ready. Reload after the latest fix, and share the details if it comes back.",
+            title: "Fauna hit a startup snag",
+            message: "One app setting loaded before the rest of Fauna was ready. Reload after the latest fix, and share the details if it comes back.",
             steps: ["Reload the page.", "If it still fails, copy the details and check the most recent script change."],
             detail
         };
@@ -75,15 +75,15 @@ function getStartupErrorInfo(error) {
 
     if (/Could not load .*: \d+|Failed to fetch/i.test(message)) {
         return {
-            title: "Flora could not load every file",
+            title: "Fauna could not load every file",
             message: "The local server did not return one of the app files. This can happen when the static server is pointed at the wrong folder or the port is serving another project.",
-            steps: ["Start the server from the Flora folder.", "Reload this page.", "Use another local port if another app is already running."],
+            steps: ["Start the server from the Fauna folder.", "Reload this page.", "Use another local port if another app is already running."],
             detail
         };
     }
 
     return {
-        title: "Flora could not start",
+        title: "Fauna could not start",
         message: "The app stopped during startup before the chat UI could load.",
         steps: ["Reload the page.", "If it repeats, copy the details and inspect the browser console."],
         detail
@@ -111,7 +111,7 @@ function renderStartupError(error) {
                     </ul>
                 </div>
                 <div class="startup-error-actions">
-                    <button class="startup-error-primary" type="button" data-startup-reload>Reload Flora</button>
+                    <button class="startup-error-primary" type="button" data-startup-reload>Reload Fauna</button>
                     <button class="startup-error-secondary" type="button" data-startup-details aria-expanded="false" aria-controls="${detailId}">Details</button>
                     <button class="startup-error-secondary" type="button" data-startup-copy>Copy details</button>
                 </div>
@@ -157,7 +157,7 @@ async function bootApp() {
         }
         finishBootLoader();
     } catch (err) {
-        console.error("Flora failed to start:", err);
+        console.error("Fauna failed to start:", err);
         renderStartupError(err);
     }
 }
