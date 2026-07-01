@@ -7143,3 +7143,310 @@ body.app-ready .suggestion-card:nth-child(4) { animation-delay: 0.38s; }
         box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
     }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Settings-modal aesthetic: all popups, menus, sidebar dark
+   ═══════════════════════════════════════════════════════════ */
+
+/* --- Sidebar: always dark, like the settings sidebar (#242424) --- */
+.sidebar {
+    background: #1e1e22 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.07) !important;
+    box-shadow: none !important;
+}
+
+.logo-text {
+    color: #f2f2f2 !important;
+}
+
+.logo-icon {
+    background: transparent !important;
+    box-shadow: none !important;
+    color: var(--accent) !important;
+}
+
+.logo-icon .flora-mark {
+    filter: none !important;
+}
+
+.sidebar-section-label,
+.history-label {
+    color: rgba(255, 255, 255, 0.28) !important;
+    opacity: 1 !important;
+}
+
+.nav-item,
+.history-item,
+.chat-session-row {
+    color: rgba(255, 255, 255, 0.52) !important;
+}
+
+.nav-item:hover,
+.history-item:hover:not(:disabled),
+.chat-session-row:hover,
+.nav-item:focus-visible,
+.history-item:focus-visible {
+    background: rgba(255, 255, 255, 0.06) !important;
+    color: #f0f0f0 !important;
+    transform: none !important;
+}
+
+.nav-item.active,
+.history-item.active,
+.chat-session-row.active {
+    background: color-mix(in srgb, var(--accent) 14%, rgba(30, 30, 34, 0)) !important;
+    color: #a8bdff !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+.nav-item.active:hover,
+.history-item.active:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 18%, rgba(30, 30, 34, 0)) !important;
+}
+
+.chat-session-main {
+    color: inherit !important;
+}
+
+.chat-session-row.active .chat-session-main {
+    color: #a8bdff !important;
+}
+
+.history-subsection-label {
+    color: rgba(255, 255, 255, 0.22) !important;
+}
+
+.new-chat-item {
+    color: rgba(255, 255, 255, 0.42) !important;
+}
+
+.new-chat-item:hover,
+.new-chat-item:focus-visible {
+    color: #f0f0f0 !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.nav-icon,
+.history-icon {
+    opacity: 0.55 !important;
+}
+
+.nav-item.active .nav-icon,
+.history-item.active .history-icon {
+    opacity: 0.9 !important;
+    color: #a8bdff !important;
+}
+
+.sidebar-collapse-toggle {
+    color: rgba(255, 255, 255, 0.3) !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+.sidebar-collapse-toggle:hover,
+.sidebar-collapse-toggle:focus-visible {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: rgba(255, 255, 255, 0.75) !important;
+    border: 0 !important;
+}
+
+.chat-session-menu-trigger {
+    border: 0 !important;
+    border-radius: 7px !important;
+    background: transparent !important;
+    color: rgba(255, 255, 255, 0.25) !important;
+}
+
+.chat-session-menu-trigger:hover,
+.chat-session-menu-trigger:focus-visible,
+.chat-session-menu-wrap.open .chat-session-menu-trigger {
+    border: 0 !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: rgba(255, 255, 255, 0.75) !important;
+}
+
+/* --- Chat session context menu: settings-modal style --- */
+.chat-session-menu {
+    min-width: 180px !important;
+    gap: 2px !important;
+    padding: 6px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 12px !important;
+    background: #242424 !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.52), 0 2px 8px rgba(0, 0, 0, 0.28) !important;
+    animation: sMenuIn 0.15s var(--ease) both !important;
+}
+
+@keyframes sMenuIn {
+    from { opacity: 0; transform: translateY(5px) scale(0.97); }
+    to   { opacity: 1; transform: none; }
+}
+
+.chat-session-menu-item {
+    min-height: 36px !important;
+    padding: 0 10px !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    color: #d8d8d8 !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+    gap: 9px !important;
+}
+
+.chat-session-menu-item svg {
+    width: 14px !important;
+    height: 14px !important;
+    color: rgba(255, 255, 255, 0.38) !important;
+}
+
+.chat-session-menu-item:hover,
+.chat-session-menu-item:focus-visible {
+    background: #303030 !important;
+    color: #fff !important;
+}
+
+.chat-session-menu-item:hover svg,
+.chat-session-menu-item:focus-visible svg {
+    color: rgba(255, 255, 255, 0.65) !important;
+}
+
+.chat-session-menu-item-delete {
+    color: #e8807a !important;
+}
+
+.chat-session-menu-item-delete svg {
+    color: rgba(232, 100, 90, 0.6) !important;
+}
+
+.chat-session-menu-item-delete:hover,
+.chat-session-menu-item-delete:focus-visible {
+    background: rgba(220, 80, 70, 0.13) !important;
+    color: #ff9590 !important;
+}
+
+.chat-session-menu-item-delete:hover svg,
+.chat-session-menu-item-delete:focus-visible svg {
+    color: rgba(255, 120, 110, 0.75) !important;
+}
+
+/* --- Model dropdown: settings-modal style --- */
+.model-dropdown {
+    padding: 6px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 14px !important;
+    background: #202020 !important;
+    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.54), 0 4px 12px rgba(0, 0, 0, 0.26) !important;
+}
+
+.model-option {
+    min-height: 36px !important;
+    padding: 0 10px !important;
+    border-radius: 9px !important;
+    background: transparent !important;
+    color: #cccccc !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+}
+
+.model-option:hover {
+    background: #2e2e2e !important;
+    color: #fff !important;
+}
+
+.model-option.active {
+    background: #2a2f3e !important;
+    color: #9eb4ff !important;
+}
+
+/* --- Tools dropdown: settings-modal style --- */
+.tools-dropdown {
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 16px !important;
+    background: #202020 !important;
+    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.52) !important;
+}
+
+.tools-header {
+    color: rgba(255, 255, 255, 0.32) !important;
+    font-size: 10px !important;
+    letter-spacing: 0.07em !important;
+    text-transform: uppercase !important;
+    border-bottom-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+.tools-section {
+    border-bottom-color: rgba(255, 255, 255, 0.07) !important;
+}
+
+.setting-title {
+    color: #eeeeee !important;
+}
+
+.setting-desc {
+    color: #888888 !important;
+}
+
+.tools-action-btn {
+    border-color: rgba(255, 255, 255, 0.09) !important;
+    background: #2a2a2a !important;
+    color: #dddddd !important;
+    border-radius: 9px !important;
+}
+
+.tools-action-btn:hover,
+.tools-action-btn:focus-visible {
+    background: #353535 !important;
+    color: #fff !important;
+}
+
+/* --- Voice quick panel: settings-modal style --- */
+.voice-quick-panel {
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: #202020 !important;
+    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* --- Tooltip: settings-modal dark style --- */
+[data-tooltip]::after {
+    background: #202020 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #e4e4e4 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.44) !important;
+}
+
+/* --- Toast: settings-modal style --- */
+.toast {
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: #282828 !important;
+    color: #efefef !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.48) !important;
+}
+
+/* --- Custom select popup: settings-modal style --- */
+.custom-select-popup {
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 14px !important;
+    background: #202020 !important;
+    box-shadow: 0 20px 56px rgba(0, 0, 0, 0.52) !important;
+}
+
+.custom-select-option {
+    border-radius: 9px !important;
+    color: #cccccc !important;
+}
+
+.custom-select-option:hover,
+.custom-select-option.selected {
+    background: #2e2e2e !important;
+    color: #fff !important;
+}
+
+/* --- Mobile header: match sidebar dark --- */
+.mobile-header {
+    background: #1e1e22 !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+}
+
