@@ -1,0 +1,35 @@
+<header class="main-header">
+    <div class="header-left">
+        <button class="icon-btn sidebar-toggle-btn header-toggle-btn" type="button" aria-label="Toggle Sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+        <div class="breadcrumb">
+            <div class="breadcrumb-icon-wrapper">
+                <svg class="breadcrumb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </div>
+            <div class="breadcrumb-stack">
+                <div class="breadcrumb-title-row">
+                    <span id="chatTitle" class="breadcrumb-text">Current Session</span>
+                    <input id="chatTitleInput" class="chat-title-input" type="text" maxlength="80" aria-label="Chat name" hidden>
+                    <button id="chatTitleEditBtn" class="chat-title-edit-btn" type="button" aria-label="Rename chat">
+                        <svg class="chat-title-edit-icon-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="m16.5 3.5 4 4L7 21l-4 1 1-4 12.5-14.5Z"></path></svg>
+                        <svg class="chat-title-edit-icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>
+                    </button>
+                </div>
+                <span id="tokenCounter" class="breadcrumb-subtext">0 Session Tokens</span>
+            </div>
+        </div>
+    </div>
+    <div class="header-right">
+        <button id="statusPill" class="status-pill" type="button" data-tooltip="Local service status">
+            <span class="pulse-dot" aria-hidden="true"></span>
+            <span id="serviceStatusLabel">Ollama local</span>
+        </button>
+        <button id="settingsOpenBtn" class="theme-toggle settings-open-btn" type="button" aria-label="Open settings">
+            <svg class="settings-open-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.36a1.7 1.7 0 0 0-1 .58V20a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1-.58 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-.58-1H4a2 2 0 1 1 0-4h.08a1.7 1.7 0 0 0 .58-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1-.58V4a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1 .58 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9c.22.36.42.7.58 1H20a2 2 0 1 1 0 4h-.08a1.7 1.7 0 0 0-.52 1Z"></path></svg>
+            <span>Settings</span>
+        </button>
+    </div>
+</header>

@@ -1,0 +1,166 @@
+<footer class="input-wrapper">
+    <div id="voiceAgentStage" class="voice-agent-stage" hidden aria-live="polite">
+        <div id="voiceAgentOrb" class="voice-agent-orb" aria-hidden="true"></div>
+        <span id="voiceAgentStatus" class="voice-agent-status">Listening</span>
+    </div>
+    <div class="input-container-floating">
+        <div id="previewContainer" class="preview-container"></div>
+        <input type="file" id="fileInput" multiple style="display: none;" />
+
+        <textarea id="prompt" rows="1" placeholder="Message Flora"></textarea>
+
+        <div class="input-action-bar">
+            <div class="action-bar-left">
+                <button id="uploadButton" class="action-circle-btn" type="button" aria-label="Attach Files">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <div id="voiceChatControls" class="voice-chat-controls" hidden>
+                    <div id="voiceListeningPill" class="voice-listening-pill" aria-live="polite">
+                        <span class="voice-listening-dots" aria-hidden="true">
+                            <span></span><span></span><span></span><span></span>
+                        </span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path>
+                            <path d="M19 11v1a7 7 0 0 1-14 0v-1"></path>
+                            <path d="M12 19v3"></path>
+                        </svg>
+                        <span id="voiceListeningLabel" class="visually-hidden">Listening</span>
+                    </div>
+                    <button id="voiceReplyToggleBtn" class="voice-mode-icon-btn active" type="button" aria-pressed="true" aria-label="Voice replies on" data-tooltip="Voice replies">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M11 5 6 9H3v6h3l5 4V5Z"></path>
+                            <path d="M16 9.5a4 4 0 0 1 0 5"></path>
+                            <path d="M19 7a8 8 0 0 1 0 10"></path>
+                        </svg>
+                    </button>
+                    <button id="voiceQuickSettingsBtn" class="voice-quick-settings-btn" type="button" aria-expanded="false" aria-controls="voiceQuickPanel">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M4 7h10"></path><path d="M18 7h2"></path><path d="M16 5v4"></path>
+                            <path d="M4 17h2"></path><path d="M10 17h10"></path><path d="M8 15v4"></path>
+                        </svg>
+                        <span id="voiceQuickVoiceLabel">Ara</span>
+                        <span class="voice-quick-separator">·</span>
+                        <span id="voiceQuickPersonaLabel">Assistant</span>
+                        <svg class="voice-quick-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                    </button>
+                </div>
+                <div class="tools-container">
+                    <button id="toolsBtn" class="action-pill-btn" type="button">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        <span>Tools</span>
+                    </button>
+                    <div id="toolsDropdown" class="tools-dropdown">
+                        <div class="tools-header">
+                            <span>Tools</span>
+                            <small>Agent behavior for this chat</small>
+                        </div>
+                        <div class="tools-section">
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Code Sandbox</span>
+                                    <span class="setting-desc">Preview HTML, CSS & JS in interactive sandbox</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleSandbox" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Web Search</span>
+                                    <span class="setting-desc">Find current information and useful links online</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleWebSearch" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Grounding</span>
+                                    <span class="setting-desc">Anchor web answers to sources and cite links</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleGrounding" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Google Grounding</span>
+                                    <span class="setting-desc">Add a Google results link to grounded answers</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleGoogleGrounding" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Local Workspace</span>
+                                    <span class="setting-desc">Allow file reads and terminal commands through the local bridge</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleWorkspaceBridge">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="action-bar-right">
+                <div id="modelSwitcherHost" class="model-switcher"></div>
+                <button id="sendButton" class="run-btn" type="button" aria-label="Send message" data-tooltip="Send message">
+                    <span class="send-btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 12h13"></path>
+                            <path d="m13 6 6 6-6 6"></path>
+                        </svg>
+                    </span>
+                    <span class="send-btn-label">Send</span>
+                    <span class="shortcut-badge">Ctrl Enter</span>
+                </button>
+                <button id="stopButton" class="stop-btn" type="button" hidden aria-label="Stop generation">
+                    <span>Stop</span>
+                </button>
+                <button id="voiceButton" class="voice-btn" type="button" aria-label="Voice Input">
+                    <svg id="voiceBtnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                </button>
+                <button id="voiceStopButton" class="voice-stop-btn" type="button" hidden aria-label="Stop voice chat">Stop</button>
+            </div>
+        </div>
+        <section id="voiceQuickPanel" class="voice-quick-panel" hidden aria-label="Voice quick settings">
+            <div class="voice-quick-section">
+                <div class="voice-quick-heading">Voice</div>
+                <div id="voiceQuickChoices" class="voice-quick-grid" role="radiogroup" aria-label="Voice"></div>
+            </div>
+            <div class="voice-quick-section">
+                <div class="voice-quick-heading">Personality</div>
+                <div id="voicePersonalityChoices" class="voice-personality-list" role="radiogroup" aria-label="Personality"></div>
+            </div>
+            <div class="voice-quick-section">
+                <div class="voice-quick-row">
+                    <span class="voice-quick-heading">Speed</span>
+                    <span id="voiceSpeedValue" class="voice-speed-value">1.0x</span>
+                </div>
+                <input id="voiceSpeedSlider" class="voice-speed-slider" type="range" min="0.7" max="1.3" step="0.1" value="1">
+            </div>
+            <div class="voice-quick-section">
+                <div class="voice-quick-heading">Microphone</div>
+                <div id="voiceMicChoices" class="voice-mic-list" role="radiogroup" aria-label="Microphone"></div>
+            </div>
+        </section>
+    </div>
+    <section id="clarifyingQuestionComposer" class="clarifying-question-composer" hidden aria-live="polite"></section>
+</footer>

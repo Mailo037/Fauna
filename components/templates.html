@@ -1,0 +1,36 @@
+<template id="toastTemplate">
+    <div class="toast" role="status" data-component="toast">
+        <div class="toast-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path class="toast-icon-path" d=""></path>
+            </svg>
+        </div>
+        <div class="toast-body">
+            <div class="toast-title"></div>
+            <div class="toast-message"></div>
+        </div>
+        <button class="toast-close" type="button" aria-label="Dismiss notification">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12"></path>
+            </svg>
+        </button>
+        <div class="toast-meter" aria-hidden="true"></div>
+    </div>
+</template>
+
+<template id="customSelectTemplate">
+    <div class="custom-select" data-component="custom-select">
+        <button class="custom-select-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+            <span class="custom-select-label visually-hidden">Select option</span>
+            <span class="custom-select-value"></span>
+            <svg class="custom-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </button>
+        <div class="custom-select-list" role="listbox"></div>
+    </div>
+</template>
+
+<template id="customSelectOptionTemplate">
+    <button class="custom-select-option" type="button" role="option" aria-selected="false"></button>
+</template>

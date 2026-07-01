@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-30T02:40:00Z",
+  "title": "Design System: Flora AI",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Workspace Black",
+        "canonical": "#111214",
+        "tonalRamp": ["#0d0e10", "#111214", "#17181b", "#202126", "#2a2b31", "#737988", "#a2a8b6", "#eff2fb"]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Blue Signal",
+        "canonical": "#5b7cfa",
+        "tonalRamp": ["#111936", "#243879", "#3150c2", "#4868dc", "#5b7cfa", "#8ea2ff", "#c8d2ff", "#eef2ff"]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Cool Bone Text",
+        "canonical": "#eff2fb",
+        "tonalRamp": ["#1c2230", "#626b7c", "#737988", "#a2a8b6", "#cdd3df", "#eff2fb", "#f7f8fb", "#ffffff"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Welcome Display",
+        "purpose": "Greeting only; never controls or labels."
+      },
+      "body": {
+        "displayName": "Product Body",
+        "purpose": "Default UI and chat text."
+      },
+      "mono": {
+        "displayName": "Technical Mono",
+        "purpose": "Model IDs, token counts, code labels, and parameter values."
+      }
+    },
+    "shadows": [
+      {
+        "name": "legacy-composer-lift",
+        "value": "0 10px 40px rgba(0,0,0,0.45)",
+        "purpose": "Existing old composer elevation; avoid for new ordinary controls."
+      },
+      {
+        "name": "dropdown-lift",
+        "value": "0 -10px 30px rgba(0,0,0,0.5)",
+        "purpose": "Temporary overlay separation for dropdowns above the composer."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-standard",
+        "value": "0.2s ease",
+        "purpose": "Default hover, focus, and control state transitions."
+      },
+      {
+        "name": "drawer-standard",
+        "value": "0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Sidebar drawer transform."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "tablet",
+        "value": "1024px"
+      },
+      {
+        "name": "mobile",
+        "value": "768px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Composer Surface",
+      "kind": "custom",
+      "refersTo": "composer-surface",
+      "description": "The central prompt container before chat and bottom composer during chat.",
+      "html": "<div class=\"ds-composer\"><textarea placeholder=\"Start typing a prompt...\"></textarea><div class=\"ds-composer-row\"><button>Tools</button><button>Run</button></div></div>",
+      "css": ".ds-composer { background: #2b2c32; color: #eff2fb; border: 1px solid #3a3d46; border-radius: 22px; padding: 14px 14px 10px; width: 684px; max-width: 100%; } .ds-composer textarea { width: 100%; min-height: 36px; background: transparent; color: #eff2fb; border: 0; resize: none; font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; outline: none; } .ds-composer textarea::placeholder { color: #a2a8b6; } .ds-composer-row { display: flex; justify-content: space-between; gap: 8px; padding-top: 6px; } .ds-composer button { border: 0; border-radius: 999px; background: transparent; color: #a2a8b6; padding: 6px 9px; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; } .ds-composer button:hover, .ds-composer button:focus-visible { background: #343640; color: #eff2fb; outline: 2px solid #5b7cfa; outline-offset: 2px; }"
+    },
+    {
+      "name": "Suggestion Chip",
+      "kind": "chip",
+      "refersTo": "suggestion-chip",
+      "description": "Compact prompt starter for the welcome screen.",
+      "html": "<button class=\"ds-suggestion-chip\"><span class=\"ds-chip-icon\">*</span><span>Optimiseer Kode</span></button>",
+      "css": ".ds-suggestion-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 7px 11px; border-radius: 999px; border: 1px solid #3a3d46; background: rgba(91,124,250,0.15); color: #eff2fb; font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer; } .ds-suggestion-chip:hover, .ds-suggestion-chip:focus-visible { background: #343640; border-color: #5b7cfa; outline: 2px solid #5b7cfa; outline-offset: 2px; } .ds-chip-icon { color: #5b7cfa; }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill",
+      "description": "Compact service-state indicator in the app header.",
+      "html": "<button class=\"ds-status-pill\"><span class=\"ds-dot\"></span>Ollama connected</button>",
+      "css": ".ds-status-pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: #a2a8b6; padding: 5px 9px; font: 600 11px/1 ui-sans-serif, system-ui, sans-serif; } .ds-status-pill:hover, .ds-status-pill:focus-visible { color: #eff2fb; background: #2a2b31; outline: 2px solid #5b7cfa; outline-offset: 2px; } .ds-dot { width: 6px; height: 6px; border-radius: 50%; background: #8ea2ff; }"
+    },
+    {
+      "name": "Notification Toast",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Compact lower-corner notification with state icon, title, message, dismiss action, and timeout meter.",
+      "html": "<div class=\"ds-toast\"><div class=\"ds-toast-icon\">i</div><div><div class=\"ds-toast-title\">Notice</div><div class=\"ds-toast-message\">Local status updated.</div></div><button aria-label=\"Dismiss notification\">x</button><span class=\"ds-toast-meter\"></span></div>",
+      "css": ".ds-toast { position: relative; display: grid; grid-template-columns: 28px minmax(0,1fr) 30px; gap: 10px; min-height: 64px; overflow: hidden; padding: 12px 10px 12px 12px; border: 1px solid #3a3d46; border-radius: 16px; background: #202126; color: #eff2fb; box-shadow: 0 8px 14px rgba(0,0,0,0.16); font: 12px/1.38 ui-sans-serif, system-ui, sans-serif; } .ds-toast-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #5b7cfa; background: rgba(91,124,250,0.15); font-weight: 800; } .ds-toast-title { font-weight: 760; color: #eff2fb; } .ds-toast-message { color: #a2a8b6; } .ds-toast button { width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: #737988; } .ds-toast button:hover, .ds-toast button:focus-visible { color: #eff2fb; background: #2a2b31; outline: 2px solid #5b7cfa; outline-offset: 2px; } .ds-toast-meter { position: absolute; left: 12px; right: 12px; bottom: 6px; height: 2px; border-radius: 999px; background: #5b7cfa; opacity: 0.42; }"
+    },
+    {
+      "name": "Settings Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Dense settings input for endpoints and workflow values.",
+      "html": "<label class=\"ds-field\"><span>Wan endpoint</span><input value=\"http://localhost:8188\" /></label>",
+      "css": ".ds-field { display: grid; gap: 6px; color: #eff2fb; font: 600 11px/1.2 ui-sans-serif, system-ui, sans-serif; } .ds-field input { width: 100%; border: 1px solid #3a3d46; border-radius: 8px; background: #111214; color: #eff2fb; padding: 8px; font: 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; outline: none; } .ds-field input:focus-visible { border-color: #5b7cfa; outline: 2px solid rgba(91,124,250,0.35); outline-offset: 2px; }"
+    },
+    {
+      "name": "Dropdown Panel",
+      "kind": "custom",
+      "refersTo": "dropdown-panel",
+      "description": "Layered pop-up panel for tools and model choices.",
+      "html": "<div class=\"ds-dropdown\"><div class=\"ds-dropdown-title\">Agentic Settings</div><button>Code Sandbox</button><button>Web Search</button></div>",
+      "css": ".ds-dropdown { width: 360px; background: #202126; color: #eff2fb; border: 1px solid #3a3d46; border-radius: 14px; box-shadow: 0 18px 48px rgba(0,0,0,0.34); padding: 14px; display: grid; gap: 10px; } .ds-dropdown-title { color: #737988; font: 600 10px/1.2 ui-sans-serif, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.05em; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.08); } .ds-dropdown button { text-align: left; border: 0; border-radius: 8px; padding: 8px; background: transparent; color: #a2a8b6; font: 500 12px/1.2 ui-sans-serif, system-ui, sans-serif; } .ds-dropdown button:hover, .ds-dropdown button:focus-visible { background: #2a2b31; color: #eff2fb; outline: 2px solid #5b7cfa; outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Local Console",
+    "overview": "Flora's interface should feel like a premium local workstation: compact, capable, and quiet enough for repeated use. The visual system uses a DeepSeek-like chat shell across light and dark themes: flat near-black canvas, slim rail, centered thread, rounded bottom composer, and a small blue signal reserved for active state, brand mark, and key values.",
+    "keyCharacteristics": [
+      "Compact app shell with a narrow left rail and centered composer.",
+      "Neutral local-console palette with one restrained blue signal.",
+      "Local-first product typography with system UI for interface text and system mono for technical values.",
+      "Minimal elevation at rest; depth comes from tonal layers, borders, and state.",
+      "Calm English voice that avoids accidental language switching."
+    ],
+    "rules": [
+      {
+        "name": "The One Signal Rule",
+        "body": "The blue signal is for state and trust, not ornament. If more than 10 percent of a screen is accent-colored, the interface is shouting.",
+        "section": "colors"
+      },
+      {
+        "name": "The Local Status Rule",
+        "body": "Status colors must describe real local service state. Do not use SaaS-plan colors or upsell cues.",
+        "section": "colors"
+      },
+      {
+        "name": "The Product Type Rule",
+        "body": "UI controls use system UI or system mono only. Imported marketing fonts are prohibited.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-At-Rest Rule",
+        "body": "Default surfaces are flat. Elevation appears only for overlays, focus, or transient state.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do preserve the local-console palette: #111214, #202126, #eff2fb, and #5b7cfa.",
+      "Do make local service state real and visible: Ollama connected/offline, active model, Wan configured/unconfigured.",
+      "Do keep user-facing copy fully English with consistent terms.",
+      "Do use real semantic controls for clickable UI.",
+      "Do keep product density calm and scannable."
+    ],
+    "donts": [
+      "Don't make Flora feel like a generic SaaS landing page.",
+      "Don't make Flora feel like a noisy AI demo.",
+      "Don't use a glassy gradient chatbot clone style.",
+      "Don't turn the interface into a cluttered enterprise dashboard.",
+      "Don't use Free plan, Upgrade, or plan-language unless the product truly has accounts and billing.",
+      "Don't introduce broad decorative gradients, glassmorphism, or wide soft shadows on ordinary controls.",
+      "Don't use tiny 9px text for meaningful settings, status, or mobile labels."
+    ]
+  }
+}

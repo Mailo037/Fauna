@@ -1,0 +1,49 @@
+<aside class="sidebar" id="sidebar" aria-label="Flora navigation">
+    <div class="logo">
+        <span class="logo-icon">
+            <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+        </span>
+        <span class="logo-copy">
+            <span class="logo-text">Flora</span>
+            <span class="logo-kicker">AI workspace</span>
+        </span>
+        <button id="sidebarCollapseToggle" class="sidebar-collapse-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" data-tooltip="Collapse sidebar">
+            <svg class="sidebar-collapse-icon sidebar-collapse-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                <path d="M9 4v16"></path>
+                <path d="m16 9-3 3 3 3"></path>
+            </svg>
+            <svg class="sidebar-collapse-icon sidebar-collapse-icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+                <path d="M9 4v16"></path>
+                <path d="m14 9 3 3-3 3"></path>
+            </svg>
+        </button>
+    </div>
+
+    <nav class="nav-links sidebar-section" aria-label="Workspace">
+        <div class="sidebar-section-label">Workspace</div>
+        <button class="nav-item active" type="button" data-tooltip="Playground">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span class="nav-text">Playground</span>
+            <svg class="chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
+    </nav>
+
+    <section class="history sidebar-section" aria-label="Chats">
+        <div class="history-label">Chats</div>
+        <button id="newChat" class="history-item new-chat-item" type="button" data-tooltip="New chat">
+            <svg class="history-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            <span class="chat-label">New chat</span>
+        </button>
+        <div id="chatHistoryList" class="chat-history-list" aria-label="Chat history"></div>
+    </section>
+</aside>
+
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
