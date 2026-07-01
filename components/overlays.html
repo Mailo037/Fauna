@@ -202,44 +202,54 @@
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="personalization" hidden>
-                <div class="settings-row settings-row-stacked">
-                    <div class="setting-info">
-                        <span class="setting-title">Display name</span>
-                        <span class="setting-desc">How Fauna addresses you in greetings and responses.</span>
-                    </div>
-                    <input id="personaDisplayNameInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" maxlength="40" placeholder="Your name" aria-label="Display name">
-                </div>
-                <div class="settings-row settings-row-stacked">
-                    <div class="setting-info">
-                        <span class="setting-title">Custom instructions</span>
-                        <span class="setting-desc">Prepended to every chat. Describe your role, preferences, or how you'd like responses formatted.</span>
-                    </div>
-                    <textarea id="personaCustomInstructionsInput" class="settings-textarea" rows="5" placeholder="e.g. I'm a developer who prefers concise answers with code examples. Always use TypeScript." aria-label="Custom instructions"></textarea>
-                    <div class="settings-button-row">
-                        <button id="personaSaveBtn" class="tools-action-btn" type="button">Save</button>
-                        <button id="personaClearBtn" class="tools-action-btn" type="button">Clear</button>
-                    </div>
-                </div>
-                <div class="settings-row">
-                    <div class="setting-info">
-                        <span class="setting-title">Show suggestions</span>
-                        <span class="setting-desc">Display prompt suggestions on the home screen.</span>
-                    </div>
-                    <label class="switch">
-                        <input type="checkbox" id="personaShowSuggestions" checked>
-                        <span class="toggle-slider"></span>
+
+                <!-- Identity -->
+                <div class="provider-model-section" style="border-top:0; padding-top:0;">
+                    <p class="provider-section-label">Identity</p>
+                    <label class="settings-field-label">
+                        <span>Display name</span>
+                        <input id="personaDisplayNameInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" maxlength="40" placeholder="Your name" aria-label="Display name">
                     </label>
+                    <p class="persona-field-hint">How Fauna addresses you in greetings and responses.</p>
                 </div>
-                <div class="settings-row">
-                    <div class="setting-info">
-                        <span class="setting-title">Compact welcome</span>
-                        <span class="setting-desc">Show a minimal greeting without the subtitle line.</span>
+
+                <!-- Custom instructions -->
+                <div class="provider-model-section">
+                    <p class="provider-section-label">Custom instructions</p>
+                    <textarea id="personaCustomInstructionsInput" class="settings-textarea persona-textarea" rows="5" placeholder="e.g. I'm a developer who prefers concise answers with code examples. Always use TypeScript." aria-label="Custom instructions"></textarea>
+                    <p class="persona-field-hint">Prepended to every chat. Describe your role, preferences, or how you'd like responses formatted.</p>
+                    <div class="provider-actions" style="padding-top:10px; margin-top:0; border-top:0;">
+                        <button id="personaSaveBtn" class="provider-btn provider-btn-primary" type="button">Save</button>
+                        <span class="provider-actions-spacer"></span>
+                        <button id="personaClearBtn" class="provider-btn provider-btn-ghost" type="button">Clear</button>
                     </div>
-                    <label class="switch">
-                        <input type="checkbox" id="personaCompactWelcome">
-                        <span class="toggle-slider"></span>
-                    </label>
                 </div>
+
+                <!-- Preferences -->
+                <div class="provider-model-section">
+                    <p class="provider-section-label">Preferences</p>
+                    <div class="persona-toggle-row">
+                        <div class="setting-info">
+                            <span class="setting-title">Show suggestions</span>
+                            <span class="setting-desc">Display prompt suggestions on the home screen.</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="personaShowSuggestions" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="persona-toggle-row">
+                        <div class="setting-info">
+                            <span class="setting-title">Compact welcome</span>
+                            <span class="setting-desc">Show a minimal greeting without the subtitle line.</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="personaCompactWelcome">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="services" hidden>
