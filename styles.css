@@ -6843,3 +6843,303 @@ body.app-ready .suggestion-card:nth-child(4) { animation-delay: 0.38s; }
         transform: none;
     }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Minimalist sidebar redesign
+   ═══════════════════════════════════════════════════════════ */
+
+.sidebar {
+    --sidebar-row-radius: 6px;
+    gap: 8px;
+    padding: 14px 8px;
+    background: var(--bg);
+    border-right: 1px solid var(--border-soft);
+    box-shadow: none;
+    transition: width 0.22s var(--ease), min-width 0.22s var(--ease);
+}
+
+:root[data-theme="light"] .sidebar {
+    background: var(--bg);
+    box-shadow: none;
+}
+
+/* Logo: flat, no decorative icon box */
+.logo {
+    gap: 9px;
+    min-height: 38px;
+    padding: 0 6px 10px;
+    border-bottom: 0;
+}
+
+.logo-icon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--accent);
+}
+
+.logo-icon .flora-mark {
+    width: 18px;
+    height: 18px;
+    filter: none;
+}
+
+.logo-text {
+    font-size: 14px;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    color: var(--text);
+}
+
+.logo-kicker {
+    display: none;
+}
+
+/* Collapse toggle: borderless, minimal */
+.sidebar-collapse-toggle,
+.sidebar-collapse-toggle:hover,
+.sidebar-collapse-toggle:focus-visible {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border-radius: 6px;
+}
+
+.sidebar-collapse-toggle {
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.sidebar-collapse-toggle:hover,
+.sidebar-collapse-toggle:focus-visible {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+    color: var(--text);
+    border: 0;
+}
+
+/* Section labels */
+.sidebar-section-label,
+.history-label {
+    padding: 0 8px 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.65;
+    line-height: 1;
+}
+
+/* Nav + history rows: completely flat */
+.nav-item,
+.history-item {
+    min-height: 34px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--sidebar-row-radius);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    font-weight: 520;
+    will-change: auto;
+    box-shadow: none;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.nav-item:hover,
+.history-item:hover:not(:disabled),
+.nav-item:focus-visible,
+.history-item:focus-visible {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text);
+    transform: none;
+    border: 0;
+    box-shadow: none;
+}
+
+/* Active: accent color text + subtle tint, no left bar, no gradient */
+.nav-item.active,
+.history-item.active {
+    border: 0;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    color: var(--accent);
+    font-weight: 650;
+    box-shadow: none;
+    transform: none;
+}
+
+.nav-item.active:hover,
+.history-item.active:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Icons */
+.nav-icon,
+.history-icon {
+    width: 15px;
+    height: 15px;
+    opacity: 0.65;
+}
+
+.nav-item.active .nav-icon {
+    color: var(--accent);
+    opacity: 1;
+}
+
+/* Hide chevron */
+.chevron-right {
+    display: none;
+}
+
+/* New chat: flat, no box */
+.new-chat-item {
+    margin-bottom: 3px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.new-chat-item:hover,
+.new-chat-item:focus-visible {
+    border: 0;
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text);
+}
+
+.new-chat-item .history-icon {
+    color: inherit;
+    opacity: 0.6;
+    transition: transform 0.2s var(--ease), opacity 0.15s var(--ease);
+}
+
+.new-chat-item:hover .history-icon,
+.new-chat-item:focus-visible .history-icon {
+    transform: rotate(-10deg);
+    opacity: 0.9;
+}
+
+/* Chat session rows */
+.chat-session-row {
+    border: 0;
+    border-radius: var(--sidebar-row-radius);
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.chat-session-row:hover,
+.chat-session-row:focus-within {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text);
+    transform: none;
+}
+
+.chat-session-row.active {
+    border: 0;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    box-shadow: none;
+}
+
+.chat-session-main {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    min-height: 34px;
+    gap: 7px;
+    padding: 0 8px;
+}
+
+.chat-session-row.active .chat-session-main {
+    color: var(--accent);
+}
+
+/* Hide the animated dot bar in session rows */
+.chat-session-main .dot {
+    display: none;
+}
+
+/* Chat history list: tight gaps */
+.chat-history-list {
+    gap: 1px;
+    padding: 1px 0 8px;
+}
+
+/* History subsection labels */
+.history-subsection-label {
+    margin: 8px 2px 2px;
+    padding: 0 7px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.55;
+}
+
+/* Collapsed state adjustments */
+.sidebar.collapsed {
+    padding: 14px 8px;
+}
+
+.sidebar.collapsed .logo {
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 0 4px;
+    border-bottom: 0;
+}
+
+.sidebar.collapsed .sidebar-collapse-toggle {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    border-radius: 6px;
+}
+
+.sidebar.collapsed .nav-item,
+.sidebar.collapsed .history-item,
+.sidebar.collapsed .chat-session-main {
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
+    flex: 0 0 34px;
+    border-radius: 6px;
+    padding: 0;
+    justify-content: center;
+}
+
+.sidebar.collapsed .nav-item.active,
+.sidebar.collapsed .history-item.active {
+    box-shadow: none;
+}
+
+/* Suggestion grid: removed from HTML, hide any lingering instance */
+.suggestion-grid {
+    display: none !important;
+}
+
+/* Welcome: center vertically with just the hero */
+.welcome-container {
+    justify-content: center;
+    padding-top: 0;
+    padding-bottom: 96px;
+}
+
+.welcome-hero h1 {
+    font-size: clamp(24px, 4vw, 34px);
+    font-weight: 680;
+    letter-spacing: -0.02em;
+}
+
+/* Mobile sidebar: keep styling clean */
+@media (max-width: 768px) {
+    .sidebar {
+        background: var(--bg);
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
+    }
+}
