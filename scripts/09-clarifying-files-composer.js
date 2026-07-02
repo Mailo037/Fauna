@@ -847,7 +847,10 @@ function toggleAttachmentMenu() {
 }
 
 function isDuplicateAttachment(file) {
+    const incomingPath = String(file?.__faunaDesktopFilePath || "").trim();
     return attachedFiles.some(existing => (
+        incomingPath && incomingPath === String(existing.__faunaDesktopFilePath || "").trim()
+    ) || (
         existing.name === file.name
         && existing.size === file.size
         && existing.type === file.type
@@ -856,6 +859,7 @@ function isDuplicateAttachment(file) {
 
 function addAttachedFile(file, { notify = true } = {}) {
     if (!(file instanceof File)) return false;
+    prepareDesktopFileReference(file);
     const unsupportedReason = getUnsupportedAttachmentReason(file);
     if (unsupportedReason) {
         if (notify) showUnsupportedAttachmentToast([{ file, reason: unsupportedReason }]);
@@ -928,7 +932,12 @@ function setFilePersistentPreviewSource(file, source = "") {
 async function ensurePersistentImagePreviewSource(file) {
     if (!(file instanceof File) || !file.type?.startsWith("image/")) return "";
     const existing = String(file.__faunaPersistentPreviewSrc || file.__faunaLibrarySourceSrc || "").trim();
-    if (/^(?:data:image\/|https?:)/i.test(existing)) return existing;
+    if (/^(?:data:image\/|https?:)/i.test(existing) || isDesktopFileMediaSource(existing)) return existing;
+    const desktopPreview = getDesktopFilePreviewSource(file);
+    if (desktopPreview) {
+        setFilePersistentPreviewSource(file, desktopPreview);
+        return desktopPreview;
+    }
     const base64 = await blobToBase64(file);
     const src = `data:${file.type || "image/png"};base64,${base64}`;
     setFilePersistentPreviewSource(file, src);
@@ -1026,7 +1035,7 @@ async function getBlobFromLibrarySource(src) {
 
 async function getPersistentLibraryImageSource(item, blob, type) {
     const src = String(item?.src || "").trim();
-    if (/^(?:data:image\/|https?:)/i.test(src)) return src;
+    if (/^(?:data:image\/|https?:)/i.test(src) || isDesktopFileMediaSource(src)) return src;
     const base64 = await blobToBase64(blob);
     return `data:${type || "image/png"};base64,${base64}`;
 }
@@ -1239,10 +1248,13 @@ function renderPreviewPill(file) {
 
     if (isImage) {
         const img = document.createElement("img");
-        const objectUrl = URL.createObjectURL(file);
+        const desktopPreview = getDesktopFilePreviewSource(file);
+        const objectUrl = desktopPreview || URL.createObjectURL(file);
         img.src = objectUrl;
         img.className = "preview-file-thumb";
-        img.onload = () => URL.revokeObjectURL(objectUrl);
+        img.onload = () => {
+            if (!desktopPreview) URL.revokeObjectURL(objectUrl);
+        };
         icon.appendChild(img);
     } else if (isCodeLikeAttachment(file)) {
         icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>`;

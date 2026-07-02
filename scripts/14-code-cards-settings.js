@@ -1810,7 +1810,7 @@ function updateWorkspaceBridgeSettingsUi() {
     if (!token) {
         setWorkspaceBridgeStatus("Token needed", "missing");
     } else if (isWorkspaceBridgeEnabled) {
-        setWorkspaceBridgeStatus("Ready", "configured");
+        setWorkspaceBridgeStatus(isFaunaDesktopApp() ? "Auto-started" : "Ready", "configured");
     } else {
         setWorkspaceBridgeStatus("Saved off", "missing");
     }

@@ -156,9 +156,15 @@ async function generateImageIntoBubble(container, prompt, {
     const imageUrl = useOpenAi ? null : buildImageGenerationUrl(effectivePrompt, imageOptions);
 
     updateImageGenerationToolActivity(activity, "Rendering");
-    const generatedImageUrl = useOpenAi
+    let generatedImageUrl = useOpenAi
         ? await generateOpenAiImage(effectivePrompt, signal, imageOptions)
         : imageUrl;
+    generatedImageUrl = await persistGeneratedMediaSource(generatedImageUrl, {
+        kind: "image",
+        prompt: effectivePrompt,
+        label,
+        extension: imageOptions.format || "png"
+    });
     updateImageGenerationToolActivity(activity, "Preparing preview");
     await preloadImage(generatedImageUrl, signal);
     updateImageGenerationToolActivity(activity, "Ready", "done");
@@ -313,7 +319,13 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
 
         if (isOpenAiProvider()) {
             updateImageGenerationToolActivity(imageActivity, "Sending edit");
-            const imageUrl = await editOpenAiImage(requestText, imageFiles, signal);
+            let imageUrl = await editOpenAiImage(requestText, imageFiles, signal);
+            imageUrl = await persistGeneratedMediaSource(imageUrl, {
+                kind: "image",
+                prompt: requestText,
+                label: "Generated edit",
+                extension: "png"
+            });
             updateImageGenerationToolActivity(imageActivity, "Preparing preview");
             await preloadImage(imageUrl, signal);
             updateImageGenerationToolActivity(imageActivity, "Ready", "done");
@@ -339,7 +351,13 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
 
         updateImageGenerationToolActivity(imageActivity, "Writing prompt");
         const editPrompt = await buildImageEditPrompt(requestText, imageFiles, signal);
-        const imageUrl = buildImageGenerationUrl(editPrompt);
+        let imageUrl = buildImageGenerationUrl(editPrompt);
+        imageUrl = await persistGeneratedMediaSource(imageUrl, {
+            kind: "image",
+            prompt: editPrompt,
+            label: "Generated edit",
+            extension: "png"
+        });
 
         updateImageGenerationToolActivity(imageActivity, "Rendering edit");
         await preloadImage(imageUrl, signal);
@@ -463,15 +481,21 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
         throwIfAborted(signal);
         updateCreationProgress(aiBubble, "Rendering video frames", 1);
         const videoResult = await generateWanVideo(prompt, signal);
+        const videoUrl = await persistGeneratedMediaSource(videoResult.url, {
+            kind: "video",
+            prompt,
+            label: videoResult.label,
+            extension: videoResult.extension || "mp4"
+        });
 
         updateCreationProgress(aiBubble, "Encoding clip", 2);
-        renderGeneratedVideo(aiBubble, prompt, videoResult.url, videoResult.extension, videoResult.label);
+        renderGeneratedVideo(aiBubble, prompt, videoUrl, videoResult.extension, videoResult.label);
         conversationHistory.push({
             role: "assistant",
-            content: `Generated Wan video clip for: ${prompt}\n\n${videoResult.url}`,
+            content: `Generated Wan video clip for: ${prompt}\n\n${videoUrl}`,
             createdAt: new Date().toISOString()
         });
-        setupAssistantActions(aiBubble.parentElement, videoResult.url, {
+        setupAssistantActions(aiBubble.parentElement, videoUrl, {
             messageIndex: conversationHistory.length - 1,
             canFork: true
         });
@@ -497,15 +521,21 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
             const sourceImage = await loadImageElement(imageUrl, signal);
             updateCreationProgress(aiBubble, "Animating camera motion", 1);
             const videoResult = await createTenSecondClip(sourceImage, prompt, signal);
+            const videoUrl = await persistGeneratedMediaSource(videoResult.url, {
+                kind: "video",
+                prompt,
+                label: "Fallback animated clip",
+                extension: videoResult.extension || "mp4"
+            });
 
             updateCreationProgress(aiBubble, "Finalizing clip", 2);
-            renderGeneratedVideo(aiBubble, prompt, videoResult.url, videoResult.extension, "Fallback animated clip");
+            renderGeneratedVideo(aiBubble, prompt, videoUrl, videoResult.extension, "Fallback animated clip");
             conversationHistory.push({
                 role: "assistant",
-                content: `Wan was unavailable, so Fauna generated a fallback 10 second animated clip for: ${prompt}\n\n${videoResult.url}`,
+                content: `Wan was unavailable, so Fauna generated a fallback 10 second animated clip for: ${prompt}\n\n${videoUrl}`,
                 createdAt: new Date().toISOString()
             });
-            setupAssistantActions(aiBubble.parentElement, videoResult.url, {
+            setupAssistantActions(aiBubble.parentElement, videoUrl, {
                 messageIndex: conversationHistory.length - 1,
                 canFork: true
             });
@@ -583,7 +613,7 @@ function buildImageGenerationUrl(prompt, options = {}) {
 function getWanWorkflowTemplate() {
     const workflow = window.FAUNA_WAN_WORKFLOW || safeLocalStorageGet(WAN_VIDEO_WORKFLOW_STORAGE_KEY);
     if (!workflow) {
-        throw new Error(`No Wan workflow configured. Add a ComfyUI API workflow to localStorage key "${WAN_VIDEO_WORKFLOW_STORAGE_KEY}"`);
+        throw new Error("No Wan workflow configured. Add a ComfyUI API workflow in Settings > Media.");
     }
 
     try {
@@ -1044,6 +1074,7 @@ function getGeneratedImageSourceLabel(imageUrl) {
     if (!value) return "Generated image";
     if (/^data:image\//i.test(value)) return "Inline image data";
     if (/^blob:/i.test(value)) return "Browser image URL";
+    if (isDesktopFileMediaSource(value)) return "Fauna AppData";
 
     try {
         const url = new URL(value, window.location.href);

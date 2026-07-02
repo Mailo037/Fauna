@@ -1,2 +1,5 @@
 attached_assets/*
 .playwright-cli/
+node_modules/
+dist/
+*.log

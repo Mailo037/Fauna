@@ -114,7 +114,7 @@ def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[st
 
 def set_cors_headers(handler: BaseHTTPRequestHandler) -> None:
     origin = handler.headers.get("Origin", "")
-    if re.match(r"^https?://(?:127\.0\.0\.1|localhost):\d+$", origin):
+    if origin == "fauna-app://app" or re.match(r"^https?://(?:127\.0\.0\.1|localhost):\d+$", origin):
         handler.send_header("Access-Control-Allow-Origin", origin)
         handler.send_header("Vary", "Origin")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")

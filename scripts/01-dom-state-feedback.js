@@ -302,6 +302,7 @@ const AI_MAX_OUTPUT_TOKENS_STORAGE_KEY = "faunaAiMaxOutputTokens";
 const AI_TOP_P_STORAGE_KEY = "faunaAiTopP";
 const OLLAMA_TOP_K_STORAGE_KEY = "faunaOllamaTopK";
 const OPENAI_VERBOSITY_STORAGE_KEY = "faunaOpenAiVerbosity";
+const DESKTOP_FILE_URL_RE = /^(?:fauna-file|file):\/\//i;
 const STREAM_RENDER_THROTTLE_MS = 45;
 const CHAT_AUTO_SCROLL_THRESHOLD = 96;
 const COMPOSER_SAFE_AREA_EXTRA_PX = 36;
@@ -328,6 +329,104 @@ const ASSISTANT_CONTROL_TAG_NAMES = ASSISTANT_CONTROL_TAG_SUFFIXES.flatMap(suffi
 const ASSISTANT_CONTROL_TAG_NAMES_PATTERN = ASSISTANT_CONTROL_TAG_NAMES.join("|");
 const ASSISTANT_CONTROL_BLOCKS_RE = new RegExp(`<(?:${ASSISTANT_CONTROL_TAG_NAMES_PATTERN})>\\s*[\\s\\S]*?\\s*<\\/(?:${ASSISTANT_CONTROL_TAG_NAMES_PATTERN})>`, "gi");
 const ASSISTANT_CONTROL_OPEN_TO_END_RE = new RegExp(`<(?:${ASSISTANT_CONTROL_TAG_NAMES_PATTERN})>\\s*[\\s\\S]*$`, "i");
+
+function getFaunaDesktopApi() {
+    const api = globalThis.faunaDesktop;
+    return api?.isDesktop ? api : null;
+}
+
+function isFaunaDesktopApp() {
+    return Boolean(getFaunaDesktopApi());
+}
+
+function defineHiddenFileValue(file, key, value) {
+    if (!(file instanceof File) || !value) return;
+    try {
+        Object.defineProperty(file, key, {
+            value,
+            enumerable: false,
+            configurable: true
+        });
+    } catch {
+        file[key] = value;
+    }
+}
+
+function prepareDesktopFileReference(file) {
+    const api = getFaunaDesktopApi();
+    if (!api || !(file instanceof File)) return { path: "", url: "" };
+
+    const existingPath = String(file.__faunaDesktopFilePath || "").trim();
+    const existingUrl = String(file.__faunaDesktopPreviewSrc || "").trim();
+    if (existingPath && existingUrl) return { path: existingPath, url: existingUrl };
+
+    const filePath = existingPath || api.getFilePath?.(file) || "";
+    const previewUrl = filePath ? api.filePathToUrl?.(filePath) || "" : "";
+    defineHiddenFileValue(file, "__faunaDesktopFilePath", filePath);
+    defineHiddenFileValue(file, "__faunaDesktopPreviewSrc", previewUrl);
+    return { path: filePath, url: previewUrl };
+}
+
+function getDesktopFilePreviewSource(file) {
+    const existing = String(file?.__faunaDesktopPreviewSrc || "").trim();
+    if (existing) return existing;
+    return prepareDesktopFileReference(file).url;
+}
+
+function isDesktopFileMediaSource(src) {
+    return DESKTOP_FILE_URL_RE.test(String(src || "").trim());
+}
+
+function getGeneratedMediaExtensionFromUrl(url, fallback = "") {
+    const value = String(url || "").split(/[?#]/)[0];
+    const match = value.match(/\.([a-z0-9]{2,5})$/i);
+    return match ? match[1].toLowerCase() : fallback;
+}
+
+function ensureDesktopArtifactChatSessionId() {
+    if (!isFaunaDesktopApp()) return activeSessionId || getActiveSession?.()?.id || "";
+
+    let session = getActiveSession?.() || null;
+    if (!session && activeChatHasContent?.()) {
+        session = createChatSession();
+        chatSessions.unshift(session);
+        activeSessionId = session.id;
+        updateActiveChatTitle?.();
+        if (activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND) {
+            updateWorkspaceUrlFragment?.({ replace: true });
+        }
+    }
+    return session?.id || activeSessionId || "unassigned-chat";
+}
+
+async function persistGeneratedMediaSource(sourceUrl, {
+    kind = "media",
+    prompt = "",
+    label = "",
+    extension = "",
+    mimeType = "",
+    chatId = ""
+} = {}) {
+    const api = getFaunaDesktopApi();
+    const value = String(sourceUrl || "").trim();
+    if (!api || !value || isDesktopFileMediaSource(value)) return value;
+
+    try {
+        const result = await api.saveGeneratedMedia?.({
+            sourceUrl: value,
+            chatId: chatId || ensureDesktopArtifactChatSessionId(),
+            kind,
+            prompt,
+            label,
+            extension: extension || getGeneratedMediaExtensionFromUrl(value, kind === "image" ? "png" : ""),
+            mimeType
+        });
+        return result?.url || value;
+    } catch (err) {
+        console.warn("Could not save generated media to AppData:", err);
+        return value;
+    }
+}
 
 function getAssistantControlTagNames(suffix) {
     return [

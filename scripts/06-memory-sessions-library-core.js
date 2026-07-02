@@ -328,13 +328,14 @@ function persistChatSessions() {
     }
 
     if (!saved) {
-        console.warn("Could not save Fauna chat history: browser storage quota was exceeded.");
+        const storageLabel = isFaunaDesktopApp() ? "AppData storage" : "browser storage";
+        console.warn(`Could not save Fauna chat history: ${storageLabel} was unavailable.`);
         if (!hasShownChatStorageWarning) {
-            showToast("Chat history is too large to save locally. Delete or archive older chats to free browser storage.", "warning");
+            showToast(`Chat history is too large to save locally. Delete or archive older chats to free ${storageLabel}.`, "warning");
             hasShownChatStorageWarning = true;
         }
     } else if (chatStorageProfile !== CHAT_STORAGE_PROFILE_FULL && !hasShownChatStorageWarning) {
-        showToast("Browser storage is nearly full, so Fauna saved a lighter chat history snapshot.", "warning");
+        showToast(`${isFaunaDesktopApp() ? "AppData storage" : "Browser storage"} is nearly full, so Fauna saved a lighter chat history snapshot.`, "warning");
         hasShownChatStorageWarning = true;
     }
 
@@ -971,6 +972,17 @@ async function createUploadedLibraryItem(file, index = 0) {
     };
 
     if (type === "image" || type === "video") {
+        const desktopRef = prepareDesktopFileReference(file);
+        if (desktopRef.url) {
+            return {
+                ...base,
+                id: getLibraryItemId(`upload-${type}`, { id: "manual-library-upload" }, `${title}:${file.size}:${file.lastModified}:${desktopRef.path || desktopRef.url}`, index),
+                detail: [type === "image" ? "Uploaded image" : "Uploaded video", extension, sizeLabel].filter(Boolean).join(" · "),
+                src: desktopRef.url,
+                filePath: desktopRef.path,
+                alt: title
+            };
+        }
         const dataBase64 = await blobToBase64(file);
         const mimeType = file.type || (type === "image" ? "image/png" : "video/mp4");
         const src = `data:${mimeType};base64,${dataBase64}`;
@@ -1124,6 +1136,7 @@ function getRestorableLibraryMediaSource(sourceKey, mediaType = "image") {
     const item = getLibraryItemByPersistentKey(sourceKey);
     const src = String(item?.src || "").trim();
     if (!src || /^blob:/i.test(src)) return "";
+    if (isDesktopFileMediaSource(src)) return src;
     if (mediaType === "image") return /^(?:data:image\/|https?:)/i.test(src) ? src : "";
     if (mediaType === "video") return /^(?:data:video\/|https?:)/i.test(src) ? src : "";
     if (mediaType === "audio") return /^(?:data:audio\/|https?:)/i.test(src) ? src : "";
@@ -1180,7 +1193,7 @@ function isPersistableLibraryMediaSrc(src) {
     const value = String(src || "").trim();
     if (!value) return false;
     if (value.includes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")) return false;
-    return /^(?:https?:|data:(?:image|video|audio)\/)/i.test(value);
+    return /^(?:https?:|data:(?:image|video|audio)\/)/i.test(value) || isDesktopFileMediaSource(value);
 }
 
 function normalizeStoredLibraryItem(raw) {
@@ -1225,6 +1238,7 @@ function normalizeStoredLibraryItem(raw) {
     return {
         ...base,
         src,
+        filePath: String(raw.filePath || ""),
         fileName: String(raw.fileName || ""),
         alt: String(raw.alt || raw.detail || raw.title || base.title)
     };
@@ -1424,7 +1438,7 @@ function isUsableLibraryMediaSrc(src, session = null) {
     if (!value) return false;
     if (value.includes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==")) return false;
     if (/^blob:/i.test(value) && !(Array.isArray(session?.domNodes) && session.domNodes.length > 0)) return false;
-    return /^(?:https?:|blob:|data:(?:image|video|audio)\/)/i.test(value);
+    return /^(?:https?:|blob:|data:(?:image|video|audio)\/)/i.test(value) || isDesktopFileMediaSource(value);
 }
 
 function getLibraryItemId(prefix, session, value, index) {
