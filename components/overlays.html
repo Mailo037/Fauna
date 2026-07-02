@@ -1,6 +1,67 @@
-<div id="imageLightbox" class="image-lightbox" hidden aria-hidden="true">
-    <button class="image-lightbox-close" type="button" aria-label="Close">&times;</button>
-    <img class="image-lightbox-img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="Full size image" />
+<div id="imageLightbox" class="image-lightbox" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Image viewer">
+    <div class="image-lightbox-toolbar" aria-label="Image zoom controls">
+        <button class="image-lightbox-tool" type="button" data-lightbox-action="zoom-out" aria-label="Zoom out" data-tooltip="Zoom out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"></path></svg>
+        </button>
+        <span class="image-lightbox-zoom" aria-live="polite">100%</span>
+        <button class="image-lightbox-tool" type="button" data-lightbox-action="zoom-in" aria-label="Zoom in" data-tooltip="Zoom in">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+        </button>
+        <button class="image-lightbox-tool" type="button" data-lightbox-action="reset" aria-label="Reset view" data-tooltip="Reset view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.1-6.6L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-15.1 6.6L3 16"></path><path d="M3 21v-5h5"></path></svg>
+        </button>
+    </div>
+    <button class="image-lightbox-close" type="button" aria-label="Close image viewer" data-tooltip="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+    </button>
+    <div class="image-lightbox-stage">
+        <img class="image-lightbox-img" draggable="false" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="Full size image" />
+    </div>
+</div>
+
+<div id="libraryPickerModal" class="library-picker-modal" hidden aria-hidden="true">
+    <div class="library-picker-backdrop" data-library-picker-close></div>
+    <section class="library-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="libraryPickerTitle">
+        <header class="library-picker-header">
+            <div>
+                <h2 id="libraryPickerTitle">Choose from Library</h2>
+                <p id="libraryPickerSubtitle">Select items to attach to this chat.</p>
+            </div>
+            <button id="libraryPickerClose" class="library-picker-close" type="button" aria-label="Close Library picker" data-library-picker-close>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            </button>
+        </header>
+        <div class="library-picker-controls">
+            <label class="library-picker-search-wrap" for="libraryPickerSearch">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+                <input id="libraryPickerSearch" class="library-picker-search" type="search" autocomplete="off" placeholder="Search Library">
+            </label>
+            <div class="library-picker-filter-row" aria-label="Library item type">
+                <button class="library-picker-chip active" type="button" data-library-picker-type="all" aria-pressed="true">All</button>
+                <button class="library-picker-chip" type="button" data-library-picker-type="images" aria-pressed="false">Images</button>
+                <button class="library-picker-chip" type="button" data-library-picker-type="videos" aria-pressed="false">Videos</button>
+                <button class="library-picker-chip" type="button" data-library-picker-type="code" aria-pressed="false">Code</button>
+            </div>
+            <div class="library-picker-filter-row library-picker-sort-row" aria-label="Created date order">
+                <button class="library-picker-chip active" type="button" data-library-picker-sort="newest" aria-pressed="true">Newest first</button>
+                <button class="library-picker-chip" type="button" data-library-picker-sort="oldest" aria-pressed="false">Oldest first</button>
+            </div>
+        </div>
+        <div id="libraryPickerGrid" class="library-picker-grid" aria-live="polite"></div>
+        <div id="libraryPickerEmpty" class="library-picker-empty" hidden>
+            <div class="library-picker-empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-1.5Z"></path><path d="M10 3h8a2 2 0 0 1 2 2v14.5A2 2 0 0 1 18 21h-8"></path></svg>
+            </div>
+            <h3>No matching items</h3>
+        </div>
+        <footer class="library-picker-footer">
+            <span id="libraryPickerSelectionCount" class="library-picker-selection-count">0 selected</span>
+            <div class="library-picker-footer-actions">
+                <button id="libraryPickerCancel" class="library-picker-secondary" type="button" data-library-picker-close>Cancel</button>
+                <button id="libraryPickerAttach" class="library-picker-primary" type="button" disabled>Attach selected</button>
+            </div>
+        </footer>
+    </section>
 </div>
 
 <div id="settingsModal" class="settings-modal" hidden aria-hidden="true">
@@ -24,6 +85,10 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>
                     <span>AI Provider</span>
                 </button>
+                <button class="settings-nav-item" type="button" data-settings-pane="usage" aria-selected="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19V5"></path><path d="M4 19h16"></path><rect x="7" y="11" width="3" height="5" rx="1"></rect><rect x="12" y="7" width="3" height="9" rx="1"></rect><rect x="17" y="9" width="3" height="7" rx="1"></rect></svg>
+                    <span>Usage</span>
+                </button>
                 <button class="settings-nav-item" type="button" data-settings-pane="services" aria-selected="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path><circle cx="8" cy="6" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="10" cy="18" r="1"></circle></svg>
                     <span>Local Services</span>
@@ -41,56 +106,122 @@
             </header>
 
             <div class="settings-pane active" data-settings-pane-panel="general">
-                <div class="settings-row">
-                    <div class="setting-info">
-                        <span class="setting-title">Theme</span>
-                        <span class="setting-desc">Switch between light and dark mode.</span>
+                <div class="provider-model-section settings-panel-section settings-panel-section-first">
+                    <p class="provider-section-label">Appearance</p>
+                    <div class="settings-control-stack">
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Theme</span>
+                                <span class="setting-desc">Switch between light and dark mode.</span>
+                            </div>
+                            <button id="themeToggle" class="settings-theme-toggle" type="button" aria-label="Switch to light theme">
+                                <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>
+                                <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                                <span id="themeLabel">Dark</span>
+                            </button>
+                        </div>
+                        <div class="settings-control-card settings-control-card-stacked">
+                            <div class="setting-info">
+                                <span class="setting-title">Accent color</span>
+                                <span id="accentValue" class="setting-desc">Blue</span>
+                            </div>
+                            <div class="accent-switcher" role="radiogroup" aria-label="Accent color">
+                                <button class="accent-choice" type="button" data-accent-choice="blue" aria-label="Use blue accent" aria-checked="true" role="radio">
+                                    <span class="accent-swatch accent-swatch-blue" aria-hidden="true"></span>
+                                    <span>Blue</span>
+                                </button>
+                                <button class="accent-choice" type="button" data-accent-choice="orange" aria-label="Use Claude orange accent" aria-checked="false" role="radio">
+                                    <span class="accent-swatch accent-swatch-orange" aria-hidden="true"></span>
+                                    <span>Orange</span>
+                                </button>
+                                <button class="accent-choice" type="button" data-accent-choice="green" aria-label="Use green accent" aria-checked="false" role="radio">
+                                    <span class="accent-swatch accent-swatch-green" aria-hidden="true"></span>
+                                    <span>Green</span>
+                                </button>
+                                <button class="accent-choice" type="button" data-accent-choice="red" aria-label="Use red accent" aria-checked="false" role="radio">
+                                    <span class="accent-swatch accent-swatch-red" aria-hidden="true"></span>
+                                    <span>Red</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <button id="themeToggle" class="settings-theme-toggle" type="button" aria-label="Switch to light theme">
-                        <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>
-                        <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
-                        <span id="themeLabel">Dark</span>
-                    </button>
                 </div>
-                <div class="settings-row">
-                    <div class="setting-info">
-                        <span class="setting-title">Accent color</span>
-                        <span id="accentValue" class="setting-desc">Blue</span>
+                <div class="provider-model-section settings-panel-section">
+                    <p class="provider-section-label">Behavior</p>
+                    <div class="settings-control-card">
+                        <div class="setting-info">
+                            <span class="setting-title">AI response streaming</span>
+                            <span id="aiStreamingStatus" class="setting-desc">Stream supported model replies as they arrive.</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="toggleAiStreaming" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
                     </div>
-                    <div class="accent-switcher" role="radiogroup" aria-label="Accent color">
-                        <button class="accent-choice" type="button" data-accent-choice="blue" aria-label="Use blue accent" aria-checked="true" role="radio">
-                            <span class="accent-swatch accent-swatch-blue" aria-hidden="true"></span>
-                            <span>Blue</span>
-                        </button>
-                        <button class="accent-choice" type="button" data-accent-choice="orange" aria-label="Use Claude orange accent" aria-checked="false" role="radio">
-                            <span class="accent-swatch accent-swatch-orange" aria-hidden="true"></span>
-                            <span>Orange</span>
-                        </button>
-                        <button class="accent-choice" type="button" data-accent-choice="green" aria-label="Use green accent" aria-checked="false" role="radio">
-                            <span class="accent-swatch accent-swatch-green" aria-hidden="true"></span>
-                            <span>Green</span>
-                        </button>
-                        <button class="accent-choice" type="button" data-accent-choice="red" aria-label="Use red accent" aria-checked="false" role="radio">
-                            <span class="accent-swatch accent-swatch-red" aria-hidden="true"></span>
-                            <span>Red</span>
-                        </button>
+                    <div class="settings-control-card settings-range-card">
+                        <div class="setting-info">
+                            <span class="setting-title">Temperature</span>
+                            <span id="temperatureStatus" class="setting-desc">Default model behavior</span>
+                        </div>
+                        <div class="settings-range-wrap">
+                            <span id="tempValue" class="setting-value">0.7</span>
+                            <input type="range" id="paramTemp" min="0" max="1.5" step="0.1" value="0.7" class="param-slider">
+                        </div>
                     </div>
-                </div>
-                <div class="settings-row">
-                    <div class="setting-info">
-                        <span class="setting-title">Temperature</span>
-                        <span class="setting-desc">Default model behavior</span>
+                    <div class="settings-control-card settings-control-card-stacked ai-call-settings-card">
+                        <div class="setting-info">
+                            <span class="setting-title">Output limits</span>
+                            <span id="aiOutputLimitsStatus" class="setting-desc">Use 0 for provider defaults.</span>
+                        </div>
+                        <div class="ai-call-settings-grid">
+                            <label class="settings-field-label">
+                                <span>Max output tokens</span>
+                                <input id="maxOutputTokensInput" class="settings-input settings-number-input ai-call-number-input" type="number" min="0" max="128000" step="256" value="0" aria-label="Maximum output tokens">
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Top P</span>
+                                <input id="topPInput" class="settings-input settings-number-input ai-call-number-input" type="number" min="0.05" max="1" step="0.05" value="1" aria-label="Top P">
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Ollama Top K</span>
+                                <input id="ollamaTopKInput" class="settings-input settings-number-input ai-call-number-input" type="number" min="0" max="200" step="1" value="40" aria-label="Ollama Top K">
+                            </label>
+                        </div>
                     </div>
-                    <div class="settings-range-wrap">
-                        <span id="tempValue" class="setting-value">0.7</span>
-                        <input type="range" id="paramTemp" min="0" max="1.5" step="0.1" value="0.7" class="param-slider">
+                    <div class="settings-control-card settings-control-card-stacked ai-call-settings-card">
+                        <div class="setting-info">
+                            <span class="setting-title">OpenAI verbosity</span>
+                            <span id="openAiVerbosityStatus" class="setting-desc">Controls response detail when the model supports it.</span>
+                        </div>
+                        <div class="settings-mini-segment" role="radiogroup" aria-label="OpenAI verbosity">
+                            <button class="settings-mini-choice" type="button" data-ai-verbosity="low" role="radio" aria-checked="false">Low</button>
+                            <button class="settings-mini-choice" type="button" data-ai-verbosity="medium" role="radio" aria-checked="true">Medium</button>
+                            <button class="settings-mini-choice" type="button" data-ai-verbosity="high" role="radio" aria-checked="false">High</button>
+                        </div>
+                    </div>
+                    <div class="settings-control-card settings-range-card">
+                        <div class="setting-info">
+                            <span class="setting-title">Response animation</span>
+                            <span class="setting-desc">Typewriter duration in seconds. Set 0 for instant replies.</span>
+                        </div>
+                        <div class="settings-range-wrap settings-duration-wrap">
+                            <span id="typewriterDurationValue" class="setting-value">6s</span>
+                            <input type="range" id="typewriterDuration" min="0" max="20" step="1" value="6" class="param-slider" aria-label="Response animation duration">
+                            <input id="typewriterDurationNumber" class="settings-input settings-number-input" type="number" min="0" max="20" step="1" value="6" aria-label="Response animation duration in seconds">
+                        </div>
                     </div>
                 </div>
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="voice" hidden>
+                <div id="voiceSetupNotice" class="voice-setup-notice" hidden></div>
                 <section class="voice-picker" aria-label="OpenAI voice">
-                    <div id="voiceOrb" class="voice-orb" aria-hidden="true"></div>
+                    <div id="voiceOrb" class="voice-orb">
+                        <button id="voicePreviewBtn" class="voice-preview-btn" type="button" aria-label="Preview selected voice">
+                            <svg class="voice-preview-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l10-6.5-10-6.5Z"></path></svg>
+                            <svg class="voice-preview-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"></rect></svg>
+                        </button>
+                    </div>
                     <div class="voice-carousel">
                         <button id="voicePrevBtn" class="voice-cycle-btn" type="button" aria-label="Previous voice">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
@@ -107,7 +238,7 @@
                     <input id="openAiVoiceInput" type="hidden" value="alloy">
                     <div class="voice-choice-wrap" id="voiceChoiceWrap">
                         <div id="voiceChoiceList" class="voice-choice-list" role="radiogroup" aria-label="Available OpenAI voices"></div>
-                        <div class="voice-show-more-fade" aria-hidden="true">
+                        <div class="voice-show-more-fade">
                             <button id="voiceShowMoreBtn" class="voice-show-more-btn" type="button">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
                                 Show all voices
@@ -121,12 +252,13 @@
                         </div>
                     </div>
                 </section>
-                <div class="settings-row">
+                <div class="settings-row settings-row-stacked">
                     <div class="setting-info">
-                        <span class="setting-title">Speech model</span>
-                        <span class="setting-desc">Voice responses use OpenAI speech when OpenAI is active.</span>
+                        <span class="setting-title">Voice model</span>
+                        <span class="setting-desc">OpenAI Realtime voice chat uses this model when OpenAI is active.</span>
                     </div>
-                    <span class="setting-value">gpt-4o-mini-tts</span>
+                    <input id="openAiRealtimeModelInput" type="hidden" value="gpt-realtime-2">
+                    <div id="openAiRealtimeModelSelectHost" class="settings-model-select-host"></div>
                 </div>
                 <div class="settings-row">
                     <div class="setting-info">
@@ -135,6 +267,36 @@
                     </div>
                     <span class="settings-select-like">Automatic</span>
                 </div>
+                <section class="voice-local-pipeline" aria-label="Local voice pipeline">
+                    <div class="settings-section-heading settings-model-heading">
+                        <p class="provider-section-label">Local voice pipeline</p>
+                    </div>
+                    <div class="provider-model-grid">
+                        <label class="settings-field-label">
+                            <span>Transcription</span>
+                            <input id="localVoiceTranscriptionInput" type="hidden" value="whisper">
+                            <div id="localVoiceTranscriptionSelectHost" class="settings-model-select-host"></div>
+                        </label>
+                        <label class="settings-field-label">
+                            <span>Reply voice</span>
+                            <input id="localVoiceReplyModelInput" type="hidden" value="moshi">
+                            <div id="localVoiceReplyModelSelectHost" class="settings-model-select-host"></div>
+                        </label>
+                        <label class="settings-field-label settings-field-label-wide">
+                            <span>Whisper endpoint</span>
+                            <input id="localVoiceTranscriptionEndpointInput" class="settings-input" type="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:8000/v1/audio/transcriptions" aria-label="Whisper endpoint">
+                        </label>
+                        <label class="settings-field-label settings-field-label-wide">
+                            <span>Whisper model</span>
+                            <input id="localVoiceTranscriptionModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="whisper-large-v3" aria-label="Whisper model">
+                        </label>
+                        <label class="settings-field-label settings-field-label-wide">
+                            <span>Voice endpoint</span>
+                            <input id="localVoiceReplyEndpointInput" class="settings-input" type="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:8998/v1/audio/speech" aria-label="Local voice endpoint">
+                        </label>
+                    </div>
+                    <p class="persona-field-hint">Whisper and voice endpoints route through the Local Workspace Bridge and must be self-hosted on localhost or a private network.</p>
+                </section>
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="provider" hidden>
@@ -157,11 +319,51 @@
                     </div>
                 </div>
 
+                <div class="settings-row ai-cache-row">
+                    <div class="setting-info">
+                        <span class="setting-title">AI caching</span>
+                        <span id="aiCachingStatus" class="setting-desc">Off</span>
+                    </div>
+                    <button id="aiCachingToggle" class="provider-btn provider-btn-secondary ai-cache-toggle" type="button" aria-pressed="false" data-tooltip="Turn on caching">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <ellipse cx="12" cy="5" rx="7" ry="3"></ellipse>
+                            <path d="M5 5v6c0 1.66 3.13 3 7 3s7-1.34 7-3V5"></path>
+                            <path d="M5 11v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6"></path>
+                        </svg>
+                        <span id="aiCachingToggleLabel">Turn on</span>
+                    </button>
+                </div>
+
+                <!-- Local models -->
+                <div class="provider-model-section local-model-section" data-provider-config="local">
+                    <div class="settings-section-heading">
+                        <p class="provider-section-label">Local Ollama models</p>
+                        <div class="settings-section-actions">
+                            <span id="localModelsStatus" class="settings-status-badge">Checking</span>
+                            <button id="ollamaCatalogBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M4 5h16"></path>
+                                    <path d="M4 12h16"></path>
+                                    <path d="M4 19h16"></path>
+                                    <path d="M8 5v14"></path>
+                                </svg>
+                                Catalog
+                            </button>
+                        </div>
+                    </div>
+                    <p class="settings-section-desc">Choose the local chat model. Missing models can be pulled after you approve the install.</p>
+                    <div id="localModelList" class="local-model-list" role="radiogroup" aria-label="Local Ollama models"></div>
+                    <div class="provider-actions">
+                        <button id="localModelsRefreshBtn" class="provider-btn provider-btn-secondary" type="button">Refresh</button>
+                        <button id="localModelsInstallBtn" class="provider-btn provider-btn-primary" type="button">Install missing</button>
+                    </div>
+                </div>
+
                 <!-- API Key -->
-                <div class="settings-row settings-row-stacked">
+                <div class="settings-row settings-row-stacked" data-provider-config="openai">
                     <div class="setting-info">
                         <span class="setting-title">OpenAI API key</span>
-                        <span class="setting-desc">Stored in this browser only. Use a device you trust.</span>
+                        <span class="setting-desc">Stored in this browser only. OpenAI calls route through the local bridge.</span>
                     </div>
                     <div class="provider-key-wrap">
                         <input id="openAiApiKeyInput" class="settings-input provider-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" aria-label="OpenAI API key">
@@ -173,26 +375,40 @@
                 </div>
 
                 <!-- Models -->
-                <div class="provider-model-section">
-                    <p class="provider-section-label">Models</p>
+                <div class="provider-model-section" data-provider-config="openai">
+                    <div class="settings-section-heading settings-model-heading">
+                        <p class="provider-section-label">Models</p>
+                        <button id="openAiCatalogBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M4 5h16"></path>
+                                <path d="M4 12h16"></path>
+                                <path d="M4 19h16"></path>
+                                <path d="M8 5v14"></path>
+                            </svg>
+                            Catalog
+                        </button>
+                    </div>
                     <div class="provider-model-grid">
                         <label class="settings-field-label">
                             <span>Chat</span>
-                            <input id="openAiChatModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini">
+                            <input id="openAiChatModelInput" type="hidden" value="gpt-5.4-mini">
+                            <div id="openAiChatModelSelectHost" class="settings-model-select-host"></div>
                         </label>
                         <label class="settings-field-label">
                             <span>Image</span>
-                            <input id="openAiImageModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-image-1">
+                            <input id="openAiImageModelInput" type="hidden" value="gpt-image-1.5">
+                            <div id="openAiImageModelSelectHost" class="settings-model-select-host"></div>
                         </label>
-                        <label class="settings-field-label">
+                        <div class="settings-field-label settings-field-label-wide">
                             <span>Transcription</span>
-                            <input id="openAiTranscriptionModelInput" class="settings-input" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini-transcribe">
-                        </label>
+                            <input id="openAiTranscriptionModelInput" type="hidden" value="gpt-4o-mini-transcribe">
+                            <div id="openAiTranscriptionModelSelectHost" class="settings-model-select-host"></div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Actions -->
-                <div class="provider-actions">
+                <div class="provider-actions" data-provider-config="openai">
                     <button id="openAiSaveBtn" class="provider-btn provider-btn-primary" type="button">Save</button>
                     <button id="openAiTestBtn" class="provider-btn provider-btn-secondary" type="button">Test connection</button>
                     <span class="provider-actions-spacer"></span>
@@ -216,7 +432,7 @@
                 <!-- Custom instructions -->
                 <div class="provider-model-section">
                     <p class="provider-section-label">Custom instructions</p>
-                    <textarea id="personaCustomInstructionsInput" class="settings-textarea persona-textarea" rows="5" placeholder="e.g. I'm a developer who prefers concise answers with code examples. Always use TypeScript." aria-label="Custom instructions"></textarea>
+                    <textarea id="personaCustomInstructionsInput" class="settings-textarea persona-textarea" rows="5" maxlength="4000" placeholder="e.g. I'm a developer who prefers concise answers with code examples. Always use TypeScript." aria-label="Custom instructions"></textarea>
                     <p class="persona-field-hint">Prepended to every chat. Describe your role, preferences, or how you'd like responses formatted.</p>
                     <div class="provider-actions" style="padding-top:10px; margin-top:0; border-top:0;">
                         <button id="personaSaveBtn" class="provider-btn provider-btn-primary" type="button">Save</button>
@@ -228,61 +444,174 @@
                 <!-- Preferences -->
                 <div class="provider-model-section">
                     <p class="provider-section-label">Preferences</p>
-                    <div class="persona-toggle-row">
+                    <div class="persona-toggle-row persona-toggle-row-memory">
                         <div class="setting-info">
-                            <span class="setting-title">Show suggestions</span>
-                            <span class="setting-desc">Display prompt suggestions on the home screen.</span>
+                            <span class="setting-title">Memory beta</span>
+                            <span class="setting-desc">Allow Fauna and you to save memories that every chat can use.</span>
                         </div>
-                        <label class="switch">
-                            <input type="checkbox" id="personaShowSuggestions" checked>
-                            <span class="toggle-slider"></span>
-                        </label>
+                        <div class="memory-toggle-control">
+                            <span id="memoryBetaStatus" class="settings-status-badge">Off</span>
+                            <label class="switch">
+                                <input type="checkbox" id="toggleMemoryBeta">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
                     </div>
-                    <div class="persona-toggle-row">
-                        <div class="setting-info">
-                            <span class="setting-title">Compact welcome</span>
-                            <span class="setting-desc">Show a minimal greeting without the subtitle line.</span>
-                        </div>
-                        <label class="switch">
-                            <input type="checkbox" id="personaCompactWelcome">
-                            <span class="toggle-slider"></span>
-                        </label>
+                    <div class="memory-settings-summary">
+                        <span id="memoryCountLabel">0 memories</span>
+                        <button id="memoryOpenCommandBtn" class="provider-btn provider-btn-secondary" type="button">Manage with /memory</button>
                     </div>
                 </div>
 
             </div>
 
-            <div class="settings-pane" data-settings-pane-panel="services" hidden>
-                <div class="settings-row settings-row-stacked">
-                    <div class="setting-info">
-                        <span class="setting-title">Wan 2.2 Video</span>
-                        <span id="wanStatus" class="setting-desc">Not set</span>
+            <div class="settings-pane" data-settings-pane-panel="usage" hidden>
+                <section class="usage-status-panel" aria-label="Usage status">
+                    <div id="usageStatsRail" class="usage-stats-rail"></div>
+
+                    <section class="usage-calendar-section" aria-labelledby="usageCalendarTitle">
+                        <div class="usage-section-head">
+                            <h3 id="usageCalendarTitle">Token Usage</h3>
+                            <div class="usage-view-tabs" role="tablist" aria-label="Token usage view">
+                                <button class="usage-view-tab active" type="button" data-usage-view="daily" role="tab" aria-selected="true">Daily</button>
+                                <button class="usage-view-tab" type="button" data-usage-view="weekly" role="tab" aria-selected="false">Weekly</button>
+                                <button class="usage-view-tab" type="button" data-usage-view="cumulative" role="tab" aria-selected="false">Cumulative</button>
+                            </div>
+                        </div>
+                        <div id="usageCalendar" class="usage-calendar" role="img" aria-label="Token usage for the past year"></div>
+                        <div id="usageMonthLabels" class="usage-month-labels" aria-hidden="true"></div>
+                    </section>
+
+                    <div class="usage-insight-grid">
+                        <section class="usage-insight-card" aria-labelledby="usageActivityTitle">
+                            <h3 id="usageActivityTitle">Activity Insights</h3>
+                            <div id="usageActivityInsights" class="usage-insight-list"></div>
+                        </section>
+                        <section class="usage-insight-card" aria-labelledby="usageToolsTitle">
+                            <h3 id="usageToolsTitle">Most Used Tool Calls</h3>
+                            <div id="usageToolCalls" class="usage-tool-list"></div>
+                        </section>
                     </div>
-                    <input id="wanEndpointInput" class="settings-input" type="text" value="http://localhost:8188" aria-label="Wan ComfyUI endpoint">
-                    <textarea id="wanWorkflowInput" class="settings-textarea" rows="4" placeholder="Paste ComfyUI API workflow JSON with {{PROMPT}} here"></textarea>
-                    <div class="settings-button-row">
-                        <button id="wanSaveBtn" class="tools-action-btn" type="button">Save Wan</button>
-                        <button id="wanTestBtn" class="tools-action-btn" type="button">Test</button>
-                        <button id="wanClearBtn" class="tools-action-btn" type="button">Clear</button>
+                </section>
+            </div>
+
+            <div class="settings-pane" data-settings-pane-panel="services" hidden>
+                <div class="provider-model-section settings-panel-section settings-panel-section-first">
+                    <div class="settings-section-heading">
+                        <p class="provider-section-label">Wan 2.2 Video</p>
+                        <span id="wanStatus" class="settings-status-badge">Not set</span>
+                    </div>
+                    <div class="provider-model-grid settings-single-field-grid">
+                        <label class="settings-field-label">
+                            <span>Endpoint</span>
+                            <input id="wanEndpointInput" class="settings-input" type="text" value="http://localhost:8188" aria-label="Wan ComfyUI endpoint">
+                        </label>
+                    </div>
+                    <label class="settings-field-label">
+                        <span>Workflow JSON</span>
+                        <textarea id="wanWorkflowInput" class="settings-textarea service-textarea" rows="4" placeholder="Paste ComfyUI API workflow JSON with {{PROMPT}} here"></textarea>
+                    </label>
+                    <div class="provider-actions">
+                        <button id="wanSaveBtn" class="provider-btn provider-btn-primary" type="button">Save</button>
+                        <button id="wanTestBtn" class="provider-btn provider-btn-secondary" type="button">Test</button>
+                        <span class="provider-actions-spacer"></span>
+                        <button id="wanClearBtn" class="provider-btn provider-btn-ghost" type="button">Clear</button>
                     </div>
                 </div>
-                <div class="settings-row settings-row-stacked">
-                    <div class="setting-info">
-                        <span class="setting-title">Local Workspace Bridge</span>
-                        <span id="workspaceBridgeStatus" class="setting-desc">Not set</span>
+                <div class="provider-model-section settings-panel-section">
+                    <div class="settings-section-heading">
+                        <p class="provider-section-label">Local Workspace Bridge</p>
+                        <span id="workspaceBridgeStatus" class="settings-status-badge">Not set</span>
                     </div>
-                    <span class="setting-desc">Start the bridge on this machine, then paste the printed token here. Commands run inside the configured workspace only.</span>
-                    <input id="workspaceBridgeEndpointInput" class="settings-input" type="text" value="http://127.0.0.1:8765" aria-label="Workspace bridge endpoint">
-                    <input id="workspaceBridgeTokenInput" class="settings-input" type="password" autocomplete="off" placeholder="Bridge token" aria-label="Workspace bridge token">
-                    <div class="settings-button-row">
-                        <button id="workspaceBridgeSaveBtn" class="tools-action-btn" type="button">Save Bridge</button>
-                        <button id="workspaceBridgeTestBtn" class="tools-action-btn" type="button">Test</button>
-                        <button id="workspaceBridgeClearBtn" class="tools-action-btn" type="button">Clear</button>
+                    <p class="settings-section-desc">Start the bridge on this machine, then paste the printed token here. It handles workspace tools, public web page inspection, and OpenAI API relay requests.</p>
+                    <div class="provider-model-grid">
+                        <label class="settings-field-label">
+                            <span>Endpoint</span>
+                            <input id="workspaceBridgeEndpointInput" class="settings-input" type="text" value="http://127.0.0.1:8765" aria-label="Workspace bridge endpoint">
+                        </label>
+                        <label class="settings-field-label">
+                            <span>Token</span>
+                            <input id="workspaceBridgeTokenInput" class="settings-input" type="password" autocomplete="off" placeholder="Bridge token" aria-label="Workspace bridge token">
+                        </label>
+                    </div>
+                    <div class="provider-actions">
+                        <button id="workspaceBridgeSaveBtn" class="provider-btn provider-btn-primary" type="button">Save</button>
+                        <button id="workspaceBridgeTestBtn" class="provider-btn provider-btn-secondary" type="button">Test</button>
+                        <span class="provider-actions-spacer"></span>
+                        <button id="workspaceBridgeClearBtn" class="provider-btn provider-btn-ghost" type="button">Clear</button>
                     </div>
                     <code class="settings-command-hint">py -3 local-bridge.py --root . --port 8765</code>
                 </div>
             </div>
         </main>
+    </section>
+</div>
+
+<div id="openAiCatalogModal" class="settings-submodal" hidden aria-hidden="true">
+    <div class="settings-submodal-backdrop" data-openai-catalog-close></div>
+    <section class="settings-subdialog model-catalog-dialog" role="dialog" aria-modal="true" aria-labelledby="openAiCatalogTitle">
+        <header class="model-catalog-header">
+            <div>
+                <h2 id="openAiCatalogTitle">OpenAI Model Catalog</h2>
+                <p id="openAiCatalogStatus">Built-in catalog</p>
+            </div>
+            <button id="openAiCatalogCloseBtn" class="settings-close-btn model-catalog-close" type="button" aria-label="Close model catalog" data-openai-catalog-close>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            </button>
+        </header>
+        <div class="model-catalog-controls">
+            <label class="model-catalog-search" for="openAiCatalogSearchInput">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+                <input id="openAiCatalogSearchInput" type="search" autocomplete="off" placeholder="Search models or capabilities">
+            </label>
+            <div class="model-catalog-toolbar">
+                <div class="model-catalog-sort" role="group" aria-label="Sort model catalog">
+                    <button class="model-catalog-sort-btn active" type="button" data-openai-catalog-sort="default" aria-pressed="true">Default</button>
+                    <button class="model-catalog-sort-btn" type="button" data-openai-catalog-sort="context-desc" aria-pressed="false">Highest context</button>
+                    <button class="model-catalog-sort-btn" type="button" data-openai-catalog-sort="context-asc" aria-pressed="false">Lowest context</button>
+                </div>
+                <div class="model-catalog-filter-wrap">
+                    <button id="openAiCatalogFiltersBtn" class="provider-btn provider-btn-secondary model-catalog-filter-btn" type="button" aria-haspopup="true" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"></path><path d="M7 12h10"></path><path d="M10 18h4"></path></svg>
+                        <span data-openai-catalog-filter-label>Filters</span>
+                    </button>
+                    <div id="openAiCatalogFiltersMenu" class="model-catalog-filter-menu" role="dialog" aria-label="Model capability filters" hidden>
+                        <div class="model-catalog-filter-column">
+                            <p>Must support</p>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="text-input"> Text input</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="image-input"> Image input</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="audio-input"> Audio input</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="text-output"> Text output</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="image-output"> Image output</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="audio-output"> Audio output</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="tools"> Tools</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="files"> Files</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="structured"> Structured output</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="reasoning"> Reasoning</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="streaming"> Streaming</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="require" value="temperature"> Temperature</label>
+                        </div>
+                        <div class="model-catalog-filter-column">
+                            <p>Must not support</p>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="image-input"> Image input</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="audio-input"> Audio input</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="image-output"> Image output</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="audio-output"> Audio output</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="tools"> Tools</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="files"> Files</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="structured"> Structured output</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="reasoning"> Reasoning</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="streaming"> Streaming</label>
+                            <label><input type="checkbox" data-openai-catalog-filter="exclude" value="temperature"> Temperature</label>
+                        </div>
+                        <button id="openAiCatalogClearFiltersBtn" class="provider-btn provider-btn-ghost model-catalog-clear-filters" type="button">Clear filters</button>
+                    </div>
+                </div>
+                <button id="openAiCatalogRefreshBtn" class="provider-btn provider-btn-secondary" type="button">Refresh</button>
+            </div>
+        </div>
+        <div id="openAiCatalogList" class="model-catalog-list" role="list" aria-live="polite"></div>
+        <p id="openAiCatalogEmpty" class="model-catalog-empty" hidden>No OpenAI models found.</p>
     </section>
 </div>
 

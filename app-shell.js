@@ -12,7 +12,7 @@ function createBootLoader() {
     loader.setAttribute("aria-live", "polite");
     loader.innerHTML = `
         <div class="app-boot-loader-mark" aria-hidden="true">
-            <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.09 6.26 6.73.92-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+            <svg class="fauna-mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.09 6.26 6.73.92-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
         </div>
         <div class="app-boot-loader-text">Starting Fauna</div>
         <div class="app-boot-loader-bar" aria-hidden="true"><span></span></div>
@@ -100,7 +100,7 @@ function renderStartupError(error) {
         <main class="startup-error" role="alert" aria-labelledby="startupErrorTitle">
             <section class="startup-error-card">
                 <div class="startup-error-mark" aria-hidden="true">
-                    <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.09 6.26 6.73.92-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+                    <svg class="fauna-mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.09 6.26 6.73.92-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
                 </div>
                 <div class="startup-error-copy">
                     <p class="startup-error-kicker">Startup interrupted</p>
@@ -150,7 +150,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js");
+        await import("./script.js?v=20260702-voice-pricing-copy");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));

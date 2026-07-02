@@ -1,7 +1,7 @@
 <aside class="sidebar" id="sidebar" aria-label="Fauna navigation">
     <div class="logo">
         <span class="logo-icon">
-            <svg class="flora-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+            <svg class="fauna-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.09 6.26L20.82 9.18l-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
         </span>
         <span class="logo-copy">
             <span class="logo-text">Fauna</span>
@@ -23,7 +23,7 @@
 
     <nav class="nav-links sidebar-section" aria-label="Workspace">
         <div class="sidebar-section-label">Workspace</div>
-        <button class="nav-item active" type="button" data-tooltip="Playground">
+        <button id="playgroundNavButton" class="nav-item active" type="button" data-workspace-view="playground" data-tooltip="Playground" aria-current="page">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <polyline points="14 2 14 8 20 8"></polyline>
@@ -34,15 +34,41 @@
             <span class="nav-text">Playground</span>
             <svg class="chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
         </button>
+        <button id="libraryNavButton" class="nav-item" type="button" data-workspace-view="library" data-tooltip="Library">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 19.5V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-1.5Z"></path>
+                <path d="M10 3h8a2 2 0 0 1 2 2v14.5A2 2 0 0 1 18 21h-8"></path>
+                <path d="M14 7h3"></path>
+                <path d="M14 11h3"></path>
+                <path d="M14 15h3"></path>
+            </svg>
+            <span class="nav-text">Library</span>
+            <svg class="chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </button>
     </nav>
 
-    <section class="history sidebar-section" aria-label="Chats">
-        <div class="history-label">Chats</div>
+    <section class="history history-active sidebar-section" aria-label="Chats">
+        <button id="chatHistoryToggle" class="history-header history-toggle" type="button" aria-label="Collapse chats" aria-expanded="true" aria-controls="chatHistoryList" data-tooltip="Collapse chats">
+            <span class="history-label">Chats</span>
+            <svg class="history-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </button>
         <button id="newChat" class="history-item new-chat-item" type="button" data-tooltip="New chat">
             <svg class="history-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
             <span class="chat-label">New chat</span>
         </button>
         <div id="chatHistoryList" class="chat-history-list" aria-label="Chat history"></div>
+    </section>
+
+    <section id="archivedHistorySection" class="history history-archived sidebar-section" aria-label="Archived chats" hidden>
+        <button id="archivedChatToggle" class="history-header history-toggle" type="button" aria-label="Collapse archived chats" aria-expanded="true" aria-controls="archivedChatList" data-tooltip="Collapse archived">
+            <span class="history-label">Archived</span>
+            <svg class="history-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </button>
+        <div id="archivedChatList" class="chat-history-list archived-chat-list" aria-label="Archived chat history"></div>
     </section>
 </aside>
 

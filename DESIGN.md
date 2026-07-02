@@ -1,5 +1,5 @@
 ---
-name: Flora AI
+name: Fauna AI
 description: A calm local-first AI workstation for English local-AI prompting.
 colors:
   background: "#111214"
@@ -100,13 +100,13 @@ components:
     padding: "8px"
 ---
 
-# Design System: Flora AI
+# Design System: Fauna AI
 
 ## 1. Overview
 
 **Creative North Star: "The Local Console"**
 
-Flora's interface should feel like a premium local workstation: compact, capable, and quiet enough for repeated use. The visual system now follows a DeepSeek-like chat shell: a flat near-black canvas, slim rail, centered thread, rounded bottom composer, and a small blue signal reserved for active state, brand mark, and key values.
+Fauna's interface should feel like a premium local workstation: compact, capable, and quiet enough for repeated use. The visual system now follows a DeepSeek-like chat shell: a flat near-black canvas, slim rail, centered thread, rounded bottom composer, and a small blue signal reserved for active state, brand mark, and key values.
 
 The product should not perform like a marketing page. It should feel self-contained, trustworthy, and deliberate: a local AI console where service status, model choice, and next action are obvious without decoration. User-facing copy must be English-only, concise, and consistent.
 
@@ -171,7 +171,7 @@ The palette is a local-console palette: graphite surfaces, cool-neutral text, an
 
 ## 4. Elevation
 
-Flora should be flat by default. Depth is conveyed through tonal layers, thin borders, and active/focus state. Large diffuse shadows are allowed only for temporary overlays or legacy composer treatment; the compact shell should prefer no shadow.
+Fauna should be flat by default. Depth is conveyed through tonal layers, thin borders, and active/focus state. Large diffuse shadows are allowed only for temporary overlays or legacy composer treatment; the compact shell should prefer no shadow.
 
 ### Shadow Vocabulary
 
@@ -214,7 +214,7 @@ Flora should be flat by default. Depth is conveyed through tonal layers, thin bo
 
 ### Custom UI Primitives
 
-- **Built-In Browser UI Rule:** Do not use built-in browser UI for product feedback, help, or styled controls. Flora must use custom templates/components for toasts, select-like controls, tooltips, dialogs, popovers, and confirmations instead of `alert`, `confirm`, `prompt`, native `title` tooltips, or styled product `<select>` controls.
+- **Built-In Browser UI Rule:** Do not use built-in browser UI for product feedback, help, or styled controls. Fauna must use custom templates/components for toasts, select-like controls, tooltips, dialogs, popovers, and confirmations instead of `alert`, `confirm`, `prompt`, native `title` tooltips, or styled product `<select>` controls.
 - **Template Rule:** Reusable notices and select-like controls should come from DOM templates, then be wired by modules. This keeps the app dependency-free while preventing one-off browser-default UI.
 - **Accessibility Rule:** Custom primitives must keep roles, labels, keyboard navigation, focus-visible states, and mobile touch targets.
 
@@ -242,13 +242,13 @@ The composer is the product's anchor. It should stay centered before the first m
 - **Do** make local service state real and visible: Ollama connected/offline, active model, Wan configured/unconfigured.
 - **Do** keep user-facing copy fully English with consistent terms.
 - **Do** use real semantic controls for clickable UI.
-- **Do** use Flora's custom templates for toasts, select-like controls, and tooltip affordances.
+- **Do** use Fauna's custom templates for toasts, select-like controls, and tooltip affordances.
 - **Do** keep product density calm and scannable.
 
 ### Don't:
 
-- **Don't** make Flora feel like a generic SaaS landing page.
-- **Don't** make Flora feel like a noisy AI demo.
+- **Don't** make Fauna feel like a generic SaaS landing page.
+- **Don't** make Fauna feel like a noisy AI demo.
 - **Don't** use a glassy gradient chatbot clone style.
 - **Don't** turn the interface into a cluttered enterprise dashboard.
 - **Don't** use `Free plan`, `Upgrade`, or plan-language unless the product truly has accounts and billing.

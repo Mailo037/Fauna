@@ -6,8 +6,8 @@
     <title>Fauna</title>
     <meta name="description" content="Fauna is a calm, local-first AI workspace for prompting local models, generating media, and building without leaving your machine." />
     <meta name="theme-color" content="#5b7cfa" />
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="apple-touch-icon" href="favicon.svg">
+    <link rel="icon" type="image/png" href="favicon.png">
+    <link rel="apple-touch-icon" href="favicon.png">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -18,6 +18,71 @@
         <div data-include="components/main-header.html"></div>
         <div data-include="components/welcome.html"></div>
 
+        <section id="libraryView" class="library-view" aria-labelledby="libraryTitle" hidden>
+            <h1 id="libraryTitle" class="visually-hidden">Library</h1>
+            <div class="library-shell">
+                <div class="library-toolbar" role="toolbar" aria-label="Library controls">
+                    <div class="library-toolbar-left">
+                        <div class="library-filter-group" role="group" aria-label="Library filters">
+                            <button class="library-filter active" type="button" data-library-filter="all" aria-pressed="true">All</button>
+                            <button class="library-filter" type="button" data-library-filter="images" aria-pressed="false">Images</button>
+                            <button class="library-filter" type="button" data-library-filter="videos" aria-pressed="false">Videos</button>
+                            <button class="library-filter" type="button" data-library-filter="code" aria-pressed="false">Code</button>
+                        </div>
+                        <div class="library-layout-group" role="group" aria-label="Library layout">
+                            <button class="library-layout-toggle active" type="button" data-library-layout="grid" aria-pressed="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="4" y="4" width="6" height="6" rx="1.4"></rect>
+                                    <rect x="14" y="4" width="6" height="6" rx="1.4"></rect>
+                                    <rect x="4" y="14" width="6" height="6" rx="1.4"></rect>
+                                    <rect x="14" y="14" width="6" height="6" rx="1.4"></rect>
+                                </svg>
+                                <span>Grid</span>
+                            </button>
+                            <button class="library-layout-toggle" type="button" data-library-layout="list" aria-pressed="false">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M8 6h12"></path>
+                                    <path d="M8 12h12"></path>
+                                    <path d="M8 18h12"></path>
+                                    <path d="M4 6h.01"></path>
+                                    <path d="M4 12h.01"></path>
+                                    <path d="M4 18h.01"></path>
+                                </svg>
+                                <span>List</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="library-toolbar-actions">
+                        <button id="libraryUploadButton" class="library-selection-btn library-upload-btn" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M12 21V9"></path>
+                                <path d="m7 14 5-5 5 5"></path>
+                                <path d="M5 3h14"></path>
+                            </svg>
+                            <span>Upload</span>
+                        </button>
+                        <input id="libraryUploadInput" type="file" multiple hidden accept="image/*,video/*,.html,.htm,.css,.js,.mjs,.ts,.tsx,.jsx,.json,.md,.py,.txt,.csv,.sh,.ps1">
+                        <div class="library-selection-actions" role="group" aria-label="Library selection">
+                            <span id="librarySelectionCount" class="library-selection-count" aria-live="polite">0 selected</span>
+                            <button id="librarySelectVisible" class="library-selection-btn" type="button">Select all</button>
+                            <button id="libraryClearSelection" class="library-selection-btn" type="button" disabled hidden>Clear</button>
+                            <button id="libraryDeleteSelected" class="library-selection-btn library-selection-btn-danger" type="button" disabled hidden>Delete</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="libraryGrid" class="library-grid" aria-live="polite"></div>
+                <div id="libraryEmpty" class="library-empty" hidden>
+                    <div class="library-empty-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 19.5V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-1.5Z"></path>
+                            <path d="M10 3h8a2 2 0 0 1 2 2v14.5A2 2 0 0 1 18 21h-8"></path>
+                            <path d="m14 9 2 2 3-4"></path>
+                        </svg>
+                    </div>
+                    <h2>No library items</h2>
+                </div>
+            </div>
+        </section>
         <div id="chat" class="chat-stream"></div>
         <div data-include="components/composer.html"></div>
     </main>
@@ -25,6 +90,6 @@
     <div data-include="components/overlays.html"></div>
     <div data-include="components/templates.html"></div>
 
-    <script type="module" src="app-shell.js"></script>
+    <script type="module" src="app-shell.js?v=20260702-voice-pricing-copy"></script>
 </body>
 </html>

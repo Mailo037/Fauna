@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Small localhost bridge for Flora.
+Small localhost bridge for Fauna.
 
 The browser app cannot access arbitrary local files or execute terminal commands
 without a local helper. This server is intentionally dependency-free, binds to
@@ -10,25 +10,55 @@ without a local helper. This server is intentionally dependency-free, binds to
 from __future__ import annotations
 
 import argparse
+import base64
+import html
+import ipaddress
 import json
 import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 128_000
+MAX_OPENAI_BODY_BYTES = 32_000_000
+MAX_OPENAI_RESPONSE_BYTES = 32_000_000
+OPENAI_PROXY_TIMEOUT_SECONDS = 180
+MAX_LOCAL_AI_BODY_BYTES = 32_000_000
+MAX_LOCAL_AI_RESPONSE_BYTES = 32_000_000
+LOCAL_AI_PROXY_TIMEOUT_SECONDS = 180
+OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+BRIDGE_TOKEN_HEADER = "X-Fauna-Bridge-Token"
+LEGACY_BRIDGE_TOKEN_HEADER = "X-" + "Flo" + "ra-Bridge-Token"
+ALLOWED_OPENAI_PATHS = {
+    "/audio/speech",
+    "/audio/transcriptions",
+    "/files",
+    "/images/edits",
+    "/images/generations",
+    "/models",
+    "/realtime/calls",
+    "/responses",
+}
+OPENAI_FILE_PATH_RE = re.compile(r"^/files/[A-Za-z0-9_.-]+$")
 MAX_TEXT_BYTES = 160_000
 MAX_EXEC_SECONDS = 60
+WEB_FETCH_MAX_BYTES = 160_000
+WEB_FETCH_TIMEOUT_SECONDS = 20
+WEB_FETCH_MAX_REDIRECTS = 5
+WEB_FETCH_USER_AGENT = f"Fauna-Bridge/{VERSION} (+local user-requested fetch)"
 SKIPPED_DIRS = {
     ".git",
     ".hg",
@@ -53,6 +83,14 @@ DANGEROUS_COMMAND_PATTERNS = [
     r"\bdel\s+/[^\n]*[sqf][^\n]*(?:[A-Za-z]:\\|\\Windows\\|\\Users\\)",
     r"\bRemove-Item\b[^\n]*(?:-Recurse|-r)\b[^\n]*(?:[A-Za-z]:\\|/|~|\\Windows\\|\\Users\\)",
 ]
+
+
+class NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        return None
+
+
+WEB_FETCH_OPENER = build_opener(NoRedirectHandler)
 
 
 class BridgeConfig:
@@ -80,7 +118,8 @@ def set_cors_headers(handler: BaseHTTPRequestHandler) -> None:
         handler.send_header("Access-Control-Allow-Origin", origin)
         handler.send_header("Vary", "Origin")
     handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    handler.send_header("Access-Control-Allow-Headers", "Content-Type, X-Flora-Bridge-Token, Authorization")
+    allowed_headers = f"Content-Type, {BRIDGE_TOKEN_HEADER}, {LEGACY_BRIDGE_TOKEN_HEADER}, Authorization"
+    handler.send_header("Access-Control-Allow-Headers", allowed_headers)
     handler.send_header("Access-Control-Max-Age", "600")
 
 
@@ -189,6 +228,172 @@ def read_text_file(root: Path, requested: str, max_bytes: int) -> dict[str, Any]
     }
 
 
+def public_ip_allowed(address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def local_ai_ip_allowed(address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+def validate_local_ai_url(raw_url: Any) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        raise ValueError("Local AI URL is required")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise PermissionError("Local AI endpoints must use http or https")
+    if parsed.username or parsed.password:
+        raise PermissionError("Local AI URLs with embedded credentials are not allowed")
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Local AI URL must include a hostname")
+
+    try:
+        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve Local AI host: {host}") from exc
+
+    if not addresses:
+        raise PermissionError("Local AI host did not resolve to an address")
+    for address in addresses:
+        ip_text = address[4][0]
+        if not local_ai_ip_allowed(ip_text):
+            raise PermissionError("Local AI endpoints must resolve to localhost, private, or link-local addresses")
+
+    return parsed._replace(fragment="").geturl()
+
+
+def validate_public_http_url(raw_url: Any) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        raise ValueError("URL is required")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise PermissionError("Only http and https URLs can be inspected")
+    if parsed.username or parsed.password:
+        raise PermissionError("URLs with embedded credentials are not allowed")
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("URL must include a hostname")
+    if host.lower() in {"localhost", "localhost.localdomain"} or host.lower().endswith(".localhost"):
+        raise PermissionError("Localhost URLs are not allowed for web inspection")
+
+    try:
+        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve URL host: {host}") from exc
+
+    if not addresses:
+        raise PermissionError("URL host did not resolve to an address")
+    for address in addresses:
+        ip_text = address[4][0]
+        if not public_ip_allowed(ip_text):
+            raise PermissionError("Private, local, reserved, and link-local network addresses are not allowed")
+
+    return parsed._replace(fragment="").geturl()
+
+
+def read_limited_web_body(response: Any, max_bytes: int) -> tuple[bytes, bool]:
+    body = response.read(max_bytes + 1)
+    truncated = len(body) > max_bytes
+    return body[:max_bytes], truncated
+
+
+def decode_web_body(body: bytes, content_type: str) -> str:
+    charset_match = re.search(r"charset=([\w.-]+)", content_type, re.IGNORECASE)
+    charset = charset_match.group(1) if charset_match else "utf-8"
+    try:
+        return body.decode(charset, errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
+def normalize_web_text(text: str) -> str:
+    return "\n".join(
+        line.strip()
+        for line in re.sub(r"[ \t]+", " ", text.replace("\xa0", " ")).splitlines()
+        if line.strip()
+    ).strip()
+
+
+def html_to_readable_text(raw_html: str) -> tuple[str, str]:
+    title_match = re.search(r"(?is)<title[^>]*>(.*?)</title>", raw_html)
+    title = normalize_web_text(html.unescape(re.sub(r"(?is)<[^>]+>", " ", title_match.group(1)))) if title_match else ""
+
+    text = re.sub(r"(?is)<!--.*?-->", " ", raw_html)
+    text = re.sub(r"(?is)<(script|style|noscript|svg|canvas|iframe)[^>]*>.*?</\1>", " ", text)
+    text = re.sub(r"(?i)<\s*br\s*/?\s*>", "\n", text)
+    text = re.sub(r"(?i)</\s*(p|div|section|article|header|main|li|h[1-6]|tr|td|th)\s*>", "\n", text)
+    text = re.sub(r"(?is)<[^>]+>", " ", text)
+    text = html.unescape(text)
+    return title, normalize_web_text(text)
+
+
+def readable_web_content(raw_text: str, content_type: str) -> tuple[str, str]:
+    if "html" in content_type.lower() or re.search(r"(?is)^\s*<!doctype html|^\s*<html[\s>]", raw_text):
+        return html_to_readable_text(raw_text)
+    return "", normalize_web_text(raw_text)
+
+
+def fetch_public_url(payload: dict[str, Any]) -> dict[str, Any]:
+    original_url = str(payload.get("url") or "").strip()
+    current_url = validate_public_http_url(original_url)
+    max_bytes = clamp_int(payload.get("maxBytes"), WEB_FETCH_MAX_BYTES, 1, WEB_FETCH_MAX_BYTES)
+
+    for _redirect_index in range(WEB_FETCH_MAX_REDIRECTS + 1):
+        request = Request(
+            current_url,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+                "User-Agent": WEB_FETCH_USER_AGENT,
+            },
+            method="GET",
+        )
+        try:
+            response = WEB_FETCH_OPENER.open(request, timeout=WEB_FETCH_TIMEOUT_SECONDS)
+        except HTTPError as exc:
+            if 300 <= exc.code < 400:
+                location = exc.headers.get("Location")
+                if not location:
+                    raise ValueError("Redirect response did not include a Location header") from exc
+                current_url = validate_public_http_url(urljoin(current_url, location))
+                continue
+            response = exc
+        except URLError as exc:
+            raise ValueError(f"URL fetch failed: {exc.reason}") from exc
+
+        with response:
+            body, truncated = read_limited_web_body(response, max_bytes)
+            content_type = response.headers.get("Content-Type", "")
+            raw_text = decode_web_body(body, content_type)
+            title, content = readable_web_content(raw_text, content_type)
+            return {
+                "url": original_url,
+                "finalUrl": response.geturl() or current_url,
+                "status": int(getattr(response, "status", getattr(response, "code", 0)) or 0),
+                "contentType": content_type,
+                "title": title,
+                "content": content,
+                "truncated": truncated,
+            }
+
+    raise PermissionError("Too many redirects while inspecting URL")
+
+
 def command_is_blocked(command: str) -> str | None:
     normalized = command.strip()
     if not normalized:
@@ -264,7 +469,256 @@ def run_command(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]
         }
 
 
-class FloraBridgeHandler(BaseHTTPRequestHandler):
+def clean_header_value(value: Any, max_length: int = 300) -> str:
+    return str(value or "").replace("\r", "").replace("\n", "")[:max_length]
+
+
+def safe_multipart_token(value: Any, fallback: str) -> str:
+    text = str(value or fallback).replace("\r", "").replace("\n", "").replace('"', "")
+    return text or fallback
+
+
+def normalize_openai_path(value: Any) -> str:
+    path = str(value or "").strip()
+    if not path.startswith("/") or "://" in path or "\\" in path:
+        raise ValueError("Invalid OpenAI path")
+    route = path.split("?", 1)[0]
+    if route not in ALLOWED_OPENAI_PATHS and not OPENAI_FILE_PATH_RE.match(route):
+        raise PermissionError("OpenAI endpoint is not allowed by this bridge")
+    return path
+
+
+def openai_passthrough_headers(payload_headers: Any, api_key: str) -> dict[str, str]:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": f"Fauna-Bridge/{VERSION}",
+    }
+    if isinstance(payload_headers, dict):
+        accept = payload_headers.get("Accept") or payload_headers.get("accept")
+        if accept:
+            headers["Accept"] = clean_header_value(accept)
+    return headers
+
+
+def encode_multipart_fields(fields: Any) -> tuple[bytes, str]:
+    if not isinstance(fields, list):
+        raise ValueError("Multipart OpenAI body must include a fields list")
+
+    boundary = f"----FaunaBridge{secrets.token_hex(16)}"
+    chunks: list[bytes] = []
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        name = safe_multipart_token(field.get("name"), "")
+        if not name:
+            continue
+
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        if "dataBase64" in field:
+            filename = safe_multipart_token(field.get("fileName"), "upload.bin")
+            mime_type = clean_header_value(field.get("mimeType") or "application/octet-stream")
+            chunks.append(
+                (
+                    f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                    f"Content-Type: {mime_type}\r\n\r\n"
+                ).encode("utf-8")
+            )
+            chunks.append(base64.b64decode(str(field.get("dataBase64") or ""), validate=True))
+            chunks.append(b"\r\n")
+        else:
+            chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+            chunks.append(str(field.get("value") or "").encode("utf-8"))
+            chunks.append(b"\r\n")
+
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks), boundary
+
+
+def build_openai_request_body(body_payload: Any) -> tuple[bytes | None, dict[str, str]]:
+    if body_payload in (None, ""):
+        return None, {}
+    if not isinstance(body_payload, dict):
+        return str(body_payload).encode("utf-8"), {"Content-Type": "text/plain; charset=utf-8"}
+
+    kind = str(body_payload.get("kind") or "text").lower()
+    if kind == "json":
+        return (
+            json.dumps(body_payload.get("value") or {}, ensure_ascii=False).encode("utf-8"),
+            {"Content-Type": "application/json"},
+        )
+    if kind == "text":
+        content_type = clean_header_value(body_payload.get("contentType") or "text/plain; charset=utf-8")
+        return str(body_payload.get("value") or "").encode("utf-8"), {"Content-Type": content_type}
+    if kind == "base64":
+        content_type = clean_header_value(body_payload.get("contentType") or "application/octet-stream")
+        return base64.b64decode(str(body_payload.get("dataBase64") or ""), validate=True), {"Content-Type": content_type}
+    if kind == "multipart":
+        body, boundary = encode_multipart_fields(body_payload.get("fields"))
+        return body, {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+
+    raise ValueError("Unsupported OpenAI body type")
+
+
+def read_limited_openai_body(response: Any) -> tuple[bytes, bool]:
+    body = response.read(MAX_OPENAI_RESPONSE_BYTES + 1)
+    truncated = len(body) > MAX_OPENAI_RESPONSE_BYTES
+    return body[:MAX_OPENAI_RESPONSE_BYTES], truncated
+
+
+def build_openai_proxy_request(payload: dict[str, Any]) -> Request:
+    api_key = str(payload.get("apiKey") or "").strip()
+    if not api_key:
+        raise PermissionError("OpenAI API key is missing")
+
+    method = str(payload.get("method") or "POST").upper()
+    if method not in {"DELETE", "GET", "POST"}:
+        raise PermissionError("OpenAI bridge supports DELETE, GET, and POST only")
+
+    path = normalize_openai_path(payload.get("path"))
+    body, body_headers = build_openai_request_body(payload.get("body"))
+    if method in {"DELETE", "GET"}:
+        body = None
+        body_headers = {}
+
+    headers = openai_passthrough_headers(payload.get("headers"), api_key)
+    headers.update(body_headers)
+    return Request(f"{OPENAI_API_BASE_URL}{path}", data=body, headers=headers, method=method)
+
+
+def proxy_openai_request(payload: dict[str, Any]) -> dict[str, Any]:
+    request = build_openai_proxy_request(payload)
+
+    try:
+        with urlopen(request, timeout=OPENAI_PROXY_TIMEOUT_SECONDS) as response:
+            response_body, truncated = read_limited_openai_body(response)
+            response_headers = dict(response.headers.items())
+            status = int(response.status)
+    except HTTPError as exc:
+        response_body, truncated = read_limited_openai_body(exc)
+        response_headers = dict(exc.headers.items())
+        status = int(exc.code)
+    except URLError as exc:
+        return {"ok": False, "error": f"OpenAI request failed: {exc.reason}"}
+
+    return {
+        "ok": True,
+        "status": status,
+        "headers": {
+            key: value
+            for key, value in response_headers.items()
+            if key.lower() in {"content-type", "openai-request-id", "x-request-id"}
+        },
+        "bodyBase64": base64.b64encode(response_body).decode("ascii"),
+        "truncated": truncated,
+    }
+
+
+def send_openai_stream_headers(handler: BaseHTTPRequestHandler, status: int, response_headers: dict[str, str]) -> None:
+    handler.send_response(status)
+    set_cors_headers(handler)
+    for key, value in response_headers.items():
+        if key.lower() in {"content-type", "openai-request-id", "x-request-id"}:
+            handler.send_header(key, value)
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.end_headers()
+
+
+def stream_openai_request(payload: dict[str, Any], handler: BaseHTTPRequestHandler) -> None:
+    request = build_openai_proxy_request(payload)
+
+    try:
+        response = urlopen(request, timeout=OPENAI_PROXY_TIMEOUT_SECONDS)
+    except HTTPError as exc:
+        response_body, _truncated = read_limited_openai_body(exc)
+        response_headers = dict(exc.headers.items())
+        handler.send_response(int(exc.code))
+        set_cors_headers(handler)
+        for key, value in response_headers.items():
+            if key.lower() in {"content-type", "openai-request-id", "x-request-id"}:
+                handler.send_header(key, value)
+        handler.send_header("Content-Length", str(len(response_body)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.end_headers()
+        handler.wfile.write(response_body)
+        return
+    except URLError as exc:
+        json_response(handler, 502, {"ok": False, "error": f"OpenAI request failed: {exc.reason}"})
+        return
+
+    with response:
+        send_openai_stream_headers(handler, int(response.status), dict(response.headers.items()))
+        while True:
+            chunk = response.read(8192)
+            if not chunk:
+                break
+            try:
+                handler.wfile.write(chunk)
+                handler.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                break
+
+
+def read_limited_local_ai_body(response: Any) -> tuple[bytes, bool]:
+    body = response.read(MAX_LOCAL_AI_RESPONSE_BYTES + 1)
+    truncated = len(body) > MAX_LOCAL_AI_RESPONSE_BYTES
+    return body[:MAX_LOCAL_AI_RESPONSE_BYTES], truncated
+
+
+def local_ai_passthrough_headers(payload_headers: Any) -> dict[str, str]:
+    headers = {"User-Agent": f"Fauna-Bridge/{VERSION}"}
+    if isinstance(payload_headers, dict):
+        accept = payload_headers.get("Accept") or payload_headers.get("accept")
+        if accept:
+            headers["Accept"] = clean_header_value(accept)
+    return headers
+
+
+def build_local_ai_proxy_request(payload: dict[str, Any]) -> Request:
+    method = str(payload.get("method") or "POST").upper()
+    if method not in {"GET", "POST"}:
+        raise PermissionError("Local AI bridge supports GET and POST only")
+
+    url = validate_local_ai_url(payload.get("url"))
+    body, body_headers = build_openai_request_body(payload.get("body"))
+    if method == "GET":
+        body = None
+        body_headers = {}
+
+    headers = local_ai_passthrough_headers(payload.get("headers"))
+    headers.update(body_headers)
+    return Request(url, data=body, headers=headers, method=method)
+
+
+def proxy_local_ai_request(payload: dict[str, Any]) -> dict[str, Any]:
+    request = build_local_ai_proxy_request(payload)
+
+    try:
+        with urlopen(request, timeout=LOCAL_AI_PROXY_TIMEOUT_SECONDS) as response:
+            response_body, truncated = read_limited_local_ai_body(response)
+            response_headers = dict(response.headers.items())
+            status = int(response.status)
+    except HTTPError as exc:
+        response_body, truncated = read_limited_local_ai_body(exc)
+        response_headers = dict(exc.headers.items())
+        status = int(exc.code)
+    except URLError as exc:
+        return {"ok": False, "error": f"Local AI request failed: {exc.reason}"}
+
+    return {
+        "ok": True,
+        "status": status,
+        "headers": {
+            key: value
+            for key, value in response_headers.items()
+            if key.lower() in {"content-type", "x-request-id"}
+        },
+        "bodyBase64": base64.b64encode(response_body).decode("ascii"),
+        "truncated": truncated,
+    }
+
+
+class FaunaBridgeHandler(BaseHTTPRequestHandler):
     config: BridgeConfig
 
     def log_message(self, format: str, *args: Any) -> None:
@@ -320,7 +774,12 @@ class FloraBridgeHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
-        if length > MAX_BODY_BYTES:
+        max_body_bytes = MAX_BODY_BYTES
+        if parsed.path == "/openai":
+            max_body_bytes = MAX_OPENAI_BODY_BYTES
+        elif parsed.path == "/local-ai":
+            max_body_bytes = MAX_LOCAL_AI_BODY_BYTES
+        if length > max_body_bytes:
             json_response(self, 413, {"ok": False, "error": "Request body is too large"})
             return
 
@@ -329,6 +788,18 @@ class FloraBridgeHandler(BaseHTTPRequestHandler):
             payload = json.loads(body or "{}")
             if parsed.path == "/exec":
                 result = run_command(self.config, payload)
+                json_response(self, 200, {"ok": True, **result})
+            elif parsed.path == "/openai":
+                if payload.get("streamResponse"):
+                    stream_openai_request(payload, self)
+                else:
+                    result = proxy_openai_request(payload)
+                    json_response(self, 200, result)
+            elif parsed.path == "/local-ai":
+                result = proxy_local_ai_request(payload)
+                json_response(self, 200, result)
+            elif parsed.path == "/fetch-url":
+                result = fetch_public_url(payload)
                 json_response(self, 200, {"ok": True, **result})
             else:
                 json_response(self, 404, {"ok": False, "error": "Unknown endpoint"})
@@ -340,15 +811,15 @@ class FloraBridgeHandler(BaseHTTPRequestHandler):
         token = self.config.token
         if not token:
             return True
-        header_token = self.headers.get("X-Flora-Bridge-Token", "")
+        header_token = self.headers.get(BRIDGE_TOKEN_HEADER, "") or self.headers.get(LEGACY_BRIDGE_TOKEN_HEADER, "")
         auth_header = self.headers.get("Authorization", "")
         bearer = auth_header.removeprefix("Bearer ").strip() if auth_header.startswith("Bearer ") else ""
         return secrets.compare_digest(header_token, token) or secrets.compare_digest(bearer, token)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Flora's local workspace bridge.")
-    parser.add_argument("--root", default=".", help="Workspace root directory exposed to Flora.")
+    parser = argparse.ArgumentParser(description="Run Fauna's local workspace bridge.")
+    parser.add_argument("--root", default=".", help="Workspace root directory exposed to Fauna.")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind. Keep 127.0.0.1 unless you know why.")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind.")
     parser.add_argument("--token", default="", help="Bridge token. Generated when omitted.")
@@ -364,14 +835,14 @@ def main() -> None:
         raise SystemExit(f"Workspace root does not exist or is not a directory: {root}")
 
     token = args.token or secrets.token_urlsafe(24)
-    FloraBridgeHandler.config = BridgeConfig(root, token, args.shell, args.allow_dangerous)
-    server = ThreadingHTTPServer((args.host, args.port), FloraBridgeHandler)
+    FaunaBridgeHandler.config = BridgeConfig(root, token, args.shell, args.allow_dangerous)
+    server = ThreadingHTTPServer((args.host, args.port), FaunaBridgeHandler)
 
-    print("Flora local workspace bridge")
+    print("Fauna local workspace bridge")
     print(f"URL: http://{args.host}:{args.port}")
     print(f"Root: {root}")
     print(f"Token: {token}")
-    print("Paste the URL and token into Flora Settings > Local Workspace Bridge.")
+    print("Paste the URL and token into Fauna Settings > Local Workspace Bridge.")
     print("Press Ctrl+C to stop.")
     server.serve_forever()
 

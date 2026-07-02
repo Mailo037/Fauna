@@ -5,7 +5,7 @@ export function createSidebarController({
     overlay = document.getElementById("sidebarOverlay"),
     toggles = document.querySelectorAll(".sidebar-toggle-btn"),
     collapseToggle = document.getElementById("sidebarCollapseToggle"),
-    storageKey = "floraSidebar"
+    storageKey = "faunaSidebar"
 } = {}) {
     const desktopQuery = window.matchMedia?.("(min-width: 769px)");
 

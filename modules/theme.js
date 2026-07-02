@@ -24,8 +24,8 @@ export function createThemeController({
     themeLabel = document.getElementById("themeLabel"),
     accentButtons = document.querySelectorAll("[data-accent-choice]"),
     accentValue = document.getElementById("accentValue"),
-    storageKey = "floraTheme",
-    accentStorageKey = "floraAccent"
+    storageKey = "faunaTheme",
+    accentStorageKey = "faunaAccent"
 } = {}) {
     const apply = (theme) => {
         const normalized = theme === "light" ? "light" : "dark";

@@ -2,7 +2,7 @@
 
 ## Project Snapshot
 
-Flora AI is a static, client-side playground. There is no bundler, package manager, or build step in this repository.
+Fauna AI is a static, client-side playground. There is no bundler, package manager, or build step in this repository.
 
 Primary files:
 
@@ -34,7 +34,7 @@ This app expects these optional local services:
 
 - Ollama chat API: `http://localhost:11434/api/chat`
 - ComfyUI/Wan video endpoint: `http://localhost:8188`
-- Flora workspace bridge: `http://127.0.0.1:8765`
+- Fauna workspace bridge: `http://127.0.0.1:8765`
 
 Start the optional workspace bridge from the repository root when local file/terminal access is needed:
 
@@ -54,10 +54,10 @@ It also links to browser/web services for search and image generation, including
 - Add new configurable constants near the existing constants at the top of `script.js`.
 - Keep user-facing labels concise, consistent, and fully English.
 - Preserve keyboard, mobile, and accessibility affordances when changing controls.
-- Never use built-in browser UI for product feedback, help, or styled controls. Use custom Flora templates/components for toasts, select-like controls, tooltips, dialogs, popovers, and confirmations instead of `alert`, `confirm`, `prompt`, native `title` tooltips, or styled product `<select>` controls.
+- Never use built-in browser UI for product feedback, help, or styled controls. Use custom Fauna templates/components for toasts, select-like controls, tooltips, dialogs, popovers, and confirmations instead of `alert`, `confirm`, `prompt`, native `title` tooltips, or styled product `<select>` controls.
 - Keep the code sandbox restrictive. Do not loosen iframe sandboxing or execute user-provided code in the page context.
 - Keep local workspace access opt-in through `local-bridge.py`; never make the browser page directly assume unrestricted filesystem or shell access.
-- When adding local storage, use clear `flora...` key names and define them as constants.
+- When adding local storage, use clear `fauna...` key names and define them as constants.
 - Avoid unrelated rewrites, formatting churn, or large refactors during feature work.
 
 ## Manual Test Checklist

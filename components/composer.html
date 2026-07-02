@@ -7,41 +7,51 @@
         <div id="previewContainer" class="preview-container"></div>
         <input type="file" id="fileInput" multiple style="display: none;" />
 
-        <textarea id="prompt" rows="1" placeholder="Message Fauna"></textarea>
+        <div id="slashCommandPalette" class="slash-command-palette" role="listbox" aria-label="Slash commands" hidden></div>
+
+        <textarea id="prompt" rows="1" placeholder="Message Fauna" aria-controls="slashCommandPalette" aria-autocomplete="list"></textarea>
 
         <div class="input-action-bar">
             <div class="action-bar-left">
-                <button id="uploadButton" class="action-circle-btn" type="button" aria-label="Attach Files">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                </button>
+                <div class="attachment-menu-wrap">
+                    <button id="uploadButton" class="action-circle-btn" type="button" aria-label="Attach" aria-haspopup="menu" aria-expanded="false" aria-controls="attachmentMenu">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    <div id="attachmentMenu" class="attachment-menu" role="menu" aria-label="Attach options" hidden>
+                        <button id="attachmentUploadFile" class="attachment-menu-item" type="button" role="menuitem">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+                            <span>Upload file</span>
+                        </button>
+                        <button id="attachmentChooseLibrary" class="attachment-menu-item" type="button" role="menuitem">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-1.5Z"></path><path d="M10 3h8a2 2 0 0 1 2 2v14.5A2 2 0 0 1 18 21h-8"></path><path d="M14 8h3"></path><path d="M14 12h3"></path></svg>
+                            <span>Choose from Library</span>
+                        </button>
+                    </div>
+                </div>
                 <div id="voiceChatControls" class="voice-chat-controls" hidden>
-                    <div id="voiceListeningPill" class="voice-listening-pill" aria-live="polite">
+                    <button id="voiceListeningPill" class="voice-listening-pill" type="button" aria-pressed="false" aria-label="Mute microphone" data-tooltip="Mute microphone">
                         <span class="voice-listening-dots" aria-hidden="true">
                             <span></span><span></span><span></span><span></span>
                         </span>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <svg class="voice-listening-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path>
                             <path d="M19 11v1a7 7 0 0 1-14 0v-1"></path>
                             <path d="M12 19v3"></path>
                         </svg>
                         <span id="voiceListeningLabel" class="visually-hidden">Listening</span>
-                    </div>
-                    <button id="voiceReplyToggleBtn" class="voice-mode-icon-btn active" type="button" aria-pressed="true" aria-label="Voice replies on" data-tooltip="Voice replies">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    </button>
+                    <button id="voiceReplyToggleBtn" class="voice-mode-icon-btn active" type="button" aria-pressed="true" aria-label="Turn voice replies off" data-tooltip="Turn voice replies off">
+                        <svg class="voice-reply-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M11 5 6 9H3v6h3l5 4V5Z"></path>
                             <path d="M16 9.5a4 4 0 0 1 0 5"></path>
                             <path d="M19 7a8 8 0 0 1 0 10"></path>
                         </svg>
                     </button>
-                    <button id="voiceQuickSettingsBtn" class="voice-quick-settings-btn" type="button" aria-expanded="false" aria-controls="voiceQuickPanel">
+                    <button id="voiceQuickSettingsBtn" class="voice-quick-settings-btn" type="button" aria-expanded="false" aria-controls="voiceQuickPanel" aria-label="Audio settings" data-tooltip="Audio settings">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M4 7h10"></path><path d="M18 7h2"></path><path d="M16 5v4"></path>
                             <path d="M4 17h2"></path><path d="M10 17h10"></path><path d="M8 15v4"></path>
                         </svg>
-                        <span id="voiceQuickVoiceLabel">Ara</span>
-                        <span class="voice-quick-separator">·</span>
-                        <span id="voiceQuickPersonaLabel">Assistant</span>
-                        <svg class="voice-quick-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
                     </button>
                 </div>
                 <div class="tools-container">
@@ -72,31 +82,21 @@
                             </div>
                             <div class="setting-item">
                                 <div class="setting-info">
-                                    <span class="setting-title">Web Search</span>
-                                    <span class="setting-desc">Find current information and useful links online</span>
-                                </div>
-                                <label class="switch">
-                                    <input type="checkbox" id="toggleWebSearch" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="setting-item">
-                                <div class="setting-info">
-                                    <span class="setting-title">Grounding</span>
-                                    <span class="setting-desc">Anchor web answers to sources and cite links</span>
-                                </div>
-                                <label class="switch">
-                                    <input type="checkbox" id="toggleGrounding" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="setting-item">
-                                <div class="setting-info">
                                     <span class="setting-title">Google Grounding</span>
-                                    <span class="setting-desc">Add a Google results link to grounded answers</span>
+                                    <span class="setting-desc">Search Google and inspect site content when available</span>
                                 </div>
                                 <label class="switch">
                                     <input type="checkbox" id="toggleGoogleGrounding" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Approx Location</span>
+                                    <span class="setting-desc">Allow IP-based weather and rough location tools when asked</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleApproxLocation" checked>
                                     <span class="toggle-slider"></span>
                                 </label>
                             </div>
@@ -116,19 +116,6 @@
             </div>
             <div class="action-bar-right">
                 <div id="modelSwitcherHost" class="model-switcher"></div>
-                <button id="sendButton" class="run-btn" type="button" aria-label="Send message" data-tooltip="Send message">
-                    <span class="send-btn-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M5 12h13"></path>
-                            <path d="m13 6 6 6-6 6"></path>
-                        </svg>
-                    </span>
-                    <span class="send-btn-label">Send</span>
-                    <span class="shortcut-badge">Ctrl Enter</span>
-                </button>
-                <button id="stopButton" class="stop-btn" type="button" hidden aria-label="Stop generation">
-                    <span>Stop</span>
-                </button>
                 <button id="voiceButton" class="voice-btn" type="button" aria-label="Voice Input">
                     <svg id="voiceBtnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
@@ -137,28 +124,47 @@
                         <line x1="8" y1="23" x2="16" y2="23"></line>
                     </svg>
                 </button>
+                <button id="sendButton" class="run-btn" type="button" aria-label="Send message" data-tooltip="Send message">
+                    <span class="send-btn-idle-state" data-send-state="idle">
+                        <span class="send-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 19V5"></path>
+                                <path d="m6 11 6-6 6 6"></path>
+                            </svg>
+                        </span>
+                        <span class="send-btn-label">Send</span>
+                        <span class="shortcut-badge">Ctrl Enter</span>
+                    </span>
+                    <span class="send-btn-loading-state" data-send-state="loading" hidden>
+                        <span class="send-btn-loader" aria-hidden="true"></span>
+                        <span class="send-btn-label">Working...</span>
+                    </span>
+                </button>
+                <button id="stopButton" class="stop-btn" type="button" hidden aria-label="Stop generation" data-tooltip="Stop generation">
+                    <span class="stop-btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false">
+                            <rect x="5" y="5" width="14" height="14" rx="2.5"></rect>
+                        </svg>
+                    </span>
+                </button>
                 <button id="voiceStopButton" class="voice-stop-btn" type="button" hidden aria-label="Stop voice chat">Stop</button>
             </div>
         </div>
-        <section id="voiceQuickPanel" class="voice-quick-panel" hidden aria-label="Voice quick settings">
-            <div class="voice-quick-section">
-                <div class="voice-quick-heading">Voice</div>
-                <div id="voiceQuickChoices" class="voice-quick-grid" role="radiogroup" aria-label="Voice"></div>
-            </div>
-            <div class="voice-quick-section">
-                <div class="voice-quick-heading">Personality</div>
-                <div id="voicePersonalityChoices" class="voice-personality-list" role="radiogroup" aria-label="Personality"></div>
-            </div>
+        <section id="voiceQuickPanel" class="voice-quick-panel" hidden aria-label="Audio settings">
             <div class="voice-quick-section">
                 <div class="voice-quick-row">
-                    <span class="voice-quick-heading">Speed</span>
-                    <span id="voiceSpeedValue" class="voice-speed-value">1.0x</span>
+                    <div class="voice-quick-heading">Voice</div>
+                    <div id="voiceQuickVoiceLabel" class="voice-quick-current">Alloy</div>
                 </div>
-                <input id="voiceSpeedSlider" class="voice-speed-slider" type="range" min="0.7" max="1.3" step="0.1" value="1">
+                <div id="voiceQuickVoiceChoices" class="voice-quick-voice-list" role="radiogroup" aria-label="AI voice"></div>
             </div>
             <div class="voice-quick-section">
                 <div class="voice-quick-heading">Microphone</div>
-                <div id="voiceMicChoices" class="voice-mic-list" role="radiogroup" aria-label="Microphone"></div>
+                <div id="voiceMicChoices" class="voice-device-list" role="radiogroup" aria-label="Microphone"></div>
+            </div>
+            <div class="voice-quick-section">
+                <div class="voice-quick-heading">Output</div>
+                <div id="voiceOutputChoices" class="voice-device-list" role="radiogroup" aria-label="Output device"></div>
             </div>
         </section>
     </div>

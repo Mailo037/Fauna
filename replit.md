@@ -37,11 +37,11 @@ Then open `http://127.0.0.1:5000/` (or the Replit preview pane).
 - Preserve existing DOM IDs and class names — `script.js` binds to them directly.
 - Add new configurable constants near the existing constants block at the top of `script.js`.
 - Use `var(--radius-composer)` (22px) as the reference radius for any new surfaces/modals.
-- Never use native browser UI (`alert`, `confirm`, `title` tooltips, styled `<select>`); use Flora/Fauna custom templates instead.
+- Never use native browser UI (`alert`, `confirm`, `title` tooltips, styled `<select>`); use Fauna/Fauna custom templates instead.
 
 ## User preferences
 
-- App is named **Fauna** (not Flora).
+- App is named **Fauna** (not Fauna).
 - Favicon: the letter F with botanical leaf shapes visible through the letterform.
 - Settings modal: **always fixed size** — do not change it to resize when switching panes.
 - Settings modal: add new **sections** (e.g. Personalization) rather than modifying existing ones.
