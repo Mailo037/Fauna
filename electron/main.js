@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, protocol, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, protocol, session, shell } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
@@ -44,6 +45,14 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow = null;
 let bridgeProcess = null;
+let updateState = {
+  status: "idle",
+  message: "Updates ready",
+  canInstall: false,
+  availableVersion: "",
+  currentVersion: app.getVersion(),
+  progress: 0
+};
 
 function getAppRoot() {
   return path.resolve(__dirname, "..");
@@ -481,12 +490,197 @@ async function startWorkspaceBridge() {
   return { endpoint, token, root: bridgeRoot };
 }
 
+function isMainWindowWebContents(webContents) {
+  return Boolean(mainWindow && webContents && webContents.id === mainWindow.webContents.id);
+}
+
+function configureMediaPermissions() {
+  const allowedPermissions = new Set([
+    "media",
+    "microphone",
+    "camera",
+    "audioCapture",
+    "videoCapture",
+    "display-capture"
+  ]);
+
+  const isAllowed = (webContents, permission) => (
+    allowedPermissions.has(permission) && isMainWindowWebContents(webContents)
+  );
+
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(isAllowed(webContents, permission));
+  });
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => (
+    isAllowed(webContents, permission)
+  ));
+}
+
+function sendToRenderer(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(channel, payload);
+}
+
+function getNavigationState() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { canGoBack: false, canGoForward: false };
+  }
+  return {
+    canGoBack: mainWindow.webContents.canGoBack(),
+    canGoForward: mainWindow.webContents.canGoForward()
+  };
+}
+
+function sendNavigationState() {
+  sendToRenderer("fauna:navigation-changed", getNavigationState());
+}
+
+function sendWindowState() {
+  sendToRenderer("fauna:window-state-changed", {
+    isMaximized: Boolean(mainWindow?.isMaximized())
+  });
+}
+
+function normalizeUpdateInfo(info = {}) {
+  return {
+    version: String(info.version || ""),
+    releaseName: String(info.releaseName || ""),
+    releaseDate: String(info.releaseDate || ""),
+    releaseNotes: Array.isArray(info.releaseNotes) ? info.releaseNotes : info.releaseNotes || ""
+  };
+}
+
+function setUpdateState(patch = {}) {
+  updateState = {
+    ...updateState,
+    ...patch,
+    currentVersion: app.getVersion(),
+    updatedAt: new Date().toISOString()
+  };
+  sendToRenderer("fauna:update-status", updateState);
+  return updateState;
+}
+
+function configureAutoUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("checking-for-update", () => {
+    setUpdateState({
+      status: "checking",
+      message: "Checking for updates...",
+      canInstall: false,
+      progress: 0
+    });
+  });
+
+  autoUpdater.on("update-available", info => {
+    const normalizedInfo = normalizeUpdateInfo(info);
+    setUpdateState({
+      status: "available",
+      message: normalizedInfo.version ? `Version ${normalizedInfo.version} is available` : "Update available",
+      canInstall: true,
+      availableVersion: normalizedInfo.version,
+      info: normalizedInfo,
+      progress: 0
+    });
+  });
+
+  autoUpdater.on("update-not-available", info => {
+    setUpdateState({
+      status: "current",
+      message: "Fauna is up to date",
+      canInstall: false,
+      availableVersion: normalizeUpdateInfo(info).version || "",
+      progress: 0
+    });
+  });
+
+  autoUpdater.on("download-progress", progress => {
+    setUpdateState({
+      status: "downloading",
+      message: `Downloading update ${Math.round(progress.percent || 0)}%`,
+      canInstall: false,
+      progress: Math.max(0, Math.min(100, Number(progress.percent) || 0))
+    });
+  });
+
+  autoUpdater.on("update-downloaded", info => {
+    const normalizedInfo = normalizeUpdateInfo(info);
+    setUpdateState({
+      status: "downloaded",
+      message: "Update ready to install",
+      canInstall: true,
+      availableVersion: normalizedInfo.version || updateState.availableVersion,
+      info: normalizedInfo,
+      progress: 100
+    });
+  });
+
+  autoUpdater.on("error", error => {
+    setUpdateState({
+      status: "error",
+      message: error?.message || "Update check failed",
+      canInstall: false
+    });
+  });
+}
+
+async function checkForDesktopUpdate() {
+  if (!app.isPackaged) {
+    return setUpdateState({
+      status: "dev",
+      message: "Update checks run in packaged builds",
+      canInstall: false,
+      progress: 0
+    });
+  }
+
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    setUpdateState({
+      status: "error",
+      message: error?.message || "Update check failed",
+      canInstall: false
+    });
+  }
+  return updateState;
+}
+
+async function installDesktopUpdate() {
+  if (updateState.status === "downloaded") {
+    autoUpdater.quitAndInstall(false, true);
+    return setUpdateState({
+      status: "installing",
+      message: "Installing update...",
+      canInstall: false
+    });
+  }
+
+  if (updateState.status === "available") {
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (error) {
+      setUpdateState({
+        status: "error",
+        message: error?.message || "Update download failed",
+        canInstall: false
+      });
+    }
+  }
+  return updateState;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 900,
     minWidth: 940,
     minHeight: 680,
+    frame: false,
+    autoHideMenuBar: true,
     backgroundColor: "#0f172a",
     title: "Fauna",
     icon: path.join(getAppRoot(), "favicon.png"),
@@ -499,12 +693,28 @@ function createWindow() {
     }
   });
 
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.setAutoHideMenuBar(true);
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) {
       shell.openExternal(url);
       return { action: "deny" };
     }
     return { action: "allow" };
+  });
+
+  mainWindow.on("maximize", sendWindowState);
+  mainWindow.on("unmaximize", sendWindowState);
+  mainWindow.on("restore", sendWindowState);
+  mainWindow.on("enter-full-screen", sendWindowState);
+  mainWindow.on("leave-full-screen", sendWindowState);
+  mainWindow.webContents.on("did-navigate", sendNavigationState);
+  mainWindow.webContents.on("did-navigate-in-page", sendNavigationState);
+  mainWindow.webContents.on("did-finish-load", () => {
+    sendNavigationState();
+    sendWindowState();
+    sendToRenderer("fauna:update-status", updateState);
   });
 
   mainWindow.loadURL(`${APP_PROTOCOL}://app/index.html`);
@@ -528,14 +738,50 @@ function registerIpc() {
     appDataPath: getUserDataRoot(),
     chatsPath: getChatsRoot(),
     bridgeEndpoint: storageGetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY),
-    bridgeRoot: getUserDataRoot()
+    bridgeRoot: getUserDataRoot(),
+    version: app.getVersion()
   }));
+  ipcMain.handle("fauna:window-minimize", () => {
+    mainWindow?.minimize();
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:window-toggle-maximize", () => {
+    if (!mainWindow) return { ok: false, isMaximized: false };
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+    sendWindowState();
+    return { ok: true, isMaximized: mainWindow.isMaximized() };
+  });
+  ipcMain.handle("fauna:window-close", () => {
+    mainWindow?.close();
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:window-state", () => ({
+    isMaximized: Boolean(mainWindow?.isMaximized())
+  }));
+  ipcMain.handle("fauna:navigation-state", () => getNavigationState());
+  ipcMain.handle("fauna:navigation-back", () => {
+    if (mainWindow?.webContents.canGoBack()) mainWindow.webContents.goBack();
+    return getNavigationState();
+  });
+  ipcMain.handle("fauna:navigation-forward", () => {
+    if (mainWindow?.webContents.canGoForward()) mainWindow.webContents.goForward();
+    return getNavigationState();
+  });
+  ipcMain.handle("fauna:update-state", () => updateState);
+  ipcMain.handle("fauna:update-check", () => checkForDesktopUpdate());
+  ipcMain.handle("fauna:update-install", () => installDesktopUpdate());
 }
 
 app.whenReady().then(async () => {
   ensureDirSync(getUserDataRoot());
   protocol.handle(APP_PROTOCOL, handleAppProtocol);
   protocol.handle(FILE_PROTOCOL, handleFileProtocol);
+  configureMediaPermissions();
+  configureAutoUpdater();
   registerIpc();
   try {
     await startWorkspaceBridge();
@@ -543,6 +789,9 @@ app.whenReady().then(async () => {
     console.warn("Fauna desktop could not start the workspace bridge:", error);
   }
   createWindow();
+  setTimeout(() => {
+    void checkForDesktopUpdate();
+  }, 4000);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

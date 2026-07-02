@@ -151,7 +151,11 @@ const FAUNA_TOOL_CALL_RE = createAssistantControlTagRegex("tool_call", "i");
 const FAUNA_TOOL_CALLS_RE = createAssistantControlTagRegex("tool_call", "gi");
 const FAUNA_TOOL_CALL_OPEN_RE = createAssistantControlOpenRegex("tool_call", "i");
 const FAUNA_TOOL_CALL_OPEN_TO_END_RE = createAssistantControlOpenToEndRegex("tool_call", "i");
-const FAUNA_TOOL_MAX_STEPS = 4;
+const DEFAULT_AGENT_MAX_STEPS_AT_A_TIME = 4;
+const DEFAULT_AGENT_MAX_STEPS_PER_RUN = 16;
+const MIN_AGENT_MAX_STEPS = 1;
+const MAX_AGENT_STEPS_AT_A_TIME = 32;
+const MAX_AGENT_STEPS_PER_RUN = 64;
 const FAUNA_TOOL_FALLBACK_RESULT_MAX_CHARS = 6000;
 const LOCAL_TOOL_RESULT_MAX_CHARS = 14000;
 const WEB_INSPECT_RESULT_MAX_CHARS = 12000;
@@ -190,6 +194,16 @@ const MEMORY_TOOL_NAME_ALIASES = {
     memory_delete: "delete_memory"
 };
 const MEMORY_TOOL_NAMES = new Set(Object.values(MEMORY_TOOL_NAME_ALIASES));
+const THINKING_TOOL_NAME_ALIASES = {
+    thinking: "thinking",
+    think: "thinking",
+    reason: "thinking",
+    reasoning: "thinking",
+    reflect: "thinking",
+    plan: "thinking",
+    continue_thinking: "thinking"
+};
+const THINKING_TOOL_NAMES = new Set(Object.values(THINKING_TOOL_NAME_ALIASES));
 const IMAGE_TOOL_NAME_ALIASES = {
     generate_image: "generate_image",
     image_generate: "generate_image",
@@ -262,6 +276,7 @@ const CLARIFYING_QUESTION_RE = createAssistantControlTagRegex("question", "i");
 const CLARIFYING_QUESTION_SYSTEM_PROMPT = `When you need user input before continuing, ask the question in your normal response and append one hidden JSON block at the end using this exact format: <fauna_question>{"questions":[{"question":"What should I know?","options":["Option A","Option B"],"allowCustom":true,"placeholder":"Type your answer..."}]}</fauna_question>. Use 1-3 concise questions. Each question may include 2-5 short options. Do not mention the XML block to the user. If you can answer well without more information, do not use this block.`;
 const MEMORY_REQUEST_RE = createAssistantControlTagRegex("memory", "gi");
 const MEMORY_SYSTEM_PROMPT = `Memory beta is enabled. Saved memories are durable user context across chats. When the user asks to inspect, search, save, update, or delete saved memories, prefer the memory tool so the answer reflects the latest local state. To request a memory tool, respond with exactly one XML block and no other text: <fauna_tool_call>{"tool":"read_memories"}</fauna_tool_call>, <fauna_tool_call>{"tool":"read_memories","query":"writing style"}</fauna_tool_call>, <fauna_tool_call>{"tool":"save_memory","text":"User prefers concise answers."}</fauna_tool_call>, or <fauna_tool_call>{"tool":"delete_memory","target":"2"}</fauna_tool_call>. Save a memory only when the user explicitly asks you to remember something or gives a stable preference, project fact, or personal detail likely to be useful later. Delete a memory only when the user asks you to forget it. After Fauna returns a tool result, answer normally.`;
+const AGENT_LOOP_SYSTEM_PROMPT = `You have an agent loop with tool-call limits. If you need more tool-backed work after several consecutive tool calls, call the thinking tool first: <fauna_tool_call>{"tool":"thinking","summary":"What I know and what I will do next."}</fauna_tool_call>. Thinking does not access external data; it resets only the consecutive step counter. The total max steps per run is still a hard stop. After useful tool results, answer the user normally instead of repeating the same tool call.`;
 const USER_LOCALE_SYSTEM_PROMPT = `Use this browser locale context as a hint for language, spelling, units, dates, and regional assumptions. Reply in the user's message language by default. If the message language is ambiguous, prefer the primary browser language. Do not claim a precise physical location; the country or region is inferred from browser locale settings.`;
 const CODE_BLOCK_SYSTEM_PROMPT = `When you include a fenced code block, always add the best language identifier after the opening fence, such as \`\`\`python, \`\`\`javascript, \`\`\`html, \`\`\`css, \`\`\`json, \`\`\`bash, or \`\`\`powershell. For a large generated file that should appear as a compact preview card instead of an expanded code block, put an HTML comment immediately before the fence, like <!-- fauna-file: index.html -->, then include the full fenced code as usual.`;
 const IMAGE_EDIT_MODEL = "moondream";
@@ -630,6 +645,8 @@ activeMaxOutputTokens = normalizeMaxOutputTokens(safeLocalStorageGet(AI_MAX_OUTP
 activeTopP = normalizeTopP(safeLocalStorageGet(AI_TOP_P_STORAGE_KEY));
 activeOllamaTopK = normalizeOllamaTopK(safeLocalStorageGet(OLLAMA_TOP_K_STORAGE_KEY));
 activeOpenAiVerbosity = normalizeOpenAiVerbosity(safeLocalStorageGet(OPENAI_VERBOSITY_STORAGE_KEY));
+activeAgentMaxStepsAtATime = normalizeAgentMaxStepsAtATime(safeLocalStorageGet(AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY));
+activeAgentMaxStepsPerRun = normalizeAgentMaxStepsPerRun(safeLocalStorageGet(AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY));
 isAiCachingEnabled = safeLocalStorageGet(AI_CACHING_STORAGE_KEY) === "true";
 activeVoiceSpeed = normalizeStoredVoiceSpeed(safeLocalStorageGet(VOICE_SPEED_STORAGE_KEY));
 isVoiceReplyEnabled = safeLocalStorageGet(VOICE_REPLY_ENABLED_STORAGE_KEY) !== "false";
@@ -679,6 +696,24 @@ function normalizeOllamaTopK(value) {
 function normalizeOpenAiVerbosity(value) {
     const verbosity = String(value || "").trim().toLowerCase();
     return ["low", "medium", "high"].includes(verbosity) ? verbosity : "medium";
+}
+
+function normalizeAgentMaxStepsAtATime(value) {
+    if (value === null || value === undefined || String(value).trim() === "") {
+        return DEFAULT_AGENT_MAX_STEPS_AT_A_TIME;
+    }
+    const steps = Number(value);
+    if (!Number.isFinite(steps)) return DEFAULT_AGENT_MAX_STEPS_AT_A_TIME;
+    return Math.min(MAX_AGENT_STEPS_AT_A_TIME, Math.max(MIN_AGENT_MAX_STEPS, Math.round(steps)));
+}
+
+function normalizeAgentMaxStepsPerRun(value) {
+    if (value === null || value === undefined || String(value).trim() === "") {
+        return DEFAULT_AGENT_MAX_STEPS_PER_RUN;
+    }
+    const steps = Number(value);
+    if (!Number.isFinite(steps)) return DEFAULT_AGENT_MAX_STEPS_PER_RUN;
+    return Math.min(MAX_AGENT_STEPS_PER_RUN, Math.max(MIN_AGENT_MAX_STEPS, Math.round(steps)));
 }
 
 function normalizeModelId(model) {
@@ -933,6 +968,12 @@ function openAiModelSupportsImages(modelId = getOpenAiChatModel()) {
         || aiCapabilityRegistry.supportsInputModality(modelId, "image");
 }
 
+function openAiModelSupportsToolCalls(modelId = getOpenAiChatModel()) {
+    return aiCapabilityRegistry.supportsToolCalling(modelId)
+        || aiCapabilityRegistry.supportsParameter(modelId, "tools")
+        || aiCapabilityRegistry.supportsParameter(modelId, "tool_choice");
+}
+
 function activeModelSupportsStreaming() {
     return isOpenAiProvider()
         ? openAiModelSupportsStreaming(getOpenAiChatModel())
@@ -1183,6 +1224,17 @@ function updateAiCallSettingsUi() {
         !(maxTokensSupported || topPSupported || topKSupported)
     );
 
+    if (agentMaxStepsAtATimeInput) {
+        agentMaxStepsAtATimeInput.value = String(activeAgentMaxStepsAtATime);
+    }
+    if (agentMaxStepsPerRunInput) {
+        agentMaxStepsPerRunInput.value = String(activeAgentMaxStepsPerRun);
+    }
+    setSettingStatus(
+        agentLoopStatus,
+        `Runs up to ${activeAgentMaxStepsPerRun} total steps; thinking resets each ${activeAgentMaxStepsAtATime}-step burst.`
+    );
+
     openAiVerbosityButtons.forEach(button => {
         const isActive = button.dataset.aiVerbosity === activeOpenAiVerbosity;
         button.classList.toggle("active", isActive);
@@ -1225,6 +1277,9 @@ function getActiveChatRequestOptions() {
     if (activeModelSupportsOpenAiVerbosity()) {
         options.text_verbosity = activeOpenAiVerbosity;
     }
+
+    options.agent_max_steps_at_a_time = activeAgentMaxStepsAtATime;
+    options.agent_max_steps_per_run = activeAgentMaxStepsPerRun;
 
     return options;
 }

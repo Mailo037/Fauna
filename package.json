@@ -8,6 +8,9 @@
     "desktop": "electron .",
     "desktop:build": "electron-builder --win"
   },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
   "devDependencies": {
     "electron": "43.0.0",
     "electron-builder": "26.15.3"
@@ -27,6 +30,7 @@
       "styles/**/*",
       "favicon.png",
       "favicon.svg",
+      "version.json",
       "local-bridge.py",
       "electron/**/*",
       "README.md",
@@ -35,6 +39,13 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Mailo037",
+        "repo": "Fauna"
+      }
+    ],
     "win": {
       "target": [
         "nsis",
@@ -42,5 +53,8 @@
       ],
       "icon": "build/icon.ico"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

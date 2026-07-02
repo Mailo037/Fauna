@@ -528,6 +528,13 @@ function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, up
 
     if (closeSidebar) sidebarController.close();
     if (updateUrl) updateWorkspaceUrlFragment({ replace: urlMode === "replace" });
+    window.setTimeout(() => {
+        if (isFaunaDesktopApp()) {
+            void refreshDesktopNavigationState();
+        } else {
+            applyWindowNavigationState();
+        }
+    }, 0);
     scheduleAnimatedSegmentIndicators();
 }
 
@@ -981,12 +988,14 @@ async function readOpenAiResponseStream(response, { signal = null, onTextDelta =
 
     const data = finalResponse || {};
     const finalText = extractOpenAiResponseText(data) || state.content.trim();
-    if (!finalText) {
+    const toolCalls = extractOpenAiResponseToolCalls(data);
+    if (!finalText && toolCalls.length === 0) {
         throw new Error("OpenAI returned an empty response.");
     }
 
     return {
         ...data,
+        __faunaToolCalls: toolCalls,
         message: {
             role: "assistant",
             content: finalText
@@ -999,6 +1008,12 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
     const modelsToTry = Array.from(new Set([preferredModel, FALLBACK_MODEL].filter(Boolean)));
     let lastError = null;
     const shouldStream = typeof streamOptions.onTextDelta === "function";
+    const faunaToolContext = options.faunaToolContext || null;
+    const ollamaTools = faunaToolContext ? buildOllamaFaunaTools(faunaToolContext) : [];
+    const ollamaOptions = { ...options };
+    delete ollamaOptions.faunaToolContext;
+    delete ollamaOptions.agent_max_steps_at_a_time;
+    delete ollamaOptions.agent_max_steps_per_run;
 
     for (const model of modelsToTry) {
         triedModels.push(model);
@@ -1012,7 +1027,8 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
                 body: JSON.stringify({
                     model,
                     messages,
-                    options,
+                    options: ollamaOptions,
+                    ...(ollamaTools.length > 0 ? { tools: ollamaTools } : {}),
                     ...(isAiCachingEnabled ? { keep_alive: OLLAMA_CACHE_KEEP_ALIVE } : {}),
                     stream: shouldStream
                 })
@@ -1032,7 +1048,8 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
                         }
                     })
                     : await res.json();
-                if (!data?.message?.content) {
+                const hasToolCalls = Array.isArray(data?.message?.tool_calls) && data.message.tool_calls.length > 0;
+                if (!data?.message?.content && !hasToolCalls) {
                     throw new Error(`${model} returned an empty response`);
                 }
                 setActiveModel(model);
@@ -1591,6 +1608,10 @@ async function sendOpenAiResponse(messages, options = {}, signal = null, streamO
         model,
         input: prepared.input
     };
+    const faunaToolContext = options.faunaToolContext || null;
+    const openAiTools = faunaToolContext && openAiModelSupportsToolCalls(model)
+        ? buildOpenAiFaunaTools(faunaToolContext)
+        : [];
 
     if (prepared.instructions) payload.instructions = prepared.instructions;
     if (shouldSendOpenAiReasoningEffort(model)) {
@@ -1610,6 +1631,10 @@ async function sendOpenAiResponse(messages, options = {}, signal = null, streamO
             ...(payload.text || {}),
             verbosity: normalizeOpenAiVerbosity(options.text_verbosity)
         };
+    }
+    if (openAiTools.length > 0) {
+        payload.tools = openAiTools;
+        payload.tool_choice = "auto";
     }
     applyOpenAiPromptCaching(payload, prepared.instructions);
 
@@ -1635,12 +1660,14 @@ async function sendOpenAiResponse(messages, options = {}, signal = null, streamO
 
     const data = await openAiJsonFetch("/responses", payload, { signal });
     const content = extractOpenAiResponseText(data);
-    if (!content) {
+    const toolCalls = extractOpenAiResponseToolCalls(data);
+    if (!content && toolCalls.length === 0) {
         throw new Error("OpenAI returned an empty response.");
     }
 
     return {
         ...data,
+        __faunaToolCalls: toolCalls,
         message: {
             role: "assistant",
             content

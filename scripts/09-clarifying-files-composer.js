@@ -435,6 +435,13 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     const allowLocalTools = allowToolCalls && hasWorkspaceBridgeAccess();
     const allowWebTools = allowToolCalls && isWebSearchEnabled;
     const allowLocationTools = allowToolCalls && isApproxLocationEnabled;
+    const faunaToolContext = { allowToolCalls, allowLocalTools, allowWebTools, allowLocationTools };
+    const requestOptions = {
+        ...options,
+        faunaToolContext
+    };
+    const maxStepsAtATime = normalizeAgentMaxStepsAtATime(options.agent_max_steps_at_a_time ?? activeAgentMaxStepsAtATime);
+    const maxStepsPerRun = normalizeAgentMaxStepsPerRun(options.agent_max_steps_per_run ?? activeAgentMaxStepsPerRun);
     const requireChatTitle = shouldRequestAssistantChatTitle(messages);
     const workingMessages = [
         { role: "system", content: buildAssistantSystemPrompt(allowLocalTools, requireChatTitle, allowWebTools, allowToolCalls, allowLocationTools) },
@@ -445,14 +452,18 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     const toolWebSources = [];
     const toolResultsBySignature = new Map();
     const duplicateToolReminders = new Set();
+    let totalToolSteps = 0;
+    let burstToolSteps = 0;
 
-    for (let step = 0; step < FAUNA_TOOL_MAX_STEPS; step += 1) {
-        const streamRenderer = progressTarget && streamOptions.enabled !== false && isAiStreamingActive()
+    while (totalToolSteps < maxStepsPerRun) {
+        const streamRenderer = progressTarget
+            && streamOptions.enabled !== false
+            && isAiStreamingActive()
             ? createAssistantStreamRenderer(progressTarget, signal)
             : null;
         let data;
         try {
-            data = await sendProviderChat(workingMessages, options, preferredModel, signal, streamRenderer
+            data = await sendProviderChat(workingMessages, requestOptions, preferredModel, signal, streamRenderer
                 ? { onTextDelta: delta => streamRenderer.append(delta) }
                 : {});
         } catch (err) {
@@ -461,15 +472,15 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
         }
         lastData = data;
         applyAssistantChatTitle(data.message?.content);
-        const toolCall = parseFaunaToolCall(data.message?.content);
-        if (toolCall && !allowToolCalls) {
+        const toolCalls = getFaunaToolCallsFromAssistantData(data);
+        if (toolCalls.length > 0 && !allowToolCalls) {
             if (data.message) {
                 data.message.content = stripAssistantControlBlocks(data.message.content)
                     || `${getActiveComposerModelLabel()} cannot call tools. Choose a tool-capable model first.`;
             }
             return data;
         }
-        if (!toolCall) {
+        if (toolCalls.length === 0) {
             if (streamRenderer) {
                 streamRenderer.finish(data.message?.content || "");
                 data.__faunaAlreadyRendered = streamRenderer.hasRendered;
@@ -481,114 +492,159 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
         }
 
         streamRenderer?.cancel();
-        if (isImageToolName(toolCall.tool)) {
-            const visibleText = stripAssistantControlBlocks(data.message?.content || "");
-            const imageResult = await executeImageGenerationToolCall(toolCall, signal, {
-                progressTarget,
-                visibleText
-            });
-            if (data.message) {
-                data.message.content = imageResult.content || visibleText || imageResult.historyContent || "";
-            }
-            data.__faunaDisplayContent = visibleText || "Generated image";
-            if (imageResult.imageUrl) {
-                data.__faunaCopyText = getGeneratedMediaCopyText(imageResult.imageUrl, data.message?.content || imageResult.historyContent || "");
-            }
-            data.__faunaAlreadyRendered = true;
-            data.__faunaPreserveRenderedContent = true;
-            data.__faunaImageToolHandled = true;
-            return data;
-        }
+        const visibleText = stripAssistantControlBlocks(data.message?.content || "");
+        const assistantToolContextContent = data.message?.content
+            || toolCalls.map(getAssistantToolPlaceholder).filter(Boolean).join("\n")
+            || "Fauna requested tool calls.";
+        let assistantContextPushed = false;
+        let continueLoop = false;
 
-        const toolSignature = getFaunaToolCallSignature(toolCall);
-        if (toolSignature && toolResultsBySignature.has(toolSignature)) {
-            const previousResult = toolResultsBySignature.get(toolSignature);
-            if (!duplicateToolReminders.has(toolSignature)) {
-                duplicateToolReminders.add(toolSignature);
-                workingMessages.push({ role: "assistant", content: data.message.content });
-                workingMessages.push({ role: "user", content: formatDuplicateFaunaToolResultForModel(toolCall, previousResult.resultText) });
-                continue;
-            }
-
-            if (data.message) {
-                data.message.content = stripAssistantControlBlocks(data.message.content)
-                    || buildFaunaToolLimitMessage(toolResultsBySignature);
-            }
-            if (toolWebSources.length > 0) {
-                data.__faunaWebSources = mergeWebSources(toolWebSources);
-            }
-            return data;
-        }
-
-        const activityItem = {
-            kind: getFaunaToolActivityKind(toolCall),
-            label: getFaunaToolActivityLabel(toolCall),
-            tool: toolCall.tool,
-            detail: getFaunaToolActivityDetail(toolCall),
-            input: getFaunaToolActivityInput(toolCall),
-            settings: isImageToolName(toolCall.tool) ? getImageActivitySettings(toolCall) : "",
-            query: isWebToolName(toolCall.tool) ? getFaunaToolActivityInput(toolCall) : "",
-            meta: "Running"
-        };
-        toolActivityItems.push(activityItem);
-        if (progressTarget) {
-            renderToolActivity(progressTarget, {
-                title: getFaunaToolProgressLabel(toolCall),
-                items: toolActivityItems
-            });
-        }
-
-        let resultText = "";
-        try {
-            const toolResult = await executeFaunaToolCall(toolCall, signal);
-            if (toolResult && typeof toolResult === "object") {
-                resultText = toolResult.text || "";
-                if (toolResult.needsUserInput) {
-                    const questionRequest = normalizeClarifyingQuestionPayload(toolResult.needsUserInput);
-                    if (!questionRequest) throw new Error("Tool requested user input with an invalid question payload.");
-                    activityItem.meta = "Waiting";
-                    if (progressTarget) {
-                        renderToolActivity(progressTarget, {
-                            title: getFaunaToolProgressLabel(toolCall),
-                            items: toolActivityItems
-                        });
-                    }
-                    if (data.message) {
-                        data.message.content = [
-                            resultText || "Waiting for your input.",
-                            createFaunaQuestionBlock(questionRequest)
-                        ].filter(Boolean).join("\n\n");
-                    }
-                    if (toolWebSources.length > 0) {
-                        data.__faunaWebSources = mergeWebSources(toolWebSources);
-                    }
-                    return data;
+        for (const toolCall of toolCalls) {
+            const isThinkingTool = isThinkingToolName(toolCall.tool);
+            if (!isThinkingTool && burstToolSteps >= maxStepsAtATime) {
+                if (data.message) {
+                    data.message.content = visibleText
+                        || `I paused after ${burstToolSteps} tool steps. The active max steps at a time is ${maxStepsAtATime}; the model must use thinking to reset that counter before more tool calls.`;
                 }
-                if (Array.isArray(toolResult.sources) && toolResult.sources.length > 0) {
-                    activityItem.sources = toolResult.sources;
-                    toolWebSources.push(...toolResult.sources);
+                if (toolWebSources.length > 0) {
+                    data.__faunaWebSources = mergeWebSources(toolWebSources);
                 }
+                return data;
+            }
+
+            if (totalToolSteps >= maxStepsPerRun) {
+                if (data.message) {
+                    data.message.content = visibleText || buildFaunaToolLimitMessage(toolResultsBySignature);
+                }
+                if (toolWebSources.length > 0) {
+                    data.__faunaWebSources = mergeWebSources(toolWebSources);
+                }
+                return data;
+            }
+
+            totalToolSteps += 1;
+            if (isThinkingTool) {
+                burstToolSteps = 0;
             } else {
-                resultText = String(toolResult || "");
+                burstToolSteps += 1;
             }
-            activityItem.meta = "Done";
-        } catch (err) {
-            resultText = `Tool failed: ${err.message}`;
-            activityItem.meta = "Failed";
-        }
-        if (toolSignature) {
-            toolResultsBySignature.set(toolSignature, { toolCall, resultText });
+
+            if (isImageToolName(toolCall.tool)) {
+                const imageResult = await executeImageGenerationToolCall(toolCall, signal, {
+                    progressTarget,
+                    visibleText
+                });
+                if (data.message) {
+                    data.message.content = imageResult.content || visibleText || imageResult.historyContent || "";
+                }
+                data.__faunaDisplayContent = visibleText || "Generated image";
+                if (imageResult.imageUrl) {
+                    data.__faunaCopyText = getGeneratedMediaCopyText(imageResult.imageUrl, data.message?.content || imageResult.historyContent || "");
+                }
+                data.__faunaAlreadyRendered = true;
+                data.__faunaPreserveRenderedContent = true;
+                data.__faunaImageToolHandled = true;
+                return data;
+            }
+
+            const toolSignature = isThinkingTool ? "" : getFaunaToolCallSignature(toolCall);
+            if (toolSignature && toolResultsBySignature.has(toolSignature)) {
+                const previousResult = toolResultsBySignature.get(toolSignature);
+                if (!duplicateToolReminders.has(toolSignature)) {
+                    duplicateToolReminders.add(toolSignature);
+                    if (!assistantContextPushed) {
+                        workingMessages.push({ role: "assistant", content: assistantToolContextContent });
+                        assistantContextPushed = true;
+                    }
+                    workingMessages.push({ role: "user", content: formatDuplicateFaunaToolResultForModel(toolCall, previousResult.resultText) });
+                    continueLoop = true;
+                    break;
+                }
+
+                if (data.message) {
+                    data.message.content = visibleText || buildFaunaToolLimitMessage(toolResultsBySignature);
+                }
+                if (toolWebSources.length > 0) {
+                    data.__faunaWebSources = mergeWebSources(toolWebSources);
+                }
+                return data;
+            }
+
+            const activityItem = {
+                kind: getFaunaToolActivityKind(toolCall),
+                label: getFaunaToolActivityLabel(toolCall),
+                tool: toolCall.tool,
+                detail: getFaunaToolActivityDetail(toolCall),
+                input: getFaunaToolActivityInput(toolCall),
+                settings: isImageToolName(toolCall.tool) ? getImageActivitySettings(toolCall) : "",
+                query: isWebToolName(toolCall.tool) ? getFaunaToolActivityInput(toolCall) : "",
+                meta: "Running"
+            };
+            toolActivityItems.push(activityItem);
+            if (progressTarget) {
+                renderToolActivity(progressTarget, {
+                    title: getFaunaToolProgressLabel(toolCall),
+                    items: toolActivityItems
+                });
+            }
+
+            let resultText = "";
+            try {
+                const toolResult = await executeFaunaToolCall(toolCall, signal);
+                if (toolResult && typeof toolResult === "object") {
+                    resultText = toolResult.text || "";
+                    if (toolResult.needsUserInput) {
+                        const questionRequest = normalizeClarifyingQuestionPayload(toolResult.needsUserInput);
+                        if (!questionRequest) throw new Error("Tool requested user input with an invalid question payload.");
+                        activityItem.meta = "Waiting";
+                        if (progressTarget) {
+                            renderToolActivity(progressTarget, {
+                                title: getFaunaToolProgressLabel(toolCall),
+                                items: toolActivityItems
+                            });
+                        }
+                        if (data.message) {
+                            data.message.content = [
+                                resultText || "Waiting for your input.",
+                                createFaunaQuestionBlock(questionRequest)
+                            ].filter(Boolean).join("\n\n");
+                        }
+                        if (toolWebSources.length > 0) {
+                            data.__faunaWebSources = mergeWebSources(toolWebSources);
+                        }
+                        return data;
+                    }
+                    if (Array.isArray(toolResult.sources) && toolResult.sources.length > 0) {
+                        activityItem.sources = toolResult.sources;
+                        toolWebSources.push(...toolResult.sources);
+                    }
+                } else {
+                    resultText = String(toolResult || "");
+                }
+                activityItem.meta = isThinkingTool ? "Reset" : "Done";
+            } catch (err) {
+                resultText = `Tool failed: ${err.message}`;
+                activityItem.meta = "Failed";
+            }
+            if (toolSignature) {
+                toolResultsBySignature.set(toolSignature, { toolCall, resultText });
+            }
+
+            if (progressTarget) {
+                renderToolActivity(progressTarget, {
+                    title: getFaunaToolProgressLabel(toolCall),
+                    items: toolActivityItems
+                });
+            }
+
+            if (!assistantContextPushed) {
+                workingMessages.push({ role: "assistant", content: assistantToolContextContent });
+                assistantContextPushed = true;
+            }
+            workingMessages.push({ role: "user", content: formatFaunaToolResultForModel(toolCall, resultText) });
         }
 
-        if (progressTarget) {
-            renderToolActivity(progressTarget, {
-                title: getFaunaToolProgressLabel(toolCall),
-                items: toolActivityItems
-            });
-        }
-
-        workingMessages.push({ role: "assistant", content: data.message.content });
-        workingMessages.push({ role: "user", content: formatFaunaToolResultForModel(toolCall, resultText) });
+        if (continueLoop) continue;
     }
 
     if (lastData?.message) {
@@ -618,6 +674,7 @@ refreshOpenRouterCapabilities();
 initializeChatSessions();
 applyWorkspaceUrlFragment({ normalize: true });
 setWorkspaceNavState(activeWorkspaceView);
+initializeWindowBar();
 scheduleAnimatedSegmentIndicators();
 window.addEventListener("popstate", () => applyWorkspaceUrlFragment());
 window.addEventListener("hashchange", () => applyWorkspaceUrlFragment());
@@ -1358,7 +1415,15 @@ function setGeneratingBusy(busy) {
             || control === voiceQuickSettingsBtn
             || control === voiceMicToggleBtn
             || control === voiceReplyToggleBtn
+            || control === windowBackBtn
+            || control === windowForwardBtn
+            || control === windowUpdateBtn
+            || control === windowUpdateInstallBtn
+            || control === windowMinimizeBtn
+            || control === windowMaximizeBtn
+            || control === windowCloseBtn
             || control.closest?.("#voiceQuickPanel")
+            || control.closest?.("#appWindowBar")
             || control.matches?.("[data-accent-choice]")
         ) {
             control.disabled = false;

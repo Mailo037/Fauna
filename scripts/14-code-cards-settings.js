@@ -758,6 +758,18 @@ ollamaTopKInput?.addEventListener("change", event => {
     updateAiCallSettingsUi();
 });
 
+agentMaxStepsAtATimeInput?.addEventListener("change", event => {
+    activeAgentMaxStepsAtATime = normalizeAgentMaxStepsAtATime(event.target.value);
+    safeLocalStorageSet(AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY, String(activeAgentMaxStepsAtATime));
+    updateAiCallSettingsUi();
+});
+
+agentMaxStepsPerRunInput?.addEventListener("change", event => {
+    activeAgentMaxStepsPerRun = normalizeAgentMaxStepsPerRun(event.target.value);
+    safeLocalStorageSet(AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY, String(activeAgentMaxStepsPerRun));
+    updateAiCallSettingsUi();
+});
+
 openAiVerbosityButtons.forEach(button => {
     button.addEventListener("click", () => {
         if (button.disabled) return;

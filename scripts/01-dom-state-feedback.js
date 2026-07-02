@@ -18,6 +18,17 @@ const archivedChatList = document.getElementById("archivedChatList");
 const chatTitle = document.getElementById("chatTitle");
 const chatTitleInput = document.getElementById("chatTitleInput");
 const chatTitleEditBtn = document.getElementById("chatTitleEditBtn");
+const appWindowBar = document.getElementById("appWindowBar");
+const windowBackBtn = document.getElementById("windowBackBtn");
+const windowForwardBtn = document.getElementById("windowForwardBtn");
+const windowLocationLabel = document.getElementById("windowLocationLabel");
+const windowUpdateBtn = document.getElementById("windowUpdateBtn");
+const windowUpdateNotice = document.getElementById("windowUpdateNotice");
+const windowUpdateNoticeText = document.getElementById("windowUpdateNoticeText");
+const windowUpdateInstallBtn = document.getElementById("windowUpdateInstallBtn");
+const windowMinimizeBtn = document.getElementById("windowMinimizeBtn");
+const windowMaximizeBtn = document.getElementById("windowMaximizeBtn");
+const windowCloseBtn = document.getElementById("windowCloseBtn");
 const playgroundNavButton = document.getElementById("playgroundNavButton");
 const libraryNavButton = document.getElementById("libraryNavButton");
 const workspaceNavButtons = document.querySelectorAll("[data-workspace-view]");
@@ -82,6 +93,9 @@ const maxOutputTokensInput = document.getElementById("maxOutputTokensInput");
 const topPInput = document.getElementById("topPInput");
 const ollamaTopKInput = document.getElementById("ollamaTopKInput");
 const aiOutputLimitsStatus = document.getElementById("aiOutputLimitsStatus");
+const agentMaxStepsAtATimeInput = document.getElementById("agentMaxStepsAtATimeInput");
+const agentMaxStepsPerRunInput = document.getElementById("agentMaxStepsPerRunInput");
+const agentLoopStatus = document.getElementById("agentLoopStatus");
 const openAiVerbosityStatus = document.getElementById("openAiVerbosityStatus");
 const openAiVerbosityButtons = document.querySelectorAll("[data-ai-verbosity]");
 const wanEndpointInput = document.getElementById("wanEndpointInput");
@@ -199,6 +213,8 @@ let activeMaxOutputTokens = 0;
 let activeTopP = 1;
 let activeOllamaTopK = 40;
 let activeOpenAiVerbosity = "medium";
+let activeAgentMaxStepsAtATime = 4;
+let activeAgentMaxStepsPerRun = 16;
 let isAiCachingEnabled = false;
 const TOKEN_COUNTER_DEBOUNCE_MS = 280;
 const TOKEN_COUNTER_TIMEOUT_MS = 2500;
@@ -263,6 +279,11 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
+const FAUNA_APP_VERSION = "0.1.0";
+const FAUNA_APP_BUILD_ID = "20260702-window-updates";
+const FAUNA_VERSION_MANIFEST_URL = "version.json";
+const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/desktop/version.json";
+const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
 const LIBRARY_ITEMS_STORAGE_KEY = "faunaLibraryItems";
@@ -302,6 +323,8 @@ const AI_MAX_OUTPUT_TOKENS_STORAGE_KEY = "faunaAiMaxOutputTokens";
 const AI_TOP_P_STORAGE_KEY = "faunaAiTopP";
 const OLLAMA_TOP_K_STORAGE_KEY = "faunaOllamaTopK";
 const OPENAI_VERBOSITY_STORAGE_KEY = "faunaOpenAiVerbosity";
+const AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY = "faunaAgentMaxStepsAtATime";
+const AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY = "faunaAgentMaxStepsPerRun";
 const DESKTOP_FILE_URL_RE = /^(?:fauna-file|file):\/\//i;
 const STREAM_RENDER_THROTTLE_MS = 45;
 const CHAT_AUTO_SCROLL_THRESHOLD = 96;
@@ -337,6 +360,235 @@ function getFaunaDesktopApi() {
 
 function isFaunaDesktopApp() {
     return Boolean(getFaunaDesktopApi());
+}
+
+function compareSemanticVersions(a, b) {
+    const left = String(a || "").split(/[.-]/).map(part => Number.parseInt(part, 10));
+    const right = String(b || "").split(/[.-]/).map(part => Number.parseInt(part, 10));
+    const length = Math.max(left.length, right.length, 3);
+    for (let index = 0; index < length; index += 1) {
+        const leftValue = Number.isFinite(left[index]) ? left[index] : 0;
+        const rightValue = Number.isFinite(right[index]) ? right[index] : 0;
+        if (leftValue !== rightValue) return leftValue > rightValue ? 1 : -1;
+    }
+    return 0;
+}
+
+function isManifestNewer(manifest = {}) {
+    const remoteVersion = String(manifest.version || "").trim();
+    const remoteBuild = String(manifest.buildId || manifest.build || "").trim();
+    if (remoteVersion && compareSemanticVersions(remoteVersion, FAUNA_APP_VERSION) > 0) return true;
+    return Boolean(remoteBuild && remoteBuild !== FAUNA_APP_BUILD_ID);
+}
+
+function getWindowLocationText() {
+    if (activeWorkspaceView === WORKSPACE_VIEW_LIBRARY) return "Library";
+    const title = String(chatTitle?.textContent || getActiveSession?.()?.title || "").trim();
+    return title || "Current Session";
+}
+
+function updateWindowBarLocation() {
+    if (windowLocationLabel) {
+        windowLocationLabel.textContent = getWindowLocationText();
+    }
+}
+
+let webNavigationStack = [window.location.href];
+let webNavigationIndex = 0;
+
+function syncWebNavigationStack() {
+    const href = window.location.href;
+    if (webNavigationStack[webNavigationIndex] === href) return;
+
+    const previousIndex = webNavigationStack.lastIndexOf(href, webNavigationIndex - 1);
+    if (previousIndex !== -1) {
+        webNavigationIndex = previousIndex;
+        return;
+    }
+
+    const nextIndex = webNavigationStack.indexOf(href, webNavigationIndex + 1);
+    if (nextIndex !== -1) {
+        webNavigationIndex = nextIndex;
+        return;
+    }
+
+    webNavigationStack = webNavigationStack.slice(0, webNavigationIndex + 1);
+    webNavigationStack.push(href);
+    webNavigationIndex = webNavigationStack.length - 1;
+}
+
+function applyWindowNavigationState(state = null) {
+    if (isFaunaDesktopApp() && state) {
+        if (windowBackBtn) windowBackBtn.disabled = !state.canGoBack;
+        if (windowForwardBtn) windowForwardBtn.disabled = !state.canGoForward;
+        return;
+    }
+
+    syncWebNavigationStack();
+    if (windowBackBtn) windowBackBtn.disabled = webNavigationIndex <= 0;
+    if (windowForwardBtn) windowForwardBtn.disabled = webNavigationIndex >= webNavigationStack.length - 1;
+}
+
+async function refreshDesktopNavigationState() {
+    const state = await getFaunaDesktopApi()?.navigation?.getState?.();
+    applyWindowNavigationState(state);
+}
+
+function setWindowMaximizedState(isMaximized) {
+    document.body?.classList.toggle("desktop-window-maximized", Boolean(isMaximized));
+    if (windowMaximizeBtn) {
+        const label = isMaximized ? "Restore" : "Maximize";
+        windowMaximizeBtn.setAttribute("aria-label", label);
+        windowMaximizeBtn.dataset.tooltip = label;
+    }
+}
+
+function setWindowUpdateUi(state = {}, { manual = false } = {}) {
+    const status = state?.status || "idle";
+    const message = state?.message || "";
+    const isBusy = ["checking", "downloading", "installing"].includes(status);
+    const hasNotice = ["available", "downloading", "downloaded", "installing", "error"].includes(status);
+
+    if (windowUpdateBtn) {
+        windowUpdateBtn.disabled = isBusy;
+        windowUpdateBtn.setAttribute("aria-busy", String(isBusy));
+        windowUpdateBtn.dataset.tooltip = message || "Check updates";
+    }
+
+    if (windowUpdateNotice) {
+        windowUpdateNotice.hidden = !hasNotice;
+    }
+    if (windowUpdateNoticeText) {
+        windowUpdateNoticeText.textContent = message || "Update available";
+    }
+    if (windowUpdateInstallBtn) {
+        windowUpdateInstallBtn.hidden = !["available", "downloaded"].includes(status);
+        windowUpdateInstallBtn.disabled = isBusy;
+        windowUpdateInstallBtn.textContent = status === "downloaded"
+            ? "Install"
+            : isFaunaDesktopApp() ? "Download" : "Reload";
+    }
+
+    if (manual) {
+        if (status === "current") showToast("Fauna is up to date.", "success");
+        else if (status === "dev") showToast(message || "Update checks run in packaged builds.", "info");
+        else if (status === "error") showToast(`Update check failed: ${message}`, "error");
+        else if (status === "available") showToast(message || "Update available.", "info");
+        else if (status === "downloaded") showToast("Update ready to install.", "success");
+    }
+}
+
+async function checkWebAppUpdate({ manual = false } = {}) {
+    setWindowUpdateUi({ status: "checking", message: "Checking for updates..." });
+    try {
+        const fetchManifest = async (sourceUrl) => {
+            const url = new URL(sourceUrl, window.location.href);
+            url.searchParams.set("t", String(Date.now()));
+            const response = await fetch(url, { cache: "no-store", credentials: "omit" });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return response.json();
+        };
+        let manifest;
+        try {
+            manifest = await fetchManifest(FAUNA_REMOTE_VERSION_MANIFEST_URL);
+        } catch (remoteError) {
+            console.warn("Remote update manifest was unavailable:", remoteError);
+            manifest = await fetchManifest(FAUNA_VERSION_MANIFEST_URL);
+        }
+        if (isManifestNewer(manifest)) {
+            setWindowUpdateUi({
+                status: "available",
+                message: manifest.version ? `Version ${manifest.version} is available` : "Update available",
+                canInstall: true,
+                availableVersion: manifest.version || "",
+                releaseUrl: manifest.releaseUrl || FAUNA_RELEASES_URL
+            }, { manual });
+        } else {
+            setWindowUpdateUi({
+                status: "current",
+                message: "Fauna is up to date",
+                canInstall: false
+            }, { manual });
+        }
+    } catch (error) {
+        setWindowUpdateUi({
+            status: "error",
+            message: error?.message || "Update check failed",
+            canInstall: false
+        }, { manual });
+    }
+}
+
+async function checkFaunaAppUpdate({ manual = false } = {}) {
+    const desktopUpdates = getFaunaDesktopApi()?.updates;
+    if (desktopUpdates?.check) {
+        const state = await desktopUpdates.check();
+        setWindowUpdateUi(state, { manual });
+        return;
+    }
+    await checkWebAppUpdate({ manual });
+}
+
+async function installFaunaAppUpdate() {
+    const desktopUpdates = getFaunaDesktopApi()?.updates;
+    if (desktopUpdates?.install) {
+        const state = await desktopUpdates.install();
+        setWindowUpdateUi(state);
+        return;
+    }
+    window.location.reload();
+}
+
+function initializeWindowBar() {
+    if (!appWindowBar) return;
+    const desktopApi = getFaunaDesktopApi();
+    document.body?.classList.toggle("desktop-app", Boolean(desktopApi));
+    updateWindowBarLocation();
+    applyWindowNavigationState();
+
+    windowBackBtn?.addEventListener("click", () => {
+        if (desktopApi?.navigation?.back) {
+            void desktopApi.navigation.back().then(applyWindowNavigationState);
+            return;
+        }
+        if (webNavigationIndex > 0) window.history.back();
+    });
+    windowForwardBtn?.addEventListener("click", () => {
+        if (desktopApi?.navigation?.forward) {
+            void desktopApi.navigation.forward().then(applyWindowNavigationState);
+            return;
+        }
+        if (webNavigationIndex < webNavigationStack.length - 1) window.history.forward();
+    });
+    windowUpdateBtn?.addEventListener("click", () => {
+        void checkFaunaAppUpdate({ manual: true });
+    });
+    windowUpdateInstallBtn?.addEventListener("click", () => {
+        void installFaunaAppUpdate();
+    });
+
+    if (desktopApi) {
+        windowMinimizeBtn?.addEventListener("click", () => void desktopApi.window?.minimize?.());
+        windowMaximizeBtn?.addEventListener("click", () => void desktopApi.window?.toggleMaximize?.());
+        windowCloseBtn?.addEventListener("click", () => void desktopApi.window?.close?.());
+        desktopApi.window?.getState?.().then(state => setWindowMaximizedState(state?.isMaximized));
+        desktopApi.window?.onStateChanged?.(state => setWindowMaximizedState(state?.isMaximized));
+        desktopApi.navigation?.getState?.().then(applyWindowNavigationState);
+        desktopApi.navigation?.onChanged?.(applyWindowNavigationState);
+        desktopApi.updates?.getState?.().then(setWindowUpdateUi);
+        desktopApi.updates?.onStatus?.(setWindowUpdateUi);
+    }
+
+    window.addEventListener("popstate", () => {
+        window.setTimeout(() => applyWindowNavigationState(), 0);
+    });
+    window.addEventListener("hashchange", () => {
+        window.setTimeout(() => applyWindowNavigationState(), 0);
+    });
+
+    window.setTimeout(() => {
+        void checkFaunaAppUpdate({ manual: false });
+    }, 2200);
 }
 
 function defineHiddenFileValue(file, key, value) {

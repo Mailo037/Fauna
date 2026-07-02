@@ -40,6 +40,13 @@ async function saveGeneratedMedia(payload = {}) {
   return ipcRenderer.invoke("fauna:save-generated-media", payload);
 }
 
+function onRendererEvent(channel, handler) {
+  if (typeof handler !== "function") return () => {};
+  const listener = (_event, payload) => handler(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
 contextBridge.exposeInMainWorld("faunaDesktop", {
   isDesktop: true,
   storageGet(key) {
@@ -62,5 +69,50 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   saveGeneratedMedia,
   getInfo() {
     return ipcRenderer.invoke("fauna:desktop-info");
+  },
+  window: {
+    minimize() {
+      return ipcRenderer.invoke("fauna:window-minimize");
+    },
+    toggleMaximize() {
+      return ipcRenderer.invoke("fauna:window-toggle-maximize");
+    },
+    close() {
+      return ipcRenderer.invoke("fauna:window-close");
+    },
+    getState() {
+      return ipcRenderer.invoke("fauna:window-state");
+    },
+    onStateChanged(handler) {
+      return onRendererEvent("fauna:window-state-changed", handler);
+    }
+  },
+  navigation: {
+    back() {
+      return ipcRenderer.invoke("fauna:navigation-back");
+    },
+    forward() {
+      return ipcRenderer.invoke("fauna:navigation-forward");
+    },
+    getState() {
+      return ipcRenderer.invoke("fauna:navigation-state");
+    },
+    onChanged(handler) {
+      return onRendererEvent("fauna:navigation-changed", handler);
+    }
+  },
+  updates: {
+    getState() {
+      return ipcRenderer.invoke("fauna:update-state");
+    },
+    check() {
+      return ipcRenderer.invoke("fauna:update-check");
+    },
+    install() {
+      return ipcRenderer.invoke("fauna:update-install");
+    },
+    onStatus(handler) {
+      return onRendererEvent("fauna:update-status", handler);
+    }
   }
 });

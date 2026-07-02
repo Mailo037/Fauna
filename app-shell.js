@@ -34,7 +34,7 @@ async function loadInclude(element) {
     const source = element.dataset.include;
     if (!source) return;
 
-    const response = await fetch(source, { credentials: "same-origin" });
+    const response = await fetch(source, { credentials: "same-origin", cache: "no-cache" });
     if (!response.ok) {
         throw new Error(`Could not load ${source}: ${response.status}`);
     }
@@ -150,7 +150,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260702-split-workspace");
+        await import("./script.js?v=20260702-window-updates");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));

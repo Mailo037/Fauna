@@ -179,6 +179,7 @@ function updateActiveChatTitle() {
         if (chatTitle) chatTitle.textContent = "Library";
         if (chatTitleInput && !isChatTitleEditing) chatTitleInput.value = "Library";
         document.title = "Library - Fauna";
+        updateWindowBarLocation();
         return;
     }
     const session = getActiveSession();
@@ -186,6 +187,7 @@ function updateActiveChatTitle() {
     if (chatTitle) chatTitle.textContent = title;
     if (chatTitleInput && !isChatTitleEditing) chatTitleInput.value = title;
     document.title = title === "Current Session" ? "Fauna" : `${title} - Fauna`;
+    updateWindowBarLocation();
 }
 
 function setChatTitleEditing(editing) {

@@ -4,6 +4,174 @@ body {
     background: var(--bg);
 }
 
+.app-window-bar {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 200;
+    display: grid;
+    grid-template-columns: minmax(132px, 1fr) minmax(180px, auto) minmax(132px, 1fr);
+    align-items: center;
+    height: var(--window-bar-height);
+    padding: 0 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: #202124;
+    color: #aeb4c0;
+    -webkit-app-region: drag;
+    user-select: none;
+}
+
+.window-bar-left,
+.window-bar-right,
+.desktop-window-controls,
+.window-bar-center,
+.window-update-notice {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.window-bar-left {
+    justify-content: flex-start;
+    gap: 2px;
+}
+
+.window-bar-right {
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.window-bar-center {
+    justify-content: center;
+    gap: 8px;
+    max-width: min(46vw, 520px);
+    color: #f3f4f8;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0;
+}
+
+.window-bar-location-icon {
+    display: inline-flex;
+    width: 15px;
+    height: 15px;
+    color: #9aa1ad;
+}
+
+.window-bar-location-icon svg {
+    width: 15px;
+    height: 15px;
+}
+
+.window-bar-location-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.window-bar-icon-btn,
+.window-control-btn,
+.window-update-install-btn {
+    -webkit-app-region: no-drag;
+}
+
+.window-bar-icon-btn,
+.window-control-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 28px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: #aeb4c0;
+    transition: background-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.window-bar-icon-btn svg,
+.window-control-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.window-bar-icon-btn:hover:not(:disabled),
+.window-control-btn:hover {
+    background: #2b2d31;
+    color: #ffffff;
+}
+
+.window-bar-icon-btn:disabled {
+    opacity: 0.34;
+}
+
+.desktop-window-controls {
+    display: none;
+    gap: 0;
+}
+
+.desktop-app .desktop-window-controls {
+    display: flex;
+}
+
+.window-control-btn {
+    width: 42px;
+    border-radius: 0;
+}
+
+.window-control-close:hover {
+    background: #d84f4b;
+    color: #ffffff;
+}
+
+.window-control-icon-restore {
+    display: none;
+}
+
+.desktop-window-maximized .window-control-icon-maximize {
+    display: none;
+}
+
+.desktop-window-maximized .window-control-icon-restore {
+    display: block;
+}
+
+.window-update-notice {
+    gap: 8px;
+    max-width: min(330px, 34vw);
+    min-height: 28px;
+    padding: 0 4px 0 10px;
+    border: 1px solid rgba(126, 150, 255, 0.34);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: #f3f4f8;
+    font-size: 12px;
+    font-weight: 760;
+    -webkit-app-region: no-drag;
+}
+
+.window-update-notice span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.window-update-install-btn {
+    min-height: 22px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 850;
+}
+
+.window-update-install-btn:hover {
+    background: var(--accent-strong);
+}
+
 .sidebar {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
@@ -1057,6 +1225,7 @@ body.voice-chat-active #welcome .suggestion-grid {
     }
 
     .mobile-header {
+        top: var(--window-bar-height);
         background: var(--bg);
         border-bottom: 1px solid var(--border-soft);
         backdrop-filter: none;
@@ -1064,7 +1233,7 @@ body.voice-chat-active #welcome .suggestion-grid {
 
     .sidebar {
         position: fixed;
-        inset: 0 auto 0 0;
+        inset: var(--window-bar-height) auto 0 0;
         width: min(280px, 86vw);
         min-width: 0;
         align-items: stretch;
@@ -1076,6 +1245,29 @@ body.voice-chat-active #welcome .suggestion-grid {
 
     .sidebar.open {
         transform: translateX(0);
+    }
+
+    .app-window-bar {
+        grid-template-columns: minmax(72px, 1fr) minmax(92px, auto) minmax(72px, 1fr);
+        padding: 0 6px;
+    }
+
+    .window-bar-center {
+        max-width: 44vw;
+        font-size: 12px;
+    }
+
+    .window-update-notice {
+        max-width: 36vw;
+        padding-left: 8px;
+    }
+
+    .window-update-notice span {
+        display: none;
+    }
+
+    .window-update-install-btn {
+        min-width: 54px;
     }
 
     .logo {

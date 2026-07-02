@@ -956,6 +956,8 @@ async function getWorkspaceContextForPrompt(text, signal = null) {
 
 function normalizeFaunaToolName(toolName) {
     const name = String(toolName || "").trim().toLowerCase();
+    if (THINKING_TOOL_NAME_ALIASES[name]) return THINKING_TOOL_NAME_ALIASES[name];
+    if (THINKING_TOOL_NAMES.has(name)) return name;
     if (IMAGE_TOOL_NAME_ALIASES[name]) return IMAGE_TOOL_NAME_ALIASES[name];
     if (IMAGE_TOOL_NAMES.has(name)) return name;
     if (WEB_TOOL_NAME_ALIASES[name]) return WEB_TOOL_NAME_ALIASES[name];
@@ -967,6 +969,196 @@ function normalizeFaunaToolName(toolName) {
     if (WORKSPACE_TOOL_NAME_ALIASES[name]) return WORKSPACE_TOOL_NAME_ALIASES[name];
     if (WORKSPACE_TOOL_NAMES.has(name)) return name;
     return MEMORY_TOOL_NAME_ALIASES[name] || "";
+}
+
+function createFaunaToolParameterSchema(properties = {}, required = []) {
+    return {
+        type: "object",
+        properties,
+        required,
+        additionalProperties: true
+    };
+}
+
+function getFaunaNativeToolDefinitions({
+    allowLocalTools = false,
+    allowWebTools = false,
+    allowLocationTools = false,
+    allowToolCalls = true
+} = {}) {
+    if (!allowToolCalls) return [];
+
+    const tools = [
+        {
+            name: "thinking",
+            description: "Record a brief plan or reflection and reset the consecutive agent-step counter before more tool-backed work.",
+            parameters: createFaunaToolParameterSchema({
+                summary: { type: "string", description: "Short summary of known facts, uncertainty, and next action." }
+            })
+        },
+        {
+            name: "generate_image",
+            description: "Generate a new image from a complete visual prompt.",
+            parameters: createFaunaToolParameterSchema({
+                prompt: { type: "string", description: "Complete polished image prompt." },
+                aspectRatio: { type: "string", description: "Aspect ratio such as 1:1, 16:9, 9:16, 4:3, or 3:4." },
+                style: { type: "string", description: "Visual style, medium, or look." },
+                quality: { type: "string", description: "auto, low, medium, or high." },
+                format: { type: "string", description: "png, jpeg, or webp." },
+                width: { type: "number" },
+                height: { type: "number" },
+                negativePrompt: { type: "string" }
+            }, ["prompt"])
+        },
+        {
+            name: "wait",
+            description: "Wait for a short duration, timer, pause, or delay.",
+            parameters: createFaunaToolParameterSchema({
+                seconds: { type: "number" },
+                duration: { type: "string" },
+                reason: { type: "string" }
+            })
+        },
+        {
+            name: "stopwatch",
+            description: "Measure elapsed time for a command, a fixed duration, or until user input.",
+            parameters: createFaunaToolParameterSchema({
+                mode: { type: "string" },
+                command: { type: "string" },
+                cwd: { type: "string" },
+                timeout: { type: "number" },
+                duration: { type: "string" },
+                prompt: { type: "string" },
+                label: { type: "string" }
+            })
+        }
+    ];
+
+    if (allowLocalTools) {
+        tools.push(
+            {
+                name: "workspace_tree",
+                description: "List files and folders inside the configured local workspace.",
+                parameters: createFaunaToolParameterSchema({
+                    path: { type: "string", description: "Workspace-relative path." },
+                    depth: { type: "number", description: "Directory depth from 0 to 5." }
+                })
+            },
+            {
+                name: "read_file",
+                description: "Read a file from the configured local workspace.",
+                parameters: createFaunaToolParameterSchema({
+                    path: { type: "string", description: "Workspace-relative file path." }
+                }, ["path"])
+            },
+            {
+                name: "run_command",
+                description: "Run a terminal command through the token-protected local workspace bridge.",
+                parameters: createFaunaToolParameterSchema({
+                    command: { type: "string" },
+                    cwd: { type: "string" },
+                    timeout: { type: "number" }
+                }, ["command"])
+            },
+            {
+                name: "wait_for",
+                description: "Poll a terminal command until it succeeds, matches output, or times out.",
+                parameters: createFaunaToolParameterSchema({
+                    command: { type: "string" },
+                    cwd: { type: "string" },
+                    intervalSeconds: { type: "number" },
+                    maxSeconds: { type: "number" },
+                    contains: { type: "string" },
+                    expectedExitCode: { type: "number" }
+                }, ["command"])
+            }
+        );
+    }
+
+    if (allowWebTools) {
+        tools.push(
+            {
+                name: "web_search",
+                description: "Search the web for current information and sources.",
+                parameters: createFaunaToolParameterSchema({
+                    query: { type: "string" }
+                }, ["query"])
+            },
+            {
+                name: "inspect_url",
+                description: "Inspect and summarize text from a specific URL.",
+                parameters: createFaunaToolParameterSchema({
+                    url: { type: "string" }
+                }, ["url"])
+            }
+        );
+    }
+
+    if (allowLocationTools) {
+        tools.push(
+            {
+                name: "get_ip_location",
+                description: "Get a coarse approximate public-IP location.",
+                parameters: createFaunaToolParameterSchema({})
+            },
+            {
+                name: "current_weather",
+                description: "Get current weather for supplied coordinates or approximate current location.",
+                parameters: createFaunaToolParameterSchema({
+                    latitude: { type: "number" },
+                    longitude: { type: "number" }
+                })
+            }
+        );
+    }
+
+    if (isMemoryEnabled) {
+        tools.push(
+            {
+                name: "read_memories",
+                description: "Read or search the user's saved memories.",
+                parameters: createFaunaToolParameterSchema({
+                    query: { type: "string" }
+                })
+            },
+            {
+                name: "save_memory",
+                description: "Save a stable user preference or project fact only when the user asks or clearly wants it remembered.",
+                parameters: createFaunaToolParameterSchema({
+                    text: { type: "string" }
+                }, ["text"])
+            },
+            {
+                name: "delete_memory",
+                description: "Delete a saved memory when the user asks to forget it.",
+                parameters: createFaunaToolParameterSchema({
+                    target: { type: "string" }
+                }, ["target"])
+            }
+        );
+    }
+
+    return tools;
+}
+
+function buildOpenAiFaunaTools(context = {}) {
+    return getFaunaNativeToolDefinitions(context).map(tool => ({
+        type: "function",
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
+    }));
+}
+
+function buildOllamaFaunaTools(context = {}) {
+    return getFaunaNativeToolDefinitions(context).map(tool => ({
+        type: "function",
+        function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters
+        }
+    }));
 }
 
 function extractFirstJsonObjectText(content) {
@@ -1020,21 +1212,106 @@ function extractFaunaToolCallPayload(content) {
 }
 
 function parseFaunaToolCall(content) {
+    return parseFaunaToolCalls(content)[0] || null;
+}
+
+function parseFaunaToolCalls(content) {
+    const text = normalizeAssistantControlMarkup(content);
+    const calls = [];
+    const seenPayloads = new Set();
+    const addPayload = payload => {
+        const cleanPayload = String(payload || "").trim();
+        if (!cleanPayload || seenPayloads.has(cleanPayload)) return;
+        seenPayloads.add(cleanPayload);
+        try {
+            const parsed = JSON.parse(cleanPayload);
+            if (!parsed || typeof parsed !== "object") return;
+            const tool = normalizeFaunaToolName(parsed.tool || parsed.name);
+            if (!tool) return;
+            calls.push({ ...parsed, tool });
+        } catch {
+            // Ignore malformed tool blocks so the assistant can answer normally.
+        }
+    };
+
+    text.matchAll(FAUNA_TOOL_CALLS_RE).forEach(match => addPayload(match[1]));
+    if (calls.length > 0) return calls;
+
     const payload = extractFaunaToolCallPayload(content);
-    if (!payload) return null;
+    addPayload(payload);
+    return calls;
+}
+
+function parseProviderToolArguments(value) {
+    if (!value) return {};
+    if (typeof value === "object") return { ...value };
+    if (typeof value !== "string") return {};
     try {
-        const parsed = JSON.parse(payload);
-        if (!parsed || typeof parsed !== "object") return null;
-        const tool = normalizeFaunaToolName(parsed.tool || parsed.name);
-        if (!tool) return null;
-        return { ...parsed, tool };
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === "object" ? parsed : {};
     } catch {
-        return null;
+        return {};
     }
+}
+
+function normalizeProviderToolCall(name, args = {}, metadata = {}) {
+    const tool = normalizeFaunaToolName(name);
+    if (!tool) return null;
+    return {
+        ...parseProviderToolArguments(args),
+        tool,
+        __faunaProviderToolCall: true,
+        __faunaToolCallId: metadata.callId || metadata.id || ""
+    };
+}
+
+function extractOpenAiResponseToolCalls(data) {
+    const calls = [];
+    (data?.output || []).forEach(item => {
+        if (item?.type !== "function_call") return;
+        const normalized = normalizeProviderToolCall(item.name, item.arguments, {
+            callId: item.call_id,
+            id: item.id
+        });
+        if (normalized) calls.push(normalized);
+    });
+    return calls;
+}
+
+function extractOllamaChatToolCalls(data) {
+    const calls = [];
+    (data?.message?.tool_calls || []).forEach(item => {
+        const fn = item?.function || {};
+        const normalized = normalizeProviderToolCall(fn.name || item.name, fn.arguments || item.arguments, {
+            id: item.id
+        });
+        if (normalized) calls.push(normalized);
+    });
+    return calls;
+}
+
+function getFaunaToolCallsFromAssistantData(data) {
+    if (Array.isArray(data?.__faunaToolCalls) && data.__faunaToolCalls.length > 0) {
+        return data.__faunaToolCalls
+            .map(call => normalizeProviderToolCall(call.tool || call.name, call, {
+                callId: call.__faunaToolCallId,
+                id: call.id
+            }))
+            .filter(Boolean);
+    }
+
+    const openAiCalls = extractOpenAiResponseToolCalls(data);
+    if (openAiCalls.length > 0) return openAiCalls;
+
+    const ollamaCalls = extractOllamaChatToolCalls(data);
+    if (ollamaCalls.length > 0) return ollamaCalls;
+
+    return parseFaunaToolCalls(data?.message?.content || "");
 }
 
 function getAssistantToolPlaceholder(toolCall) {
     if (!toolCall?.tool) return "Fauna requested a tool.";
+    if (isThinkingToolName(toolCall.tool)) return "Fauna is thinking through the next step.";
     if (isImageToolName(toolCall.tool)) return "Fauna requested image generation.";
     if (isWebToolName(toolCall.tool)) return "Fauna requested a web tool.";
     if (isLocationToolName(toolCall.tool)) return "Fauna requested location or weather.";
@@ -1152,8 +1429,18 @@ function getFaunaToolCallSignature(toolCall = {}) {
             target: String(toolCall.target || toolCall.id || toolCall.index || toolCall.text || "").trim()
         });
     }
+    if (tool === "thinking") {
+        return JSON.stringify({
+            tool,
+            summary: String(toolCall.summary || toolCall.reason || toolCall.plan || toolCall.text || "").trim()
+        });
+    }
 
     return JSON.stringify({ tool });
+}
+
+function isThinkingToolName(toolName) {
+    return THINKING_TOOL_NAMES.has(normalizeFaunaToolName(toolName));
 }
 
 function isMemoryToolName(toolName) {
@@ -1183,6 +1470,7 @@ function getToolDetailSnippet(value, maxLength = 84) {
 }
 
 function getFaunaToolProgressLabel(toolCall) {
+    if (toolCall?.tool === "thinking") return "Thinking through next steps...";
     if (toolCall?.tool === "generate_image") return "Generating image...";
     if (toolCall?.tool === "web_search") return "Searching the web...";
     if (toolCall?.tool === "inspect_url") return "Inspecting site...";
@@ -1204,6 +1492,7 @@ function getFaunaToolProgressLabel(toolCall) {
 }
 
 function getFaunaToolActivityKind(toolCall) {
+    if (isThinkingToolName(toolCall?.tool)) return "thinking";
     if (isImageToolName(toolCall?.tool)) return "image";
     if (isWebToolName(toolCall?.tool)) return "web";
     if (isLocationToolName(toolCall?.tool)) return "location";
@@ -1215,6 +1504,7 @@ function getFaunaToolActivityKind(toolCall) {
 }
 
 function getFaunaToolActivityLabel(toolCall) {
+    if (isThinkingToolName(toolCall?.tool)) return "Thinking";
     if (isImageToolName(toolCall?.tool)) return "Image generation";
     if (isWebToolName(toolCall?.tool)) return "Web";
     if (isLocationToolName(toolCall?.tool)) return "Location";
@@ -1224,6 +1514,7 @@ function getFaunaToolActivityLabel(toolCall) {
 }
 
 function getFaunaToolActivityDetail(toolCall) {
+    if (toolCall?.tool === "thinking") return getToolDetailSnippet(toolCall.summary || toolCall.reason || toolCall.plan || toolCall.text || "Reset step counter");
     if (toolCall?.tool === "generate_image") return getToolDetailSnippet(toolCall.prompt || toolCall.description || toolCall.text || "Generated image");
     if (toolCall?.tool === "web_search") return getToolDetailSnippet(toolCall.query || toolCall.text || "Search");
     if (toolCall?.tool === "inspect_url") return getToolDetailSnippet(toolCall.url || toolCall.href || toolCall.link || "URL");
@@ -1249,6 +1540,7 @@ function getFaunaToolActivityDetail(toolCall) {
 }
 
 function getFaunaToolActivityInput(toolCall) {
+    if (toolCall?.tool === "thinking") return String(toolCall.summary || toolCall.reason || toolCall.plan || toolCall.text || "").trim();
     if (toolCall?.tool === "generate_image") return String(toolCall.prompt || toolCall.description || toolCall.text || "").trim();
     if (toolCall?.tool === "web_search") return String(toolCall.query || toolCall.text || toolCall.prompt || "").trim();
     if (toolCall?.tool === "inspect_url") return String(toolCall.url || toolCall.href || toolCall.link || "").trim();
@@ -1277,6 +1569,17 @@ function getFaunaToolActivityInput(toolCall) {
 async function executeFaunaToolCall(toolCall, signal = null) {
     if (isImageToolName(toolCall?.tool)) {
         throw new Error("Image generation tools need a visible chat target.");
+    }
+
+    if (isThinkingToolName(toolCall?.tool)) {
+        const summary = String(toolCall.summary || toolCall.reason || toolCall.plan || toolCall.text || "").trim();
+        return {
+            text: [
+                "Thinking step recorded. The consecutive tool-step counter has been reset.",
+                summary ? `Summary: ${summary}` : "",
+                "Continue with the next useful tool call or answer the user."
+            ].filter(Boolean).join("\n")
+        };
     }
 
     if (isMemoryToolName(toolCall?.tool)) {
@@ -1458,22 +1761,27 @@ async function executeImageGenerationToolCall(toolCall, signal = null, {
 }
 
 function formatFaunaToolResultForModel(toolCall, resultText) {
+    const isThinkingTool = isThinkingToolName(toolCall?.tool);
     const isMemoryTool = isMemoryToolName(toolCall?.tool);
     const isWebTool = isWebToolName(toolCall?.tool);
     const isLocationTool = isLocationToolName(toolCall?.tool);
     const isTimeTool = isTimeToolName(toolCall?.tool);
-    const label = isMemoryTool
-        ? "Memory tool result"
-        : isWebTool
+    const label = isThinkingTool
+        ? "Thinking tool result"
+        : isMemoryTool
+            ? "Memory tool result"
+            : isWebTool
             ? "Web tool result"
             : isLocationTool
                 ? "Location/weather tool result"
                 : isTimeTool
                     ? "Timer/wait tool result"
                     : "Local workspace tool result";
-    const instruction = isMemoryTool
-        ? "Use this result to answer the user's original memory request. If memory changed, acknowledge it briefly."
-        : isWebTool
+    const instruction = isThinkingTool
+        ? "The consecutive tool-step counter has reset. Continue with the next useful tool call or answer the user without repeating unnecessary work."
+        : isMemoryTool
+            ? "Use this result to answer the user's original memory request. If memory changed, acknowledge it briefly."
+            : isWebTool
             ? "Use this web result to answer the user's original request. Cite the URLs used, and say if search or inspection was insufficient."
             : isLocationTool
                 ? "Use this result to answer the user's original request. Mention that IP-based location is approximate when relevant, and cite source URLs if present."
@@ -1512,6 +1820,7 @@ function buildAssistantSystemPrompt(allowLocalTools = false, requireChatTitle = 
         CODE_BLOCK_SYSTEM_PROMPT,
         requireChatTitle ? CHAT_TITLE_SYSTEM_PROMPT : "",
         CLARIFYING_QUESTION_SYSTEM_PROMPT,
+        allowToolCalls ? AGENT_LOOP_SYSTEM_PROMPT : "",
         allowToolCalls ? IMAGE_TOOL_SYSTEM_PROMPT : "",
         allowToolCalls && allowWebTools ? WEB_TOOL_SYSTEM_PROMPT : "",
         allowToolCalls ? buildRuntimeToolSystemPrompt(allowLocationTools, allowLocalTools) : "",

@@ -190,6 +190,22 @@
                     </div>
                     <div class="settings-control-card settings-control-card-stacked ai-call-settings-card">
                         <div class="setting-info">
+                            <span class="setting-title">Agent loop</span>
+                            <span id="agentLoopStatus" class="setting-desc">Thinking resets the at-a-time counter.</span>
+                        </div>
+                        <div class="ai-call-settings-grid">
+                            <label class="settings-field-label">
+                                <span>Max steps at a time</span>
+                                <input id="agentMaxStepsAtATimeInput" class="settings-input settings-number-input ai-call-number-input" type="number" min="1" max="32" step="1" value="4" aria-label="Maximum agent steps at a time">
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Max steps per run</span>
+                                <input id="agentMaxStepsPerRunInput" class="settings-input settings-number-input ai-call-number-input" type="number" min="1" max="64" step="1" value="16" aria-label="Maximum agent steps per run">
+                            </label>
+                        </div>
+                    </div>
+                    <div class="settings-control-card settings-control-card-stacked ai-call-settings-card">
+                        <div class="setting-info">
                             <span class="setting-title">OpenAI verbosity</span>
                             <span id="openAiVerbosityStatus" class="setting-desc">Controls response detail when the model supports it.</span>
                         </div>
