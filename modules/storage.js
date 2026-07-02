@@ -16,12 +16,21 @@ export function safeLocalStorageGet(key) {
         const desktopStorage = getDesktopStorage();
         if (desktopStorage) {
             const desktopValue = desktopStorage.storageGet(key);
-            if (desktopValue !== null && desktopValue !== undefined) return desktopValue;
+            if (desktopValue !== null && desktopValue !== undefined) {
+                localStorage.removeItem(key);
+                const legacyKey = getLegacyStorageKey(key);
+                if (legacyKey) localStorage.removeItem(legacyKey);
+                return desktopValue;
+            }
         }
 
         const value = localStorage.getItem(key);
         if (value !== null) {
-            if (desktopStorage) desktopStorage.storageSet(key, value);
+            if (desktopStorage && desktopStorage.storageSet(key, value)) {
+                localStorage.removeItem(key);
+                const legacyKey = getLegacyStorageKey(key);
+                if (legacyKey) localStorage.removeItem(legacyKey);
+            }
             return value;
         }
 
@@ -31,7 +40,9 @@ export function safeLocalStorageGet(key) {
         const legacyValue = localStorage.getItem(legacyKey);
         if (legacyValue !== null) {
             if (desktopStorage) {
-                desktopStorage.storageSet(key, legacyValue);
+                if (desktopStorage.storageSet(key, legacyValue)) {
+                    localStorage.removeItem(legacyKey);
+                }
             } else {
                 localStorage.setItem(key, legacyValue);
             }

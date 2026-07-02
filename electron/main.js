@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, protocol, screen, session, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -16,6 +16,34 @@ const WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY = "faunaWorkspaceBridgeEndpoint";
 const WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY = "faunaWorkspaceBridgeToken";
 const WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY = "faunaWorkspaceBridgeEnabled";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
+const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
+const AI_PROVIDER_STORAGE_KEY = "faunaAiProvider";
+const LOCAL_CHAT_MODEL_STORAGE_KEY = "faunaLocalChatModel";
+const OPENAI_CHAT_MODEL_STORAGE_KEY = "faunaOpenAiChatModel";
+const WORKSPACE_URL_FRAGMENT_CHAT = "chat";
+const OLLAMA_BASE_URL = "http://localhost:11434";
+const OLLAMA_TAGS_URL = `${OLLAMA_BASE_URL}/api/tags`;
+const DEFAULT_LOCAL_CHAT_MODEL = "qwen3:8b";
+const DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4-mini";
+const APP_CACHE_STORAGE_KEYS = [
+  "faunaOpenAiSpeechCache",
+  "faunaVoicePreviewCache",
+  "faunaOpenAiTranscriptionCache",
+  "faunaOpenAiFileCache",
+  "faunaOpenAiModelCatalog",
+  "faunaOpenRouterModelCapabilities"
+];
+const APP_CACHE_DIRECTORIES = [
+  "Cache",
+  "Code Cache",
+  "GPUCache",
+  "DawnCache",
+  "blob_storage",
+  "Dictionaries",
+  "Shared Dictionary",
+  "Session Storage"
+];
+const TEMP_MEDIA_FILE_RE = /^(?:voice-recording|voice-reply|speech|tts|audio-cache|voice-cache)-/i;
 
 app.setName("Fauna");
 app.setAppUserModelId("ai.fauna.desktop");
@@ -44,7 +72,14 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow = null;
+let quickWindow = null;
+let tray = null;
 let bridgeProcess = null;
+let mainRendererReady = false;
+let pendingOpenChatId = "";
+let pendingQuickPrompt = "";
+let pendingQuickPayload = null;
+let pendingNewChat = false;
 let updateState = {
   status: "idle",
   message: "Updates ready",
@@ -155,6 +190,58 @@ function readChatSessionsSync() {
   return sessions;
 }
 
+function getSessionTime(session) {
+  const updated = Date.parse(session?.updatedAt || "");
+  const created = Date.parse(session?.createdAt || "");
+  return Number.isFinite(updated) ? updated : Number.isFinite(created) ? created : 0;
+}
+
+function stripText(value) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateLabel(value, maxLength = 64) {
+  const text = stripText(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trim()}...` : text;
+}
+
+function getSessionTitle(session) {
+  const title = truncateLabel(session?.title, 64);
+  if (title) return title;
+  const firstUser = (session?.conversationHistory || []).find(message => message?.role === "user" && message?.content);
+  return truncateLabel(firstUser?.content, 64) || "Current Session";
+}
+
+function getSessionPreview(session) {
+  const history = Array.isArray(session?.conversationHistory) ? session.conversationHistory : [];
+  const latest = [...history].reverse().find(message => message?.content);
+  return truncateLabel(latest?.content, 96);
+}
+
+function sessionHasContent(session) {
+  return Boolean(
+    session?.domNodes?.length ||
+    session?.conversationHistory?.length ||
+    getSessionPreview(session)
+  );
+}
+
+function getRecentChatSummaries(limit = 8) {
+  return readChatSessionsSync()
+    .filter(session => session?.id && !session.archived && sessionHasContent(session))
+    .sort((a, b) => getSessionTime(b) - getSessionTime(a))
+    .slice(0, limit)
+    .map(session => ({
+      id: sanitizeId(session.id, "chat"),
+      title: getSessionTitle(session),
+      preview: getSessionPreview(session),
+      updatedAt: session.updatedAt || session.createdAt || ""
+    }));
+}
+
 function writeChatSessionsSync(rawValue) {
   let sessions = [];
   try {
@@ -177,6 +264,7 @@ function writeChatSessionsSync(rawValue) {
     order,
     updatedAt: new Date().toISOString()
   });
+  refreshDesktopRecents();
   return true;
 }
 
@@ -220,6 +308,321 @@ function storageRemoveSync(key) {
   delete settings[key];
   writeSettingsSync(settings);
   return true;
+}
+
+function getActiveChatIdSync() {
+  return sanitizeId(storageGetSync(ACTIVE_CHAT_SESSION_STORAGE_KEY), "");
+}
+
+function normalizeAiProvider(value) {
+  return String(value || "").trim().toLowerCase() === "openai" ? "openai" : "local";
+}
+
+function getQuickModelStateBase() {
+  const provider = normalizeAiProvider(storageGetSync(AI_PROVIDER_STORAGE_KEY));
+  const localModel = String(storageGetSync(LOCAL_CHAT_MODEL_STORAGE_KEY) || DEFAULT_LOCAL_CHAT_MODEL).trim() || DEFAULT_LOCAL_CHAT_MODEL;
+  const openAiModel = String(storageGetSync(OPENAI_CHAT_MODEL_STORAGE_KEY) || DEFAULT_OPENAI_CHAT_MODEL).trim() || DEFAULT_OPENAI_CHAT_MODEL;
+  return {
+    provider,
+    localModel,
+    openAiModel,
+    modelId: provider === "openai" ? openAiModel : localModel
+  };
+}
+
+function normalizeOllamaTagModel(model) {
+  if (typeof model === "string") return model.trim();
+  if (!model || typeof model !== "object") return "";
+  return String(model.name || model.model || model.id || "").trim();
+}
+
+async function fetchInstalledOllamaModels(timeoutMs = 2500) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(OLLAMA_TAGS_URL, { method: "GET", signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json().catch(() => ({}));
+    return Array.isArray(data.models)
+      ? data.models.map(normalizeOllamaTagModel).filter(Boolean)
+      : [];
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function getQuickModelState() {
+  const state = getQuickModelStateBase();
+  try {
+    const installedOllamaModels = await fetchInstalledOllamaModels();
+    return {
+      ...state,
+      ollamaReachable: true,
+      installedOllamaModels
+    };
+  } catch {
+    return {
+      ...state,
+      ollamaReachable: false,
+      installedOllamaModels: []
+    };
+  }
+}
+
+async function isOllamaHttpReachable() {
+  try {
+    await fetchInstalledOllamaModels(1200);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getOllamaExecutableCandidates() {
+  if (process.platform !== "win32") return ["ollama"];
+  return [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Ollama", "ollama.exe"),
+    path.join(process.env.ProgramFiles || "", "Ollama", "ollama.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "", "Ollama", "ollama.exe"),
+    "ollama.exe",
+    "ollama"
+  ].filter(Boolean);
+}
+
+function findOllamaExecutable() {
+  for (const candidate of getOllamaExecutableCandidates()) {
+    const probe = spawnSync(candidate, ["--version"], {
+      encoding: "utf8",
+      windowsHide: true
+    });
+    if (!probe.error && probe.status === 0) return candidate;
+  }
+  return "";
+}
+
+async function startOllamaHttpService() {
+  if (await isOllamaHttpReachable()) {
+    return { ok: true, status: "running", message: "Ollama is already running." };
+  }
+
+  const executable = findOllamaExecutable();
+  if (!executable) {
+    return {
+      ok: false,
+      status: "missing",
+      message: "Ollama is not installed or is not on PATH.",
+      downloadUrl: "https://ollama.com/download"
+    };
+  }
+
+  try {
+    const child = spawn(executable, ["serve"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true
+    });
+    child.unref();
+  } catch (error) {
+    return {
+      ok: false,
+      status: "error",
+      message: error?.message || "Could not start Ollama."
+    };
+  }
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 350));
+    if (await isOllamaHttpReachable()) {
+      return { ok: true, status: "started", message: "Ollama HTTP is running." };
+    }
+  }
+
+  return {
+    ok: true,
+    status: "starting",
+    message: "Ollama was started. It may need a few more seconds before HTTP responds."
+  };
+}
+
+function getDesktopInfo() {
+  const settings = readSettingsSync();
+  const sessions = readChatSessionsSync();
+  return {
+    appDataPath: getUserDataRoot(),
+    settingsPath: getSettingsPath(),
+    chatsPath: getChatsRoot(),
+    mediaPath: path.join(getChatsRoot(), "<chatId>", "media"),
+    fileRefsPath: getFileRefsPath(),
+    bridgeEndpoint: storageGetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY),
+    bridgeRoot: getUserDataRoot(),
+    version: app.getVersion(),
+    isPackaged: app.isPackaged,
+    storageBackend: "AppData",
+    settingsKeys: Object.keys(settings).sort(),
+    chatCount: sessions.length,
+    activeChatId: getActiveChatIdSync(),
+    updateState
+  };
+}
+
+async function removePathInsideUserData(targetPath) {
+  const resolved = path.resolve(targetPath);
+  if (!isPathInside(resolved, getUserDataRoot())) {
+    throw new Error(`Refusing to remove path outside AppData: ${resolved}`);
+  }
+  try {
+    await fsp.rm(resolved, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100
+    });
+    return true;
+  } catch (error) {
+    console.warn("Could not remove AppData path:", resolved, error);
+    return false;
+  }
+}
+
+async function removeKnownCacheDirectories() {
+  let removed = 0;
+  let failed = 0;
+  for (const name of APP_CACHE_DIRECTORIES) {
+    const target = path.join(getUserDataRoot(), name);
+    if (!fs.existsSync(target)) continue;
+    if (await removePathInsideUserData(target)) removed += 1;
+    else failed += 1;
+  }
+  return { removed, failed };
+}
+
+function clearSettingsCacheKeys() {
+  const settings = readSettingsSync();
+  let removed = 0;
+  for (const key of APP_CACHE_STORAGE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(settings, key)) {
+      delete settings[key];
+      removed += 1;
+    }
+  }
+  writeSettingsSync(settings);
+  return removed;
+}
+
+async function removeTemporaryChatMediaFiles() {
+  let removed = 0;
+  let failed = 0;
+  const chatsRoot = getChatsRoot();
+  if (!fs.existsSync(chatsRoot)) return { removed, failed };
+
+  const chatDirs = await fsp.readdir(chatsRoot, { withFileTypes: true }).catch(() => []);
+  for (const chatDir of chatDirs) {
+    if (!chatDir.isDirectory()) continue;
+    const mediaDir = path.join(chatsRoot, chatDir.name, "media");
+    const mediaEntries = await fsp.readdir(mediaDir, { withFileTypes: true }).catch(() => []);
+    for (const mediaEntry of mediaEntries) {
+      if (!mediaEntry.isFile() || !TEMP_MEDIA_FILE_RE.test(mediaEntry.name)) continue;
+      const target = path.join(mediaDir, mediaEntry.name);
+      if (await removePathInsideUserData(target)) removed += 1;
+      else failed += 1;
+    }
+  }
+  return { removed, failed };
+}
+
+function stripVoiceRecordingsFromStoredChats() {
+  let updated = 0;
+  const chatsRoot = getChatsRoot();
+  if (!fs.existsSync(chatsRoot)) return updated;
+
+  const chatDirs = fs.readdirSync(chatsRoot, { withFileTypes: true });
+  for (const chatDir of chatDirs) {
+    if (!chatDir.isDirectory()) continue;
+    const chatFile = path.join(chatsRoot, chatDir.name, "chat.json");
+    const session = readJsonFileSync(chatFile, null);
+    if (!session || typeof session !== "object") continue;
+
+    let changed = false;
+    if (Array.isArray(session.conversationHistory)) {
+      session.conversationHistory.forEach(message => {
+        if (message?.voiceRecording) {
+          delete message.voiceRecording;
+          changed = true;
+        }
+      });
+    }
+    if (typeof session.chatHtml === "string" && /voice-recording-player/.test(session.chatHtml)) {
+      session.chatHtml = removeVoiceRecordingPlayersFromHtml(session.chatHtml);
+      changed = true;
+    }
+    if (!changed) continue;
+    writeJsonFileSync(chatFile, session);
+    updated += 1;
+  }
+  return updated;
+}
+
+function removeVoiceRecordingPlayersFromHtml(html = "") {
+  let output = String(html || "");
+  let markerIndex = output.search(/\bvoice-recording-player\b/i);
+  while (markerIndex >= 0) {
+    const start = output.lastIndexOf("<div", markerIndex);
+    if (start < 0) break;
+
+    const tagRe = /<\/?div\b[^>]*>/gi;
+    tagRe.lastIndex = start;
+    let depth = 0;
+    let end = -1;
+    let match;
+    while ((match = tagRe.exec(output))) {
+      if (match[0][1] === "/") {
+        depth -= 1;
+        if (depth === 0) {
+          end = tagRe.lastIndex;
+          break;
+        }
+      } else {
+        depth += 1;
+      }
+    }
+    if (end < 0) break;
+    output = `${output.slice(0, start)}${output.slice(end)}`;
+    markerIndex = output.search(/\bvoice-recording-player\b/i);
+  }
+  return output;
+}
+
+async function clearAppCacheData() {
+  const removedSettingsKeys = clearSettingsCacheKeys();
+  const media = await removeTemporaryChatMediaFiles();
+  const cacheDirs = await removeKnownCacheDirectories();
+  const updatedChats = stripVoiceRecordingsFromStoredChats();
+  refreshDesktopRecents();
+  return {
+    ok: true,
+    removedSettingsKeys,
+    removedTemporaryFiles: media.removed,
+    failedTemporaryFiles: media.failed,
+    removedCacheDirectories: cacheDirs.removed,
+    failedCacheDirectories: cacheDirs.failed,
+    updatedChats
+  };
+}
+
+async function resetAppData(payload = {}) {
+  if (payload.confirmFiles !== true || payload.confirmChats !== true) {
+    throw new Error("Reset requires confirmation for files/artifacts and chats.");
+  }
+
+  await clearAppCacheData();
+  await removePathInsideUserData(getSettingsPath());
+  await removePathInsideUserData(getFileRefsPath());
+  await removePathInsideUserData(getChatsRoot());
+  refreshDesktopRecents();
+  return {
+    ok: true,
+    reset: true
+  };
 }
 
 function getFileRefsPath() {
@@ -339,7 +742,12 @@ function inferExtension(mimeType, fallback = "bin") {
     "video/mp4": "mp4",
     "video/webm": "webm",
     "audio/mpeg": "mp3",
-    "audio/wav": "wav"
+    "audio/mp3": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/webm": "webm",
+    "audio/mp4": "m4a",
+    "audio/ogg": "ogg"
   };
   return map[clean] || fallback;
 }
@@ -673,7 +1081,319 @@ async function installDesktopUpdate() {
   return updateState;
 }
 
-function createWindow() {
+function getAppIconPath() {
+  const icoPath = path.join(getAppRoot(), "build", "icon.ico");
+  if (fs.existsSync(icoPath)) return icoPath;
+  return path.join(getAppRoot(), "favicon.png");
+}
+
+function getJumpListIconPath() {
+  return app.isPackaged ? process.execPath : getAppIconPath();
+}
+
+function getTrayImage() {
+  const iconPath = getAppIconPath();
+  const image = nativeImage.createFromPath(iconPath);
+  if (!image.isEmpty()) return image.resize({ width: 16, height: 16 });
+  return nativeImage.createFromPath(path.join(getAppRoot(), "favicon.png")).resize({ width: 16, height: 16 });
+}
+
+function getChatIdFromArgv(argv = []) {
+  for (const arg of argv) {
+    const match = String(arg || "").match(/^--open-chat=(.+)$/);
+    if (match) return sanitizeId(decodeURIComponent(match[1]), "");
+  }
+  return "";
+}
+
+function hasArg(argv = [], name) {
+  return argv.some(arg => String(arg || "") === name);
+}
+
+function getMainWindowUrl(chatId = "") {
+  const hash = chatId ? `#${WORKSPACE_URL_FRAGMENT_CHAT}=${encodeURIComponent(chatId)}` : "";
+  return `${APP_PROTOCOL}://app/index.html${hash}`;
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function flushPendingRendererActions() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (pendingNewChat) {
+    sendToRenderer("fauna:new-chat", {});
+    pendingNewChat = false;
+  }
+  if (pendingOpenChatId) {
+    sendToRenderer("fauna:open-chat", { chatId: pendingOpenChatId });
+    pendingOpenChatId = "";
+  }
+  if (pendingQuickPrompt) {
+    sendToRenderer("fauna:quick-prompt", { prompt: pendingQuickPrompt });
+    pendingQuickPrompt = "";
+  }
+  if (pendingQuickPayload) {
+    sendToRenderer("fauna:quick-prompt", pendingQuickPayload);
+    pendingQuickPayload = null;
+  }
+}
+
+function normalizeQuickPromptPayload(payload) {
+  const raw = payload && typeof payload === "object"
+    ? payload
+    : { prompt: String(payload || "") };
+  const attachments = Array.isArray(raw.attachments)
+    ? raw.attachments.map(attachment => ({
+      path: String(attachment?.path || attachment?.filePath || "").trim(),
+      name: String(attachment?.name || "").trim(),
+      type: String(attachment?.type || "").trim()
+    })).filter(attachment => attachment.path)
+    : [];
+  return {
+    prompt: String(raw.prompt || "").trim(),
+    provider: normalizeAiProvider(raw.provider),
+    modelId: String(raw.modelId || "").trim(),
+    attachments
+  };
+}
+
+function quickPromptPayloadHasContent(payload) {
+  return Boolean(payload?.prompt || payload?.attachments?.length);
+}
+
+function openMainWindow({ chatId = "", prompt = "", quickPayload = null, newChat = false } = {}) {
+  const safeChatId = sanitizeId(chatId, "");
+  const nextPrompt = String(prompt || "").trim();
+  const nextQuickPayload = quickPayload
+    ? normalizeQuickPromptPayload(quickPayload)
+    : nextPrompt ? normalizeQuickPromptPayload({ prompt: nextPrompt }) : null;
+  pendingOpenChatId = safeChatId || pendingOpenChatId;
+  pendingQuickPrompt = nextPrompt || pendingQuickPrompt;
+  if (quickPromptPayloadHasContent(nextQuickPayload)) {
+    pendingQuickPayload = nextQuickPayload;
+    pendingQuickPrompt = "";
+  }
+  pendingNewChat = Boolean(newChat || pendingNewChat);
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow({ chatId: safeChatId });
+    return;
+  }
+
+  showMainWindow();
+  if (mainWindow.webContents.isLoading() || !mainRendererReady) return;
+  flushPendingRendererActions();
+}
+
+function closeQuickWindow() {
+  quickWindow?.hide();
+}
+
+function positionQuickWindow() {
+  if (!quickWindow) return;
+  const size = quickWindow.getBounds();
+  const trayBounds = tray?.getBounds?.();
+  const display = trayBounds?.width
+    ? screen.getDisplayMatching(trayBounds)
+    : screen.getPrimaryDisplay();
+  const workArea = display.workArea;
+
+  let x = Math.round(workArea.x + workArea.width - size.width - 18);
+  let y = Math.round(workArea.y + workArea.height - size.height - 18);
+
+  if (trayBounds?.width) {
+    x = Math.round(trayBounds.x + (trayBounds.width / 2) - (size.width / 2));
+    y = Math.round(trayBounds.y - size.height - 10);
+  }
+
+  x = Math.max(workArea.x + 8, Math.min(x, workArea.x + workArea.width - size.width - 8));
+  y = Math.max(workArea.y + 8, Math.min(y, workArea.y + workArea.height - size.height - 8));
+  quickWindow.setBounds({ x, y, width: size.width, height: size.height });
+}
+
+function createQuickWindow() {
+  if (quickWindow && !quickWindow.isDestroyed()) return quickWindow;
+  quickWindow = new BrowserWindow({
+    width: 470,
+    height: 640,
+    minWidth: 360,
+    minHeight: 520,
+    maxWidth: 560,
+    maxHeight: 760,
+    frame: false,
+    show: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: "#111214",
+    title: "Fauna",
+    icon: getAppIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webSecurity: true
+    }
+  });
+
+  quickWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) {
+      shell.openExternal(url);
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
+  quickWindow.on("blur", () => {
+    if (!quickWindow?.webContents.isDevToolsOpened()) quickWindow?.hide();
+  });
+  quickWindow.on("closed", () => {
+    quickWindow = null;
+  });
+  quickWindow.loadURL(`${APP_PROTOCOL}://app/desktop-quick.html`);
+  return quickWindow;
+}
+
+function toggleQuickWindow() {
+  const window = createQuickWindow();
+  if (window.isVisible()) {
+    window.hide();
+    return;
+  }
+  positionQuickWindow();
+  window.show();
+  window.focus();
+  window.webContents.send("fauna:recent-chats-changed", getRecentChatSummaries());
+}
+
+function buildRecentChatMenuItems(limit = 5) {
+  const chats = getRecentChatSummaries(limit);
+  if (chats.length === 0) {
+    return [{ label: "No recent chats", enabled: false }];
+  }
+  return chats.map(chat => ({
+    label: chat.title,
+    sublabel: chat.preview || "Open chat",
+    click: () => openMainWindow({ chatId: chat.id })
+  }));
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Open Fauna", click: () => openMainWindow() },
+    { label: "New chat", click: () => openMainWindow({ newChat: true }) },
+    { type: "separator" },
+    { label: "Recent chats", enabled: false },
+    ...buildRecentChatMenuItems(5),
+    { type: "separator" },
+    { label: "Check for updates", click: () => void checkForDesktopUpdate() },
+    {
+      label: "Quit Fauna",
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
+  ]));
+}
+
+function createTray() {
+  if (tray) return tray;
+  tray = new Tray(getTrayImage());
+  tray.setToolTip("Fauna");
+  tray.on("click", toggleQuickWindow);
+  tray.on("double-click", () => openMainWindow());
+  updateTrayMenu();
+  return tray;
+}
+
+function updateJumpList() {
+  if (process.platform !== "win32") return;
+  const recentChats = getRecentChatSummaries(10).map(chat => ({
+    type: "task",
+    title: chat.title,
+    description: chat.preview || "Open recent Fauna chat",
+    program: process.execPath,
+    args: `--open-chat=${encodeURIComponent(chat.id)}`,
+    iconPath: getJumpListIconPath(),
+    iconIndex: 0
+  }));
+
+  const categories = [
+    {
+      type: "tasks",
+      items: [
+        {
+          type: "task",
+          title: "Open Fauna",
+          description: "Open the Fauna desktop app",
+          program: process.execPath,
+          args: "--open-fauna",
+          iconPath: getJumpListIconPath(),
+          iconIndex: 0
+        },
+        {
+          type: "task",
+          title: "New chat",
+          description: "Start a new Fauna chat",
+          program: process.execPath,
+          args: "--new-chat",
+          iconPath: getJumpListIconPath(),
+          iconIndex: 0
+        }
+      ]
+    }
+  ];
+
+  if (recentChats.length > 0) {
+    categories.unshift({
+      type: "custom",
+      name: "Recent chats",
+      items: recentChats
+    });
+  }
+
+  try {
+    app.setJumpList(categories);
+  } catch (error) {
+    console.warn("Could not update Fauna jump list:", error);
+  }
+}
+
+function refreshDesktopRecents() {
+  if (!app.isReady?.()) return;
+  updateTrayMenu();
+  updateJumpList();
+  quickWindow?.webContents.send("fauna:recent-chats-changed", getRecentChatSummaries());
+}
+
+function handleLaunchArgs(argv = []) {
+  if (hasArg(argv, "--quit-fauna")) {
+    app.isQuitting = true;
+    app.quit();
+    return;
+  }
+  if (hasArg(argv, "--new-chat")) {
+    openMainWindow({ newChat: true });
+    return;
+  }
+  const chatId = getChatIdFromArgv(argv);
+  if (chatId) {
+    openMainWindow({ chatId });
+    return;
+  }
+  openMainWindow();
+}
+
+function createWindow({ chatId = "" } = {}) {
   mainWindow = new BrowserWindow({
     width: 1320,
     height: 900,
@@ -704,6 +1424,11 @@ function createWindow() {
     return { action: "allow" };
   });
 
+  mainWindow.on("close", event => {
+    if (app.isQuitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+  });
   mainWindow.on("maximize", sendWindowState);
   mainWindow.on("unmaximize", sendWindowState);
   mainWindow.on("restore", sendWindowState);
@@ -712,12 +1437,13 @@ function createWindow() {
   mainWindow.webContents.on("did-navigate", sendNavigationState);
   mainWindow.webContents.on("did-navigate-in-page", sendNavigationState);
   mainWindow.webContents.on("did-finish-load", () => {
+    mainRendererReady = false;
     sendNavigationState();
     sendWindowState();
     sendToRenderer("fauna:update-status", updateState);
   });
 
-  mainWindow.loadURL(`${APP_PROTOCOL}://app/index.html`);
+  mainWindow.loadURL(getMainWindowUrl(chatId || pendingOpenChatId));
 }
 
 function registerIpc() {
@@ -728,19 +1454,18 @@ function registerIpc() {
     event.returnValue = storageSetSync(String(key || ""), value);
   });
   ipcMain.on("fauna:storage-remove", (event, key) => {
-    event.returnValue = storageRemoveSync(String(key || ""));
+    const ok = storageRemoveSync(String(key || ""));
+    refreshDesktopRecents();
+    event.returnValue = ok;
   });
   ipcMain.on("fauna:file-url", (event, filePath) => {
     event.returnValue = selectedFileUrlForPath(filePath);
   });
   ipcMain.handle("fauna:save-generated-media", (_event, payload) => saveGeneratedMedia(payload));
-  ipcMain.handle("fauna:desktop-info", () => ({
-    appDataPath: getUserDataRoot(),
-    chatsPath: getChatsRoot(),
-    bridgeEndpoint: storageGetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY),
-    bridgeRoot: getUserDataRoot(),
-    version: app.getVersion()
-  }));
+  ipcMain.handle("fauna:desktop-info", () => getDesktopInfo());
+  ipcMain.handle("fauna:start-ollama", () => startOllamaHttpService());
+  ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
+  ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));
   ipcMain.handle("fauna:window-minimize", () => {
     mainWindow?.minimize();
     return { ok: true };
@@ -774,29 +1499,78 @@ function registerIpc() {
   ipcMain.handle("fauna:update-state", () => updateState);
   ipcMain.handle("fauna:update-check", () => checkForDesktopUpdate());
   ipcMain.handle("fauna:update-install", () => installDesktopUpdate());
+  ipcMain.handle("fauna:main-renderer-ready", () => {
+    mainRendererReady = true;
+    flushPendingRendererActions();
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:recent-chats", (_event, limit = 8) => getRecentChatSummaries(Number(limit) || 8));
+  ipcMain.handle("fauna:quick-model-state", () => getQuickModelState());
+  ipcMain.handle("fauna:quick-open-main", () => {
+    closeQuickWindow();
+    openMainWindow({ chatId: getActiveChatIdSync() });
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:quick-open-chat", (_event, chatId) => {
+    closeQuickWindow();
+    openMainWindow({ chatId: String(chatId || "") });
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:quick-new-chat", () => {
+    closeQuickWindow();
+    openMainWindow({ newChat: true });
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:quick-send-prompt", (_event, payload) => {
+    closeQuickWindow();
+    openMainWindow({
+      chatId: getActiveChatIdSync(),
+      quickPayload: normalizeQuickPromptPayload(payload)
+    });
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:quick-close", () => {
+    closeQuickWindow();
+    return { ok: true };
+  });
 }
 
-app.whenReady().then(async () => {
-  ensureDirSync(getUserDataRoot());
-  protocol.handle(APP_PROTOCOL, handleAppProtocol);
-  protocol.handle(FILE_PROTOCOL, handleFileProtocol);
-  configureMediaPermissions();
-  configureAutoUpdater();
-  registerIpc();
-  try {
-    await startWorkspaceBridge();
-  } catch (error) {
-    console.warn("Fauna desktop could not start the workspace bridge:", error);
-  }
-  createWindow();
-  setTimeout(() => {
-    void checkForDesktopUpdate();
-  }, 4000);
+pendingOpenChatId = getChatIdFromArgv(process.argv);
+pendingNewChat = hasArg(process.argv, "--new-chat");
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    handleLaunchArgs(argv);
   });
-});
+
+  app.whenReady().then(async () => {
+    ensureDirSync(getUserDataRoot());
+    protocol.handle(APP_PROTOCOL, handleAppProtocol);
+    protocol.handle(FILE_PROTOCOL, handleFileProtocol);
+    configureMediaPermissions();
+    configureAutoUpdater();
+    registerIpc();
+    try {
+      await startWorkspaceBridge();
+    } catch (error) {
+      console.warn("Fauna desktop could not start the workspace bridge:", error);
+    }
+    createTray();
+    updateJumpList();
+    createWindow({ chatId: pendingOpenChatId });
+    setTimeout(() => {
+      void checkForDesktopUpdate();
+    }, 4000);
+
+    app.on("activate", () => {
+      openMainWindow();
+    });
+  });
+}
 
 app.on("before-quit", () => {
   app.isQuitting = true;
@@ -806,5 +1580,5 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin" && !tray) app.quit();
 });

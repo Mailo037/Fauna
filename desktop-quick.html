@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fauna</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #121315;
+            --panel: #202124;
+            --panel-2: #2c2d31;
+            --border: rgba(255, 255, 255, 0.09);
+            --text: #f3f4f8;
+            --muted: #9da3af;
+            --dim: #6f7683;
+            --accent: #5b7cfa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--text);
+        }
+
+        button,
+        textarea {
+            font: inherit;
+        }
+
+        button {
+            border: 0;
+        }
+
+        .quick-shell {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-rows: 54px minmax(0, 1fr) auto;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 18px;
+            background: var(--bg);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+        }
+
+        .quick-header {
+            display: grid;
+            grid-template-columns: 42px minmax(0, 1fr) 92px;
+            align-items: center;
+            padding: 0 14px;
+            -webkit-app-region: drag;
+        }
+
+        .quick-title {
+            justify-self: center;
+            min-width: 0;
+            overflow: hidden;
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 850;
+            letter-spacing: 0;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .quick-actions {
+            justify-self: end;
+            display: flex;
+            gap: 4px;
+        }
+
+        .icon-btn,
+        .send-btn,
+        .composer-tool-btn,
+        .model-option,
+        .chip-remove,
+        .footer-link {
+            -webkit-app-region: no-drag;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            background: transparent;
+            cursor: pointer;
+            transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+        }
+
+        .icon-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 9px;
+        }
+
+        .icon-btn:hover,
+        .icon-btn:focus-visible,
+        .composer-tool-btn:hover,
+        .composer-tool-btn:focus-visible,
+        .footer-link:hover,
+        .footer-link:focus-visible {
+            background: var(--panel);
+            color: var(--text);
+            outline: 0;
+        }
+
+        .icon-btn svg,
+        .send-btn svg,
+        .composer-tool-btn svg,
+        .chip-remove svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .quick-main {
+            min-height: 0;
+            display: grid;
+            align-content: start;
+            gap: 18px;
+            padding: 42px 30px 22px;
+            overflow-y: auto;
+        }
+
+        .greeting {
+            display: grid;
+            gap: 9px;
+        }
+
+        .greeting h1 {
+            font-size: 16px;
+            font-weight: 850;
+            line-height: 1.35;
+        }
+
+        .greeting p {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .recent-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .recent-heading {
+            color: var(--dim);
+            font-size: 11px;
+            font-weight: 820;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .recent-chat {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 28px minmax(0, 1fr);
+            align-items: center;
+            gap: 10px;
+            min-height: 48px;
+            padding: 8px 10px;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            background: transparent;
+            color: var(--text);
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .recent-chat:hover,
+        .recent-chat:focus-visible {
+            border-color: var(--border);
+            background: var(--panel);
+            outline: 0;
+        }
+
+        .recent-icon {
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            color: var(--accent);
+            background: rgba(91, 124, 250, 0.14);
+        }
+
+        .recent-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .recent-copy {
+            min-width: 0;
+            display: grid;
+            gap: 2px;
+        }
+
+        .recent-title,
+        .recent-preview {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .recent-title {
+            font-size: 13px;
+            font-weight: 820;
+        }
+
+        .recent-preview {
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 650;
+        }
+
+        .empty-state {
+            display: grid;
+            gap: 8px;
+            padding: 18px 0;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .quick-composer {
+            display: grid;
+            gap: 10px;
+            padding: 0 30px 30px;
+        }
+
+        .composer-box {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 38px;
+            gap: 10px;
+            align-items: end;
+            min-height: 106px;
+            padding: 14px 14px 12px;
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            background: var(--panel);
+        }
+
+        .composer-main {
+            min-width: 0;
+            display: grid;
+            gap: 10px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 48px;
+            max-height: 118px;
+            resize: none;
+            border: 0;
+            outline: 0;
+            background: transparent;
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.45;
+        }
+
+        textarea::placeholder {
+            color: #747a84;
+        }
+
+        .attachment-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .attachment-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            max-width: 100%;
+            height: 26px;
+            padding: 0 6px 0 8px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.045);
+            color: rgba(255, 255, 255, 0.78);
+            font-size: 11px;
+            font-weight: 720;
+        }
+
+        .attachment-chip span {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .chip-remove {
+            flex: 0 0 auto;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+        }
+
+        .chip-remove:hover,
+        .chip-remove:focus-visible {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            outline: 0;
+        }
+
+        .composer-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .composer-tool-btn {
+            min-width: 28px;
+            height: 28px;
+            border-radius: 9px;
+        }
+
+        .model-picker-wrap {
+            position: relative;
+            min-width: 0;
+        }
+
+        .model-button {
+            max-width: 210px;
+            gap: 6px;
+            padding: 0 8px;
+            color: rgba(255, 255, 255, 0.76);
+            font-size: 12px;
+            font-weight: 780;
+        }
+
+        .model-button span {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .model-button svg {
+            width: 13px;
+            height: 13px;
+            flex: 0 0 auto;
+        }
+
+        .model-menu {
+            position: absolute;
+            left: 0;
+            bottom: calc(100% + 8px);
+            z-index: 20;
+            width: min(280px, calc(100vw - 72px));
+            max-height: 260px;
+            overflow: auto;
+            padding: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 14px;
+            background: #1b1c1f;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.36);
+        }
+
+        .model-menu[hidden] {
+            display: none;
+        }
+
+        .model-option {
+            width: 100%;
+            justify-content: space-between;
+            gap: 12px;
+            min-height: 38px;
+            padding: 8px 9px;
+            border-radius: 10px;
+            text-align: left;
+        }
+
+        .model-option:hover,
+        .model-option:focus-visible,
+        .model-option.active {
+            background: rgba(255, 255, 255, 0.07);
+            color: var(--text);
+            outline: 0;
+        }
+
+        .model-option-copy {
+            min-width: 0;
+            display: grid;
+            gap: 2px;
+        }
+
+        .model-option-copy strong,
+        .model-option-copy small {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .model-option-copy strong {
+            font-size: 12px;
+            font-weight: 820;
+        }
+
+        .model-option-copy small {
+            color: var(--dim);
+            font-size: 10.5px;
+            font-weight: 680;
+        }
+
+        .model-option-check {
+            flex: 0 0 auto;
+            color: var(--accent);
+            opacity: 0;
+        }
+
+        .model-option.active .model-option-check {
+            opacity: 1;
+        }
+
+        .send-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: #f2f3f5;
+            color: #17181b;
+        }
+
+        .send-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.42;
+        }
+
+        .send-btn:hover:not(:disabled),
+        .send-btn:focus-visible:not(:disabled) {
+            transform: translateY(-1px);
+            outline: 0;
+        }
+
+        .quick-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2px;
+            color: var(--dim);
+            font-size: 11px;
+            font-weight: 760;
+        }
+
+        .footer-link {
+            justify-content: flex-start;
+            min-height: 24px;
+            padding: 0 4px;
+            border-radius: 7px;
+        }
+    </style>
+</head>
+<body>
+    <section class="quick-shell" aria-label="Fauna quick chat">
+        <header class="quick-header">
+            <button id="closeBtn" class="icon-btn" type="button" aria-label="Close quick chat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M6 6l12 12"></path>
+                    <path d="M18 6 6 18"></path>
+                </svg>
+            </button>
+            <div class="quick-title">Fauna</div>
+            <div class="quick-actions">
+                <button id="newChatBtn" class="icon-btn" type="button" aria-label="New chat">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 5v14"></path>
+                        <path d="M5 12h14"></path>
+                    </svg>
+                </button>
+                <button id="openMainBtn" class="icon-btn" type="button" aria-label="Open current chat">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <rect x="4" y="5" width="15" height="15" rx="2"></rect>
+                        <path d="M9 4h9a2 2 0 0 1 2 2v9"></path>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="quick-main">
+            <section class="greeting">
+                <h1>Moin! Was liegt an?</h1>
+                <p>Ask something quick, or jump back into one of your recent chats.</p>
+            </section>
+            <section class="recent-list" aria-labelledby="recentHeading">
+                <div id="recentHeading" class="recent-heading">Recent chats</div>
+                <div id="recentChats"></div>
+            </section>
+        </main>
+
+        <form id="quickForm" class="quick-composer">
+            <input id="fileInput" type="file" multiple hidden accept="image/*,.pdf,.txt,.md,.js,.py,.json,.csv,.html,.css">
+            <div class="composer-box">
+                <div class="composer-main">
+                    <textarea id="promptInput" rows="2" placeholder="Ask Fauna"></textarea>
+                    <div id="attachmentChips" class="attachment-chips" hidden></div>
+                    <div class="composer-toolbar">
+                        <button id="attachBtn" class="composer-tool-btn" type="button" aria-label="Add attachments">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M12 5v14"></path>
+                                <path d="M5 12h14"></path>
+                            </svg>
+                        </button>
+                        <div class="model-picker-wrap">
+                            <button id="modelBtn" class="composer-tool-btn model-button" type="button" aria-label="Change model" aria-expanded="false" aria-controls="modelMenu">
+                                <span id="modelLabel">qwen3:8b</span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="m6 9 6 6 6-6"></path>
+                                </svg>
+                            </button>
+                            <div id="modelMenu" class="model-menu" hidden></div>
+                        </div>
+                    </div>
+                </div>
+                <button id="sendBtn" class="send-btn" type="submit" aria-label="Send prompt" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 19V5"></path>
+                        <path d="m5 12 7-7 7 7"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="quick-footer">
+                <button id="openLibraryBtn" class="footer-link" type="button">Open full app</button>
+                <span>Enter sends</span>
+            </div>
+        </form>
+    </section>
+
+    <script>
+        const desktop = window.faunaDesktop;
+        const quick = desktop?.quick;
+        const AI_PROVIDER_KEY = "faunaAiProvider";
+        const LOCAL_MODEL_KEY = "faunaLocalChatModel";
+        const OPENAI_MODEL_KEY = "faunaOpenAiChatModel";
+        const DEFAULT_LOCAL_MODEL = "qwen3:8b";
+        const DEFAULT_OPENAI_MODEL = "gpt-5.4-mini";
+        const LOCAL_MODELS = [
+            { id: "qwen3:8b", label: "qwen3:8b", meta: "Local reasoning" },
+            { id: "qwen3-coder:30b", label: "qwen3-coder:30b", meta: "Local code" },
+            { id: "llama2", label: "llama2", meta: "Local chat" },
+            { id: "moondream", label: "moondream", meta: "Local vision" }
+        ];
+        const OPENAI_MODELS = [
+            { id: "gpt-5.4-mini", label: "gpt-5.4-mini", meta: "OpenAI" },
+            { id: "gpt-5.4", label: "gpt-5.4", meta: "OpenAI" },
+            { id: "gpt-5.3-mini", label: "gpt-5.3-mini", meta: "OpenAI" }
+        ];
+
+        const recentChats = document.getElementById("recentChats");
+        const promptInput = document.getElementById("promptInput");
+        const sendBtn = document.getElementById("sendBtn");
+        const quickForm = document.getElementById("quickForm");
+        const fileInput = document.getElementById("fileInput");
+        const attachBtn = document.getElementById("attachBtn");
+        const attachmentChips = document.getElementById("attachmentChips");
+        const modelBtn = document.getElementById("modelBtn");
+        const modelLabel = document.getElementById("modelLabel");
+        const modelMenu = document.getElementById("modelMenu");
+        const chatIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"></path></svg>';
+        const checkIcon = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>';
+        let selectedAttachments = [];
+        let modelState = {
+            provider: readStorage(AI_PROVIDER_KEY, "local") === "openai" ? "openai" : "local",
+            localModel: readStorage(LOCAL_MODEL_KEY, DEFAULT_LOCAL_MODEL),
+            openAiModel: readStorage(OPENAI_MODEL_KEY, DEFAULT_OPENAI_MODEL),
+            installedOllamaModels: [],
+            ollamaReachable: false
+        };
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
+
+        function readStorage(key, fallback = "") {
+            try {
+                return desktop?.storageGet?.(key) || fallback;
+            } catch {
+                return fallback;
+            }
+        }
+
+        function writeStorage(key, value) {
+            try {
+                desktop?.storageSet?.(key, value);
+            } catch {}
+        }
+
+        function getActiveModelId() {
+            return modelState.provider === "openai"
+                ? modelState.openAiModel || DEFAULT_OPENAI_MODEL
+                : modelState.localModel || DEFAULT_LOCAL_MODEL;
+        }
+
+        function getModelOptions() {
+            const installed = new Set(modelState.installedOllamaModels || []);
+            const local = new Map();
+            [...LOCAL_MODELS, ...Array.from(installed).map(id => ({ id, label: id, meta: "Installed" }))].forEach(option => {
+                if (!option.id || local.has(option.id)) return;
+                const isInstalled = installed.has(option.id);
+                local.set(option.id, {
+                    ...option,
+                    provider: "local",
+                    meta: isInstalled ? "Installed" : option.meta || "Local"
+                });
+            });
+            const openai = OPENAI_MODELS.map(option => ({ ...option, provider: "openai" }));
+            return [...local.values(), ...openai];
+        }
+
+        function renderModelLabel() {
+            if (!modelLabel) return;
+            const providerPrefix = modelState.provider === "openai" ? "OpenAI" : "Ollama";
+            modelLabel.textContent = `${providerPrefix} · ${getActiveModelId()}`;
+        }
+
+        function renderModelMenu() {
+            if (!modelMenu) return;
+            const activeProvider = modelState.provider;
+            const activeModel = getActiveModelId();
+            modelMenu.replaceChildren(...getModelOptions().map(option => {
+                const button = document.createElement("button");
+                const isActive = option.provider === activeProvider && option.id === activeModel;
+                button.className = `model-option${isActive ? " active" : ""}`;
+                button.type = "button";
+                button.innerHTML = `
+                    <span class="model-option-copy">
+                        <strong>${escapeHtml(option.label || option.id)}</strong>
+                        <small>${escapeHtml(option.provider === "openai" ? option.meta || "OpenAI" : option.meta || "Ollama")}</small>
+                    </span>
+                    <span class="model-option-check">${checkIcon}</span>
+                `;
+                button.addEventListener("click", () => {
+                    modelState.provider = option.provider;
+                    if (option.provider === "openai") {
+                        modelState.openAiModel = option.id;
+                        writeStorage(OPENAI_MODEL_KEY, option.id);
+                    } else {
+                        modelState.localModel = option.id;
+                        writeStorage(LOCAL_MODEL_KEY, option.id);
+                    }
+                    writeStorage(AI_PROVIDER_KEY, option.provider);
+                    renderModelLabel();
+                    renderModelMenu();
+                    setModelMenuOpen(false);
+                });
+                return button;
+            }));
+        }
+
+        function setModelMenuOpen(open) {
+            if (!modelMenu || !modelBtn) return;
+            modelMenu.hidden = !open;
+            modelBtn.setAttribute("aria-expanded", String(open));
+        }
+
+        function updateSendState() {
+            if (sendBtn) {
+                sendBtn.disabled = !promptInput?.value.trim() && selectedAttachments.length === 0;
+            }
+        }
+
+        function renderAttachmentChips() {
+            if (!attachmentChips) return;
+            attachmentChips.hidden = selectedAttachments.length === 0;
+            attachmentChips.replaceChildren(...selectedAttachments.map((attachment, index) => {
+                const chip = document.createElement("span");
+                chip.className = "attachment-chip";
+                chip.innerHTML = `
+                    <span>${escapeHtml(attachment.name || attachment.path)}</span>
+                    <button class="chip-remove" type="button" aria-label="Remove ${escapeHtml(attachment.name || "attachment")}">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                            <path d="M18 6 6 18"></path>
+                            <path d="m6 6 12 12"></path>
+                        </svg>
+                    </button>
+                `;
+                chip.querySelector("button")?.addEventListener("click", () => {
+                    selectedAttachments = selectedAttachments.filter((_, itemIndex) => itemIndex !== index);
+                    renderAttachmentChips();
+                    updateSendState();
+                });
+                return chip;
+            }));
+        }
+
+        function addSelectedFiles(files) {
+            Array.from(files || []).forEach(file => {
+                const filePath = desktop?.getFilePath?.(file) || "";
+                if (!filePath) return;
+                if (selectedAttachments.some(attachment => attachment.path === filePath)) return;
+                selectedAttachments.push({
+                    path: filePath,
+                    name: file.name || filePath.split(/[\\/]/).pop() || "attachment",
+                    type: file.type || "",
+                    size: file.size || 0
+                });
+            });
+            renderAttachmentChips();
+            updateSendState();
+        }
+
+        function renderRecentChats(items = []) {
+            if (!recentChats) return;
+            if (!items.length) {
+                recentChats.innerHTML = '<div class="empty-state">No recent chats yet. Start with a quick prompt below.</div>';
+                return;
+            }
+            recentChats.replaceChildren(...items.map(item => {
+                const button = document.createElement("button");
+                button.className = "recent-chat";
+                button.type = "button";
+                button.innerHTML = `
+                    <span class="recent-icon">${chatIcon}</span>
+                    <span class="recent-copy">
+                        <span class="recent-title">${escapeHtml(item.title || "Current Session")}</span>
+                        <span class="recent-preview">${escapeHtml(item.preview || "Open chat")}</span>
+                    </span>
+                `;
+                button.addEventListener("click", () => quick?.openChat?.(item.id));
+                return button;
+            }));
+        }
+
+        async function refreshRecentChats() {
+            try {
+                renderRecentChats(await quick?.getRecentChats?.(6) || []);
+            } catch {
+                renderRecentChats([]);
+            }
+        }
+
+        async function refreshModelState() {
+            try {
+                const state = await quick?.getModelState?.();
+                if (state && typeof state === "object") {
+                    modelState = {
+                        ...modelState,
+                        ...state,
+                        provider: state.provider === "openai" ? "openai" : "local"
+                    };
+                }
+            } catch {}
+            renderModelLabel();
+            renderModelMenu();
+        }
+
+        promptInput?.addEventListener("input", () => {
+            updateSendState();
+            promptInput.style.height = "auto";
+            promptInput.style.height = `${Math.min(promptInput.scrollHeight, 118)}px`;
+        });
+
+        promptInput?.addEventListener("keydown", event => {
+            if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                quickForm?.requestSubmit();
+            }
+            if (event.key === "Escape") {
+                if (modelMenu && !modelMenu.hidden) {
+                    setModelMenuOpen(false);
+                    return;
+                }
+                quick?.close?.();
+            }
+        });
+
+        quickForm?.addEventListener("submit", event => {
+            event.preventDefault();
+            const prompt = promptInput?.value.trim() || "";
+            if (!prompt && selectedAttachments.length === 0) return;
+            quick?.sendPrompt?.({
+                prompt,
+                provider: modelState.provider,
+                modelId: getActiveModelId(),
+                attachments: selectedAttachments
+            });
+        });
+
+        attachBtn?.addEventListener("click", () => fileInput?.click());
+        fileInput?.addEventListener("change", event => {
+            addSelectedFiles(event.target.files);
+            fileInput.value = "";
+        });
+        modelBtn?.addEventListener("click", event => {
+            event.stopPropagation();
+            setModelMenuOpen(modelMenu?.hidden !== false);
+        });
+        document.addEventListener("click", event => {
+            if (!event.target.closest(".model-picker-wrap")) setModelMenuOpen(false);
+        });
+
+        document.getElementById("closeBtn")?.addEventListener("click", () => quick?.close?.());
+        document.getElementById("openMainBtn")?.addEventListener("click", () => quick?.openMain?.());
+        document.getElementById("openLibraryBtn")?.addEventListener("click", () => quick?.openMain?.());
+        document.getElementById("newChatBtn")?.addEventListener("click", () => quick?.newChat?.());
+        quick?.onRecentChatsChanged?.(renderRecentChats);
+        refreshRecentChats();
+        refreshModelState();
+        renderAttachmentChips();
+        updateSendState();
+        window.setTimeout(() => promptInput?.focus(), 120);
+    </script>
+</body>
+</html>

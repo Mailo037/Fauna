@@ -12,6 +12,58 @@ function getThinkingBubbleMarkup() {
             </div>`;
 }
 
+function normalizeVoiceRecordingMetadata(recording = {}) {
+    if (!recording || typeof recording !== "object") return null;
+    const path = String(recording.path || recording.filePath || "").trim();
+    const suppliedUrl = String(recording.url || recording.source || recording.sourceUrl || "").trim();
+    const desktopUrl = !suppliedUrl && path ? getFaunaDesktopApi()?.filePathToUrl?.(path) || "" : "";
+    const url = suppliedUrl || desktopUrl;
+    if (!url) return null;
+
+    const duration = Number(recording.duration || recording.durationSeconds || 0);
+    const size = Number(recording.size || 0);
+    return {
+        url,
+        path,
+        mimeType: String(recording.mimeType || recording.type || "audio/webm").trim(),
+        provider: String(recording.provider || "voice").trim(),
+        transcript: String(recording.transcript || "").trim(),
+        createdAt: String(recording.createdAt || "").trim(),
+        duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+        size: Number.isFinite(size) && size > 0 ? size : 0
+    };
+}
+
+function createVoiceRecordingPlayer(recording) {
+    const normalized = normalizeVoiceRecordingMetadata(recording);
+    if (!normalized) return null;
+
+    const player = document.createElement("div");
+    player.className = "assistant-tts-player voice-recording-player";
+    player.dataset.voiceRecordingPlayer = "true";
+    player.dataset.audioSource = normalized.url;
+    player.dataset.mimeType = normalized.mimeType;
+    player.dataset.transcript = normalized.transcript;
+    player.dataset.duration = normalized.duration ? String(normalized.duration) : "";
+    player.innerHTML = `
+        <button type="button" class="assistant-tts-toggle" data-assistant-tts-toggle aria-label="Play voice recording" data-tooltip="Play voice recording">
+            <span class="assistant-tts-icon assistant-tts-play">${getAssistantTtsIcon("play")}</span>
+            <span class="assistant-tts-icon assistant-tts-stop">${getAssistantTtsIcon("stop")}</span>
+            <span class="assistant-tts-loader" aria-hidden="true"></span>
+        </button>
+        <div class="assistant-tts-waveform" data-assistant-tts-seek role="slider" tabindex="0" aria-label="Seek voice recording" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">${getAssistantTtsWaveformMarkup()}</div>
+        <span class="assistant-tts-time">0:00</span>
+    `;
+    updateAssistantTtsProgress(player, 0, normalized.duration || 0);
+    if (normalized.createdAt) {
+        const date = new Date(normalized.createdAt);
+        if (!Number.isNaN(date.getTime())) {
+            player.setAttribute("aria-label", `Voice recording from ${date.toLocaleString()}`);
+        }
+    }
+    return player;
+}
+
 function addRenderNode(text, type, fileArray = [], options = {}) {
     const node = document.createElement("div");
     node.className = `message-node ${type}-node`;
@@ -117,6 +169,11 @@ function addRenderNode(text, type, fileArray = [], options = {}) {
         setupCopyFeature(block, text, {
             completedAt: options.createdAt
         });
+    }
+
+    const voiceRecordingPlayer = type === "user" ? createVoiceRecordingPlayer(options.voiceRecording) : null;
+    if (voiceRecordingPlayer) {
+        block.appendChild(voiceRecordingPlayer);
     }
 
     node.appendChild(block);
@@ -422,9 +479,76 @@ function stopAssistantTtsPlayback({ resetUi = true } = {}) {
     isSpeechPlaybackActive = false;
 }
 
+async function playVoiceRecordingPlayer(player) {
+    const audioSource = String(player?.dataset?.audioSource || "").trim();
+    if (!player || !audioSource) {
+        showToast("That voice recording is not available.", "warning");
+        return;
+    }
+
+    if (activeAssistantTtsPlayback?.player === player) {
+        stopAssistantTtsPlayback();
+        return;
+    }
+
+    stopAssistantTtsPlayback();
+    activeRealtimeSpeechReply?.cancel();
+    activeSpeechController?.abort();
+    activeSpeechAudio?.pause();
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+
+    const controller = new AbortController();
+    const audio = new Audio(audioSource);
+    const playback = {
+        button: null,
+        player,
+        controller,
+        text: player.dataset.transcript || "Voice recording",
+        timer: null,
+        audio,
+        duration: Number(player.dataset.duration || 0) || 0
+    };
+    activeAssistantTtsPlayback = playback;
+    activeSpeechController = controller;
+    activeSpeechAudio = audio;
+    isSpeechPlaybackActive = true;
+
+    setAssistantTtsPlayerState(player, "loading", { cached: true });
+    updateAssistantTtsProgress(player, 0, playback.duration || 0);
+    getAudioWaveformFromSource(audioSource)
+        .then(levels => setAssistantTtsWaveform(player, levels))
+        .catch(err => console.warn("Could not read voice recording waveform:", err));
+    const unbindProgress = bindAssistantTtsAudioProgress(player, audio, playback);
+
+    try {
+        await applySelectedVoiceOutput(audio, { notify: true });
+        await audio.play();
+        setAssistantTtsPlayerState(player, "playing", { cached: true });
+        await playAudioElementToEnd(audio, controller.signal);
+    } catch (err) {
+        if (err.name !== "AbortError") {
+            showToast(`Voice recording playback failed: ${err.message}`, "error");
+        }
+    } finally {
+        unbindProgress();
+        if (activeSpeechController === controller) activeSpeechController = null;
+        if (activeSpeechAudio === audio) activeSpeechAudio = null;
+        if (activeAssistantTtsPlayback === playback) {
+            setAssistantTtsPlayerState(player, "idle", { duration: playback.duration });
+            activeAssistantTtsPlayback = null;
+            isSpeechPlaybackActive = false;
+        }
+    }
+}
+
 function handleAssistantTtsPlayerToggle(toggle) {
     const player = toggle?.closest(".assistant-tts-player");
     if (!player) return;
+
+    if (player.dataset.voiceRecordingPlayer === "true") {
+        void playVoiceRecordingPlayer(player);
+        return;
+    }
 
     if (player.classList.contains("is-loading") || player.classList.contains("is-playing")) {
         stopAssistantTtsPlayback();
@@ -843,6 +967,10 @@ function getRegenerationModel(history) {
 
 async function regenerateAssistantFromAction(control) {
     if (isGenerating) return;
+    if (isActiveChatArchived()) {
+        showToast("Archived chats are read-only. Restore the chat before regenerating.", "warning");
+        return;
+    }
 
     const context = getAssistantActionContext(control);
     if (!context) {
@@ -855,24 +983,33 @@ async function regenerateAssistantFromAction(control) {
         showToast("There is no prompt to regenerate from.", "warning");
         return;
     }
+    const generationSession = ensureWritableActiveChatSession();
+    if (!generationSession) return;
+    const generationSessionId = generationSession.id;
+    const runHistory = historyBeforeResponse;
+    let runTokenTotal = sumHistoryTokenUsage(runHistory);
 
     clearClarifyingQuestionComposer();
-    activeRequestController = new AbortController();
-    const generationSignal = activeRequestController.signal;
-    setGeneratingBusy(true);
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
+    setGeneratingBusy(true, { sessionId: generationSessionId, controller: generationController });
 
     removeRenderedNodesAfter(context.messageNode);
     context.block.querySelector(".assistant-message-actions")?.remove();
     context.block.querySelector(".web-sources")?.remove();
     renderThinkingBubble(context.bubble);
-    conversationHistory = historyBeforeResponse;
+    conversationHistory = cloneConversationHistory(runHistory);
     scrollChatToBottom();
 
     try {
-        const regenerationModel = getRegenerationModel(conversationHistory);
+        const regenerationModel = getRegenerationModel(runHistory);
         const data = await sendOllamaChatWithLocalTools(
-            conversationHistory,
-            getActiveChatRequestOptions(),
+            runHistory,
+            {
+                ...getActiveChatRequestOptions(),
+                sessionId: generationSessionId
+            },
             regenerationModel,
             generationSignal,
             context.bubble,
@@ -881,23 +1018,30 @@ async function regenerateAssistantFromAction(control) {
         const tokenUsage = getProviderTokenUsage(data);
         const assistantMessage = getAssistantMessageForConversation(data, regenerationModel);
         attachTokenUsage(assistantMessage, tokenUsage);
-        conversationHistory.push(assistantMessage);
-        const assistantIndex = conversationHistory.length - 1;
+        runHistory.push(assistantMessage);
+        const assistantIndex = runHistory.length - 1;
 
-        addSessionTokens(tokenUsage, { message: assistantMessage });
+        runTokenTotal += recordSessionTokenUsage(generationSessionId, tokenUsage, { message: assistantMessage });
         await renderAssistantResponse(data, context.bubble, [], generationSignal, false, {
+            sessionId: generationSessionId,
             messageIndex: assistantIndex,
             alreadyRendered: data.__faunaAlreadyRendered === true,
             preserveRenderedContent: data.__faunaPreserveRenderedContent === true
+        });
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
         });
         showToast("Response regenerated.", "success");
     } catch (err) {
         renderErrorCard(context.bubble, err);
     } finally {
-        activeRequestController = null;
-        setGeneratingBusy(false);
+        finishChatGeneration(generationSessionId, generationController);
         updateTokenDisplay();
-        saveCurrentSession();
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
     }
 }
 

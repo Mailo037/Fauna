@@ -1325,6 +1325,17 @@ function cloneConversationHistory(history, { includeImages = true, sanitizeConte
             if (includeImages && Array.isArray(message.openAiImageFileIds) && message.openAiImageFileIds.length > 0) {
                 cloned.openAiImageFileIds = [...message.openAiImageFileIds];
             }
+            if (message.voiceRecording && typeof message.voiceRecording === "object") {
+                const voiceRecording = {};
+                ["url", "path", "mimeType", "size", "duration", "provider", "transcript", "createdAt"].forEach(key => {
+                    if (message.voiceRecording[key] !== undefined && message.voiceRecording[key] !== null && message.voiceRecording[key] !== "") {
+                        voiceRecording[key] = String(message.voiceRecording[key]);
+                    }
+                });
+                if (Object.keys(voiceRecording).length > 0) {
+                    cloned.voiceRecording = voiceRecording;
+                }
+            }
             const tokenUsage = normalizeTokenUsage(message.tokenUsage);
             if (tokenUsage) {
                 cloned.tokenUsage = tokenUsage;

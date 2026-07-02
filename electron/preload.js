@@ -70,6 +70,15 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   getInfo() {
     return ipcRenderer.invoke("fauna:desktop-info");
   },
+  startOllama() {
+    return ipcRenderer.invoke("fauna:start-ollama");
+  },
+  clearAppCache() {
+    return ipcRenderer.invoke("fauna:clear-app-cache");
+  },
+  resetAppData(payload = {}) {
+    return ipcRenderer.invoke("fauna:reset-app-data", payload);
+  },
   window: {
     minimize() {
       return ipcRenderer.invoke("fauna:window-minimize");
@@ -113,6 +122,44 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
     },
     onStatus(handler) {
       return onRendererEvent("fauna:update-status", handler);
+    }
+  },
+  quick: {
+    rendererReady() {
+      return ipcRenderer.invoke("fauna:main-renderer-ready");
+    },
+    getRecentChats(limit = 8) {
+      return ipcRenderer.invoke("fauna:recent-chats", limit);
+    },
+    getModelState() {
+      return ipcRenderer.invoke("fauna:quick-model-state");
+    },
+    openMain() {
+      return ipcRenderer.invoke("fauna:quick-open-main");
+    },
+    openChat(chatId) {
+      return ipcRenderer.invoke("fauna:quick-open-chat", chatId);
+    },
+    newChat() {
+      return ipcRenderer.invoke("fauna:quick-new-chat");
+    },
+    sendPrompt(prompt) {
+      return ipcRenderer.invoke("fauna:quick-send-prompt", prompt);
+    },
+    close() {
+      return ipcRenderer.invoke("fauna:quick-close");
+    },
+    onOpenChat(handler) {
+      return onRendererEvent("fauna:open-chat", handler);
+    },
+    onNewChat(handler) {
+      return onRendererEvent("fauna:new-chat", handler);
+    },
+    onPrompt(handler) {
+      return onRendererEvent("fauna:quick-prompt", handler);
+    },
+    onRecentChatsChanged(handler) {
+      return onRendererEvent("fauna:recent-chats-changed", handler);
     }
   }
 });

@@ -1,6 +1,6 @@
 {
   "name": "fauna-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Fauna desktop app shell",
   "main": "electron/main.js",
@@ -9,7 +9,7 @@
     "desktop:build": "electron-builder --win"
   },
   "dependencies": {
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "43.0.0",
@@ -21,6 +21,7 @@
     "asar": true,
     "files": [
       "index.html",
+      "desktop-quick.html",
       "app-shell.js",
       "script.js",
       "styles.css",
@@ -30,6 +31,7 @@
       "styles/**/*",
       "favicon.png",
       "favicon.svg",
+      "build/icon.ico",
       "version.json",
       "local-bridge.py",
       "electron/**/*",
@@ -39,6 +41,7 @@
     "directories": {
       "output": "dist"
     },
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "publish": [
       {
         "provider": "github",
@@ -48,13 +51,9 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ],
       "icon": "build/icon.ico"
     }
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.9"
   }
 }

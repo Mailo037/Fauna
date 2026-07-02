@@ -7,6 +7,7 @@ const composerPanel = document.querySelector(".input-container-floating");
 const clarifyingQuestionComposer = document.getElementById("clarifyingQuestionComposer");
 const input = document.getElementById("prompt");
 const sendButton = document.getElementById("sendButton");
+const sendShortcutBadge = sendButton?.querySelector(".shortcut-badge");
 const slashCommandPalette = document.getElementById("slashCommandPalette");
 const newChatBtn = document.getElementById("newChat");
 const chatHistoryList = document.getElementById("chatHistoryList");
@@ -142,6 +143,7 @@ const providerConfigPanels = document.querySelectorAll("[data-provider-config]")
 const localModelList = document.getElementById("localModelList");
 const localModelsStatus = document.getElementById("localModelsStatus");
 const localModelsRefreshBtn = document.getElementById("localModelsRefreshBtn");
+const localModelsStartBtn = document.getElementById("localModelsStartBtn");
 const localModelsInstallBtn = document.getElementById("localModelsInstallBtn");
 const workspaceBridgeEndpointInput = document.getElementById("workspaceBridgeEndpointInput");
 const workspaceBridgeTokenInput = document.getElementById("workspaceBridgeTokenInput");
@@ -157,6 +159,26 @@ const settingsCloseBtn = document.getElementById("settingsCloseBtn");
 const settingsTitle = document.getElementById("settingsTitle");
 const settingsNavButtons = document.querySelectorAll("[data-settings-pane]");
 const settingsPanes = document.querySelectorAll("[data-settings-pane-panel]");
+const keyboardShortcutList = document.getElementById("keyboardShortcutList");
+const keyboardShortcutsResetBtn = document.getElementById("keyboardShortcutsResetBtn");
+const shortcutRecorderModal = document.getElementById("shortcutRecorderModal");
+const shortcutRecorderTitle = document.getElementById("shortcutRecorderTitle");
+const shortcutRecorderSubtitle = document.getElementById("shortcutRecorderSubtitle");
+const shortcutRecorderKeyCaps = document.getElementById("shortcutRecorderKeyCaps");
+const shortcutRecorderHint = document.getElementById("shortcutRecorderHint");
+const shortcutRecorderResetBtn = document.getElementById("shortcutRecorderResetBtn");
+const shortcutRecorderClearBtn = document.getElementById("shortcutRecorderClearBtn");
+const shortcutRecorderSaveBtn = document.getElementById("shortcutRecorderSaveBtn");
+const completionNotificationsToggle = document.getElementById("completionNotificationsToggle");
+const completionSoundToggle = document.getElementById("completionSoundToggle");
+const completionOnlyUnfocusedToggle = document.getElementById("completionOnlyUnfocusedToggle");
+const completionBackgroundOnlyToggle = document.getElementById("completionBackgroundOnlyToggle");
+const completionSoundVolume = document.getElementById("completionSoundVolume");
+const completionSoundVolumeValue = document.getElementById("completionSoundVolumeValue");
+const notificationPermissionStatus = document.getElementById("notificationPermissionStatus");
+const notificationSettingsStatus = document.getElementById("notificationSettingsStatus");
+const notificationPermissionBtn = document.getElementById("notificationPermissionBtn");
+const notificationTestBtn = document.getElementById("notificationTestBtn");
 const themeToggle = document.getElementById("themeToggle");
 const mobileThemeToggle = document.getElementById("mobileThemeToggle");
 const themeLabel = document.getElementById("themeLabel");
@@ -199,6 +221,19 @@ const localVoiceTranscriptionModelInput = document.getElementById("localVoiceTra
 const localVoiceReplyModelInput = document.getElementById("localVoiceReplyModelInput");
 const localVoiceReplyModelSelectHost = document.getElementById("localVoiceReplyModelSelectHost");
 const localVoiceReplyEndpointInput = document.getElementById("localVoiceReplyEndpointInput");
+const localVoiceInstallBtn = document.getElementById("localVoiceInstallBtn");
+const appInfoVersion = document.getElementById("appInfoVersion");
+const appInfoUpdateStatus = document.getElementById("appInfoUpdateStatus");
+const appInfoStorageBackend = document.getElementById("appInfoStorageBackend");
+const appInfoAppDataPath = document.getElementById("appInfoAppDataPath");
+const appInfoSettingsPath = document.getElementById("appInfoSettingsPath");
+const appInfoChatsPath = document.getElementById("appInfoChatsPath");
+const appInfoMediaPath = document.getElementById("appInfoMediaPath");
+const appInfoBridgeEndpoint = document.getElementById("appInfoBridgeEndpoint");
+const appInfoChatCount = document.getElementById("appInfoChatCount");
+const appInfoStoredKeys = document.getElementById("appInfoStoredKeys");
+const appCacheClearBtn = document.getElementById("appCacheClearBtn");
+const appResetBtn = document.getElementById("appResetBtn");
 
 let isSandboxEnabled = true;
 let isWebSearchEnabled = true;
@@ -208,6 +243,11 @@ let isApproxLocationEnabled = true;
 let isWorkspaceBridgeEnabled = false;
 let isMemoryEnabled = false;
 let isAiStreamingEnabled = true;
+let completionNotificationsEnabled = false;
+let completionSoundEnabled = false;
+let completionOnlyUnfocused = true;
+let completionBackgroundOnly = true;
+let completionSoundVolumeLevel = 0.55;
 let activeTemperature = 0.7;
 let activeMaxOutputTokens = 0;
 let activeTopP = 1;
@@ -279,8 +319,8 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.0";
-const FAUNA_APP_BUILD_ID = "20260702-window-updates";
+const FAUNA_APP_VERSION = "0.1.1";
+const FAUNA_APP_BUILD_ID = "20260703-release-0.1.1";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/desktop/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
@@ -325,9 +365,15 @@ const OLLAMA_TOP_K_STORAGE_KEY = "faunaOllamaTopK";
 const OPENAI_VERBOSITY_STORAGE_KEY = "faunaOpenAiVerbosity";
 const AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY = "faunaAgentMaxStepsAtATime";
 const AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY = "faunaAgentMaxStepsPerRun";
-const DESKTOP_FILE_URL_RE = /^(?:fauna-file|file):\/\//i;
+const COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY = "faunaCompletionNotificationsEnabled";
+const COMPLETION_SOUND_ENABLED_STORAGE_KEY = "faunaCompletionSoundEnabled";
+const COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY = "faunaCompletionOnlyUnfocused";
+const COMPLETION_BACKGROUND_ONLY_STORAGE_KEY = "faunaCompletionBackgroundOnly";
+const COMPLETION_SOUND_VOLUME_STORAGE_KEY = "faunaCompletionSoundVolume";
+const DESKTOP_FILE_URL_RE = /^(?:fauna-app|fauna-file|file):\/\//i;
 const STREAM_RENDER_THROTTLE_MS = 45;
 const CHAT_AUTO_SCROLL_THRESHOLD = 96;
+const COMPOSER_DRAFT_SAVE_DEBOUNCE_MS = 220;
 const COMPOSER_SAFE_AREA_EXTRA_PX = 36;
 const COMPOSER_SAFE_AREA_DESKTOP_MIN_PX = 172;
 const COMPOSER_SAFE_AREA_MOBILE_MIN_PX = 176;
@@ -838,6 +884,8 @@ let hasShownVoiceOutputWarning = false;
 let isSpeechPlaybackActive = false;
 let isRecording = false;
 let activeRequestController = null;
+const activeGenerationRecords = new Map();
+const completedGenerationSessionIds = new Set();
 let activeCodeWorkbench = null;
 let codeWorkbenchLoadTimer = null;
 let codeWorkbenchEditTimer = null;
@@ -869,6 +917,9 @@ let activeClarifyingQuestion = null;
 let isChatTitleEditing = false;
 let settingsReturnFocus = null;
 let isChatPinnedToBottom = true;
+let composerDraftSaveTimer = null;
+let composerDraftRestoreToken = 0;
+let isRestoringComposerDraft = false;
 
 function isChatNearBottom() {
     if (!chat) return true;
@@ -895,8 +946,21 @@ function updateComposerSafeArea() {
     chat.style.setProperty("--composer-safe-area", `${Math.max(getComposerSafeAreaMinimum(), safeArea)}px`);
 }
 
+function updateComposerAttachmentLayoutState() {
+    const hasAttachments = Boolean(
+        attachedFiles.length > 0
+        || previewContainer?.children?.length
+        || previewContainer?.textContent?.trim()
+    );
+    inputWrapper?.classList.toggle("has-attachments", hasAttachments);
+    composerPanel?.classList.toggle("has-attachments", hasAttachments);
+    return hasAttachments;
+}
+
 function scheduleComposerSafeAreaUpdate({ scroll = false, force = false } = {}) {
+    updateComposerAttachmentLayoutState();
     window.requestAnimationFrame(() => {
+        updateComposerAttachmentLayoutState();
         updateComposerSafeArea();
         if (scroll) {
             scrollChatToBottom({ force, behavior: "auto" });
@@ -1025,6 +1089,14 @@ window.addEventListener("resize", () => {
 
 if (inputWrapper && "ResizeObserver" in window) {
     new ResizeObserver(() => scheduleComposerSafeAreaUpdate()).observe(inputWrapper);
+}
+
+if (previewContainer && "MutationObserver" in window) {
+    new MutationObserver(() => scheduleComposerSafeAreaUpdate()).observe(previewContainer, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
 }
 
 function setCurrentVoiceAssistantNode(node) {
@@ -1518,17 +1590,30 @@ async function retryAssistantGenerationFromBubble(target, {
     speakThisReply = false
 } = {}) {
     if (isGenerating || !target) return;
+    if (isActiveChatArchived()) {
+        showToast("Archived chats are read-only. Restore the chat before retrying.", "warning");
+        return;
+    }
+    const generationSession = ensureWritableActiveChatSession();
+    if (!generationSession) return;
+    const generationSessionId = generationSession.id;
+    const runHistory = cloneConversationHistory(conversationHistory);
+    let runTokenTotal = sessionTotalTokens;
 
     clearClarifyingQuestionComposer();
-    activeRequestController = new AbortController();
-    const generationSignal = activeRequestController.signal;
-    setGeneratingBusy(true);
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
+    setGeneratingBusy(true, { sessionId: generationSessionId, controller: generationController });
     prepareBubbleForRetry(target);
 
     try {
         const data = await sendOllamaChatWithLocalTools(
-            conversationHistory,
-            getActiveChatRequestOptions(),
+            runHistory,
+            {
+                ...getActiveChatRequestOptions(),
+                sessionId: generationSessionId
+            },
             model,
             generationSignal,
             target,
@@ -1537,14 +1622,19 @@ async function retryAssistantGenerationFromBubble(target, {
         const tokenUsage = getProviderTokenUsage(data);
         const assistantMessage = getAssistantMessageForConversation(data, model);
         attachTokenUsage(assistantMessage, tokenUsage);
-        conversationHistory.push(assistantMessage);
-        const assistantIndex = conversationHistory.length - 1;
+        runHistory.push(assistantMessage);
+        const assistantIndex = runHistory.length - 1;
 
-        addSessionTokens(tokenUsage, { message: assistantMessage });
+        runTokenTotal += recordSessionTokenUsage(generationSessionId, tokenUsage, { message: assistantMessage });
         await renderAssistantResponse(data, target, webSources, generationSignal, speakThisReply, {
+            sessionId: generationSessionId,
             messageIndex: assistantIndex,
             alreadyRendered: data.__faunaAlreadyRendered === true,
             preserveRenderedContent: data.__faunaPreserveRenderedContent === true
+        });
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
         });
         showToast("Generation retried.", "success");
     } catch (err) {
@@ -1553,10 +1643,12 @@ async function retryAssistantGenerationFromBubble(target, {
             onRetry: () => retryAssistantGenerationFromBubble(target, { model, webSources, speakThisReply })
         });
     } finally {
-        activeRequestController = null;
-        setGeneratingBusy(false);
+        finishChatGeneration(generationSessionId, generationController);
         updateTokenDisplay();
-        saveCurrentSession();
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
     }
 }
 
@@ -1835,7 +1927,7 @@ function normalizeAssistantControlMarkup(content) {
     return text;
 }
 
-function createAssistantStreamRenderer(target, signal = null) {
+function createAssistantStreamRenderer(target, signal = null, { sessionId = "" } = {}) {
     let rawText = "";
     let renderedText = "";
     let hasRenderedText = false;
@@ -1857,7 +1949,7 @@ function createAssistantStreamRenderer(target, signal = null) {
     const render = (final = false) => {
         clearScheduledRender();
         if (!target || signal?.aborted) return;
-        applyAssistantChatTitle(rawText);
+        applyAssistantChatTitle(rawText, sessionId || activeSessionId);
 
         const visibleText = final
             ? stripAssistantControlBlocks(rawText)
@@ -1904,7 +1996,7 @@ function createAssistantStreamRenderer(target, signal = null) {
     return {
         append(delta) {
             rawText += String(delta || "");
-            applyAssistantChatTitle(rawText);
+            applyAssistantChatTitle(rawText, sessionId || activeSessionId);
             scheduleRender();
         },
         finish(finalText = rawText) {

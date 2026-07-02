@@ -137,6 +137,7 @@ const WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY = "faunaWorkspaceBridgeToken";
 const WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY = "faunaWorkspaceBridgeEnabled";
 const MEMORY_ENABLED_STORAGE_KEY = "faunaMemoryEnabled";
 const MEMORY_STORAGE_KEY = "faunaMemories";
+const KEYBOARD_SHORTCUTS_STORAGE_KEY = "faunaKeyboardShortcuts";
 const PERSONA_DISPLAY_NAME_STORAGE_KEY = "faunaPersonaDisplayName";
 const PERSONA_CUSTOM_INSTRUCTIONS_STORAGE_KEY = "faunaPersonaCustomInstructions";
 const PERSONA_DISPLAY_NAME_MAX_LENGTH = 40;
@@ -176,6 +177,21 @@ const WORKSPACE_TOOL_NAME_ALIASES = {
     read_file: "read_file",
     open_file: "read_file",
     file_read: "read_file",
+    read_files: "read_files",
+    read_many_files: "read_files",
+    multi_read_file: "read_files",
+    open_files: "read_files",
+    search_files: "search_files",
+    find_files: "search_files",
+    find_file: "search_files",
+    file_search: "search_files",
+    search_workspace_files: "search_files",
+    search_text: "search_text",
+    grep: "search_text",
+    grep_files: "search_text",
+    search_workspace: "search_text",
+    search_code: "search_text",
+    find_text: "search_text",
     run_command: "run_command",
     run_terminal_command: "run_command",
     terminal_command: "run_command",
@@ -204,6 +220,68 @@ const THINKING_TOOL_NAME_ALIASES = {
     continue_thinking: "thinking"
 };
 const THINKING_TOOL_NAMES = new Set(Object.values(THINKING_TOOL_NAME_ALIASES));
+const KEYBOARD_SHORTCUT_ACTIONS = [
+    {
+        id: "sendPrompt",
+        title: "Send prompt",
+        description: "Submit the current composer text.",
+        defaultShortcut: "Ctrl+Enter"
+    },
+    {
+        id: "focusPrompt",
+        title: "Focus prompt",
+        description: "Jump back to the composer.",
+        defaultShortcut: "Ctrl+K"
+    },
+    {
+        id: "newChat",
+        title: "New chat",
+        description: "Start a fresh chat.",
+        defaultShortcut: "Ctrl+N"
+    },
+    {
+        id: "openSettings",
+        title: "Open settings",
+        description: "Open the settings window.",
+        defaultShortcut: "Ctrl+,"
+    },
+    {
+        id: "toggleSidebar",
+        title: "Toggle sidebar",
+        description: "Collapse or expand the sidebar.",
+        defaultShortcut: "Ctrl+B"
+    },
+    {
+        id: "openLibrary",
+        title: "Open Library",
+        description: "Switch to Library.",
+        defaultShortcut: "Ctrl+Shift+L"
+    },
+    {
+        id: "openChat",
+        title: "Open chat",
+        description: "Switch back to the current chat.",
+        defaultShortcut: "Ctrl+Shift+P"
+    },
+    {
+        id: "toggleTools",
+        title: "Toggle tools",
+        description: "Open or close the tools menu.",
+        defaultShortcut: "Ctrl+Shift+T"
+    },
+    {
+        id: "toggleVoice",
+        title: "Voice input",
+        description: "Start or stop voice input.",
+        defaultShortcut: "Ctrl+Shift+V"
+    },
+    {
+        id: "checkUpdates",
+        title: "Check updates",
+        description: "Run a Fauna update check.",
+        defaultShortcut: "Ctrl+Shift+U"
+    }
+];
 const IMAGE_TOOL_NAME_ALIASES = {
     generate_image: "generate_image",
     image_generate: "generate_image",
@@ -261,7 +339,7 @@ const TIME_TOOL_NAME_ALIASES = {
     wait_for_user_input: "stopwatch"
 };
 const TIME_TOOL_NAMES = new Set(Object.values(TIME_TOOL_NAME_ALIASES));
-const LOCAL_TOOL_SYSTEM_PROMPT = `You can use Fauna local workspace tools when the user asks about local files, this project, directory listings, or terminal commands. To request a tool, respond with only the required hidden chat title block when present, then exactly one tool XML block, and no normal prose. Directory read/list examples: <fauna_tool_call>{"tool":"read_directory","path":".","depth":2}</fauna_tool_call> or <fauna_tool_call>{"tool":"list_directory","path":"components","depth":1}</fauna_tool_call>. File read example: <fauna_tool_call>{"tool":"read_file","path":"script.js"}</fauna_tool_call>. Terminal example: <fauna_tool_call>{"tool":"run_terminal_command","command":"git status --short","cwd":".","timeout":20}</fauna_tool_call>. Commands run only inside the configured workspace and may be blocked by bridge safety rules. Tool file results include line numbers; when you cite local files, reference them inline as path (line N) or path (lines A-B). After Fauna returns a tool result, answer the user normally. Do not call the same tool with the same path or command again; use the returned result unless you need a different file or command.`;
+const LOCAL_TOOL_SYSTEM_PROMPT = `You can use Fauna local workspace tools when the user asks about local files, this project, code search, directory listings, or terminal commands. To request a tool, respond with only the required hidden chat title block when present, then exactly one tool XML block, and no normal prose. Directory read/list examples: <fauna_tool_call>{"tool":"read_directory","path":".","depth":2}</fauna_tool_call> or <fauna_tool_call>{"tool":"list_directory","path":"components","depth":1}</fauna_tool_call>. File search example: <fauna_tool_call>{"tool":"search_files","query":"settings","path":".","depth":5}</fauna_tool_call>. Text search example: <fauna_tool_call>{"tool":"search_text","query":"function saveCurrentSession","path":"scripts","include":"*.js","caseSensitive":false}</fauna_tool_call>. Single-file read example: <fauna_tool_call>{"tool":"read_file","path":"script.js"}</fauna_tool_call>. Multi-file read example: <fauna_tool_call>{"tool":"read_files","paths":["scripts/08-web-local-tools.js","scripts/10-usage-commands-pipeline.js"]}</fauna_tool_call>. Terminal example: <fauna_tool_call>{"tool":"run_terminal_command","command":"git status --short","cwd":".","timeout":20}</fauna_tool_call>. Commands run only inside the configured workspace and may be blocked by bridge safety rules. Tool file results include line numbers; when you cite local files, reference them inline as path (line N) or path (lines A-B). After Fauna returns a tool result, answer the user normally. Do not call the same tool with the same path, query, or command again; use the returned result unless you need different files, a different query, or a command.`;
 function buildRuntimeToolSystemPrompt(allowLocationTools = false, allowWaitForCommand = false) {
     const locationPrompt = allowLocationTools
         ? `Approx location/weather tools: Use <fauna_tool_call>{"tool":"get_ip_location"}</fauna_tool_call> only when the user asks about their rough location. Use <fauna_tool_call>{"tool":"current_weather"}</fauna_tool_call> when the user asks for weather or temperature near them, such as "how warm is it at my place?" or "wie viel Grad ist es gerade bei mir?". This uses coarse public-IP geolocation and may be city/region-level inaccurate. Never claim a precise address and do not reveal the public IP address unless the user explicitly asks for it.`
@@ -1087,8 +1165,11 @@ function updateComposerCapabilityUi() {
     const canAttachFiles = canUseComposerFileAttachments();
     const canUseTools = canUseComposerTools();
     const modelLabel = getActiveComposerModelLabel();
+    const archived = typeof isActiveChatArchived === "function" && isActiveChatArchived();
+    const composerLocked = isGenerating || archived;
     const attachmentReason = `${modelLabel} cannot read attachments. Choose a file- or vision-capable model first.`;
     const toolReason = `${modelLabel} cannot call tools. Choose a tool-capable model first.`;
+    const readOnlyReason = archived ? "Archived chats are read-only." : "Wait for this chat to finish generating.";
 
     if (fileInput) {
         const accepted = [
@@ -1099,38 +1180,38 @@ function updateComposerCapabilityUi() {
     }
 
     if (uploadButton) {
-        uploadButton.disabled = !canAttach || isGenerating;
+        uploadButton.disabled = !canAttach || composerLocked;
         uploadButton.classList.toggle("composer-control-unavailable", !canAttach);
-        uploadButton.dataset.tooltip = canAttach ? "Attach" : attachmentReason;
-        uploadButton.setAttribute("aria-label", canAttach ? "Attach" : attachmentReason);
+        uploadButton.dataset.tooltip = composerLocked ? readOnlyReason : canAttach ? "Attach" : attachmentReason;
+        uploadButton.setAttribute("aria-label", uploadButton.dataset.tooltip);
     }
 
     [attachmentUploadFileButton, attachmentChooseLibraryButton].forEach(button => {
         if (!button) return;
-        button.disabled = !canAttach || isGenerating;
+        button.disabled = !canAttach || composerLocked;
         button.classList.toggle("composer-control-unavailable", !canAttach);
-        button.dataset.tooltip = canAttach ? "" : attachmentReason;
+        button.dataset.tooltip = composerLocked ? readOnlyReason : canAttach ? "" : attachmentReason;
     });
 
-    if (!canAttach) {
+    if (!canAttach || composerLocked) {
         closeAttachmentMenu();
     }
 
     if (toolsBtn) {
-        toolsBtn.disabled = !canUseTools || isGenerating;
+        toolsBtn.disabled = !canUseTools || composerLocked;
         toolsBtn.classList.toggle("composer-control-unavailable", !canUseTools);
-        toolsBtn.dataset.tooltip = canUseTools ? "Tools" : toolReason;
-        toolsBtn.setAttribute("aria-label", canUseTools ? "Tools" : toolReason);
+        toolsBtn.dataset.tooltip = composerLocked ? readOnlyReason : canUseTools ? "Tools" : toolReason;
+        toolsBtn.setAttribute("aria-label", toolsBtn.dataset.tooltip);
     }
 
     if (toolsDropdown) {
         toolsDropdown.classList.toggle("composer-tools-unavailable", !canUseTools);
-        if (!canUseTools) toolsDropdown.classList.remove("open");
+        if (!canUseTools || composerLocked) toolsDropdown.classList.remove("open");
     }
 
     [toggleSandbox, toggleWebSearch, toggleGrounding, toggleGoogleGrounding, toggleApproxLocation, toggleWorkspaceBridge].forEach(control => {
         if (!control) return;
-        control.disabled = !canUseTools || isGenerating;
+        control.disabled = !canUseTools || composerLocked;
     });
 }
 

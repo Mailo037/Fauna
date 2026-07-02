@@ -398,9 +398,12 @@ function setupCodeSandbox(container) {
 if (toolsBtn && toolsDropdown) {
     toolsBtn.onclick = (e) => {
         e.stopPropagation();
-        if (isGenerating || !canUseComposerTools()) {
+        const archived = typeof isActiveChatArchived === "function" && isActiveChatArchived();
+        if (isGenerating || archived || !canUseComposerTools()) {
             toolsDropdown.classList.remove("open");
-            if (!isGenerating && !canUseComposerTools()) {
+            if (archived) {
+                showToast("Archived chats are read-only.", "warning");
+            } else if (!isGenerating && !canUseComposerTools()) {
                 showToast(`${getActiveComposerModelLabel()} cannot call tools. Choose a tool-capable model first.`, "warning");
             }
             return;
@@ -419,6 +422,9 @@ function openSettingsModal() {
     if (!settingsModal) return;
     toolsDropdown?.classList.remove("open");
     updatePersonaSettingsUi();
+    void updateAppInfoPane();
+    renderKeyboardShortcutSettings();
+    updateShortcutBadges();
     settingsReturnFocus = document.activeElement instanceof HTMLElement && !settingsModal.contains(document.activeElement)
         ? document.activeElement
         : null;
@@ -525,7 +531,1032 @@ function setSettingsPane(paneName = "general") {
     if (normalized === "usage") {
         renderUsageSettingsPane();
     }
+    if (normalized === "info") {
+        void updateAppInfoPane();
+    }
+    if (normalized === "shortcuts") {
+        renderKeyboardShortcutSettings();
+    }
+    if (normalized === "notifications") {
+        renderNotificationSettings();
+    }
     scheduleAnimatedSegmentIndicators();
+}
+
+function readStoredBoolean(key, fallback) {
+    const value = safeLocalStorageGet(key);
+    if (value === "true") return true;
+    if (value === "false") return false;
+    return fallback;
+}
+
+function normalizeCompletionSoundVolume(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0.55;
+    return Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
+}
+
+function saveCompletionNotificationSetting(key, enabled) {
+    safeLocalStorageSet(key, enabled ? "true" : "false");
+}
+
+function loadNotificationSettings() {
+    completionNotificationsEnabled = readStoredBoolean(COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY, false);
+    completionSoundEnabled = readStoredBoolean(COMPLETION_SOUND_ENABLED_STORAGE_KEY, false);
+    completionOnlyUnfocused = readStoredBoolean(COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY, true);
+    completionBackgroundOnly = readStoredBoolean(COMPLETION_BACKGROUND_ONLY_STORAGE_KEY, true);
+    completionSoundVolumeLevel = normalizeCompletionSoundVolume(safeLocalStorageGet(COMPLETION_SOUND_VOLUME_STORAGE_KEY) || "0.55");
+}
+
+function getNotificationPermissionState() {
+    if (!("Notification" in window)) return "unsupported";
+    return Notification.permission || "default";
+}
+
+function getNotificationPermissionUi(permission = getNotificationPermissionState()) {
+    switch (permission) {
+        case "granted":
+            return { label: "Allowed", state: "configured", status: "System notifications are ready." };
+        case "denied":
+            return { label: "Blocked", state: "missing", status: "Notifications are blocked in system or browser settings." };
+        case "unsupported":
+            return { label: "Unsupported", state: "missing", status: "System notifications are not supported here." };
+        default:
+            return { label: "Not requested", state: "missing", status: "Allow notifications to show OS alerts." };
+    }
+}
+
+function renderNotificationSettings() {
+    const permission = getNotificationPermissionState();
+    const permissionUi = getNotificationPermissionUi(permission);
+
+    if (completionNotificationsToggle) {
+        completionNotificationsToggle.checked = completionNotificationsEnabled;
+        completionNotificationsToggle.disabled = permission === "unsupported";
+    }
+    if (completionSoundToggle) completionSoundToggle.checked = completionSoundEnabled;
+    if (completionOnlyUnfocusedToggle) completionOnlyUnfocusedToggle.checked = completionOnlyUnfocused;
+    if (completionBackgroundOnlyToggle) completionBackgroundOnlyToggle.checked = completionBackgroundOnly;
+    if (completionSoundVolume) {
+        completionSoundVolume.value = String(Math.round(completionSoundVolumeLevel * 100));
+        completionSoundVolume.disabled = !completionSoundEnabled;
+    }
+    if (completionSoundVolumeValue) {
+        completionSoundVolumeValue.textContent = `${Math.round(completionSoundVolumeLevel * 100)}%`;
+    }
+    if (notificationPermissionStatus) {
+        notificationPermissionStatus.textContent = permissionUi.label;
+        notificationPermissionStatus.dataset.state = permissionUi.state;
+    }
+    if (notificationSettingsStatus) {
+        notificationSettingsStatus.textContent = permissionUi.status;
+    }
+    if (notificationPermissionBtn) {
+        notificationPermissionBtn.disabled = permission === "granted" || permission === "unsupported";
+        notificationPermissionBtn.textContent = permission === "granted" ? "Allowed" : "Allow notifications";
+    }
+}
+
+async function requestCompletionNotificationPermission({ silent = false } = {}) {
+    if (!("Notification" in window)) {
+        if (!silent) showToast("System notifications are not supported here.", "warning");
+        renderNotificationSettings();
+        return "unsupported";
+    }
+    if (Notification.permission !== "default") {
+        renderNotificationSettings();
+        return Notification.permission;
+    }
+    let permission = "default";
+    try {
+        permission = await Notification.requestPermission();
+    } catch {
+        permission = Notification.permission || "default";
+    }
+    renderNotificationSettings();
+    if (!silent) {
+        if (permission === "granted") showToast("Notifications enabled.", "success");
+        else if (permission === "denied") showToast("Notifications are blocked.", "warning");
+    }
+    return permission;
+}
+
+function isAppFocusedForNotificationAlerts() {
+    return document.visibilityState === "visible" && document.hasFocus();
+}
+
+function shouldSendCompletionAlert(sessionId, { force = false } = {}) {
+    if (force) return true;
+    if (completionOnlyUnfocused && isAppFocusedForNotificationAlerts()) return false;
+    if (completionBackgroundOnly && sessionId === activeSessionId) return false;
+    return true;
+}
+
+async function playCompletionSound() {
+    if (!completionSoundEnabled || completionSoundVolumeLevel <= 0) return false;
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return false;
+    try {
+        const context = new AudioContextCtor();
+        if (context.state === "suspended") await context.resume();
+        const now = context.currentTime;
+        const gain = context.createGain();
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, completionSoundVolumeLevel * 0.18), now + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
+        gain.connect(context.destination);
+
+        [660, 880].forEach((frequency, index) => {
+            const oscillator = context.createOscillator();
+            oscillator.type = "sine";
+            oscillator.frequency.setValueAtTime(frequency, now + index * 0.08);
+            oscillator.connect(gain);
+            oscillator.start(now + index * 0.08);
+            oscillator.stop(now + 0.36);
+        });
+
+        window.setTimeout(() => {
+            context.close?.().catch?.(() => {});
+        }, 700);
+        return true;
+    } catch (err) {
+        console.warn("Completion sound failed:", err);
+        return false;
+    }
+}
+
+function showCompletionSystemNotification(sessionId, { title = "", body = "" } = {}) {
+    if (!completionNotificationsEnabled) return false;
+    if (!("Notification" in window) || Notification.permission !== "granted") return false;
+    const session = chatSessions.find(item => item.id === sessionId);
+    const notificationTitle = title || "Fauna";
+    const notificationBody = body || `${session?.title || "A chat"} finished generating.`;
+    try {
+        const notification = new Notification(notificationTitle, {
+            body: notificationBody,
+            tag: sessionId ? `fauna-chat-${sessionId}-complete` : "fauna-chat-complete",
+            silent: true
+        });
+        notification.onclick = () => {
+            window.focus?.();
+            if (sessionId && typeof activateChatSession === "function") {
+                activateChatSession(sessionId, { closeSidebar: false });
+            }
+            notification.close?.();
+        };
+        window.setTimeout(() => notification.close?.(), 9000);
+        return true;
+    } catch (err) {
+        console.warn("Completion notification failed:", err);
+        return false;
+    }
+}
+
+function notifyChatGenerationCompleted(sessionId) {
+    if (!shouldSendCompletionAlert(sessionId)) return;
+    const session = chatSessions.find(item => item.id === sessionId);
+    showCompletionSystemNotification(sessionId, {
+        title: "Fauna",
+        body: `${session?.title || "A chat"} is ready.`
+    });
+    void playCompletionSound();
+}
+
+async function testCompletionNotificationAlert() {
+    if (!completionNotificationsEnabled && !completionSoundEnabled) {
+        showToast("Enable sound or system notifications first.", "info");
+        return;
+    }
+    if (completionNotificationsEnabled && getNotificationPermissionState() === "default") {
+        await requestCompletionNotificationPermission({ silent: false });
+    }
+    const shown = showCompletionSystemNotification(activeSessionId || "", {
+        title: "Fauna",
+        body: "Notification test is ready."
+    });
+    const played = await playCompletionSound();
+    if (!shown && !played) {
+        showToast("No alert could be sent with the current settings.", "warning");
+    } else {
+        showToast("Test alert sent.", "success");
+    }
+}
+
+function initializeNotificationSettings() {
+    loadNotificationSettings();
+    renderNotificationSettings();
+}
+
+function setAppInfoText(node, value, fallback = "Not set") {
+    if (!node) return;
+    const text = String(value || "").trim();
+    node.textContent = text || fallback;
+}
+
+function getWebStoredFaunaKeys() {
+    try {
+        return Object.keys(localStorage)
+            .filter(key => key.startsWith("fauna"))
+            .sort();
+    } catch {
+        return [];
+    }
+}
+
+function renderAppInfoStoredKeys(keys = []) {
+    if (!appInfoStoredKeys) return;
+    const normalized = Array.from(new Set(keys.map(key => String(key || "").trim()).filter(Boolean))).sort();
+    if (normalized.length === 0) {
+        appInfoStoredKeys.textContent = "No stored settings yet.";
+        return;
+    }
+    appInfoStoredKeys.replaceChildren(...normalized.map(key => {
+        const chip = document.createElement("span");
+        chip.className = "app-info-key-chip";
+        chip.textContent = key;
+        return chip;
+    }));
+}
+
+function getUpdateBadgeState(status = "") {
+    return ["current", "idle", "downloaded"].includes(status) ? "configured" : "missing";
+}
+
+async function getAppInfoUpdateState(info = {}) {
+    const desktopUpdates = getFaunaDesktopApi()?.updates;
+    if (desktopUpdates?.getState) {
+        return desktopUpdates.getState().catch(() => info.updateState || null);
+    }
+    return info.updateState || {
+        status: "web",
+        message: "Web update checks use version.json"
+    };
+}
+
+async function updateAppInfoPane() {
+    const desktopApi = getFaunaDesktopApi();
+    let info = null;
+    if (desktopApi?.getInfo) {
+        try {
+            info = await desktopApi.getInfo();
+        } catch (err) {
+            console.warn("Could not read desktop app info:", err);
+        }
+    }
+
+    const updateStateInfo = await getAppInfoUpdateState(info || {});
+    const isDesktop = Boolean(desktopApi && info);
+    const storageBackend = isDesktop
+        ? info.storageBackend || "AppData"
+        : "Browser localStorage";
+
+    setAppInfoText(appInfoVersion, info?.version || FAUNA_APP_VERSION, FAUNA_APP_VERSION);
+    setAppInfoText(appInfoStorageBackend, storageBackend);
+    setAppInfoText(appInfoChatCount, Number.isFinite(Number(info?.chatCount)) ? `${Number(info.chatCount).toLocaleString()} chats` : `${chatSessions.length.toLocaleString()} chats`, "0 chats");
+    setAppInfoText(appInfoBridgeEndpoint, info?.bridgeEndpoint || getWorkspaceBridgeBaseUrl(), "Not set");
+    setAppInfoText(appInfoAppDataPath, info?.appDataPath, isDesktop ? "AppData path unavailable" : "Browser localStorage");
+    setAppInfoText(appInfoSettingsPath, info?.settingsPath, isDesktop ? "settings.json" : "localStorage");
+    setAppInfoText(appInfoChatsPath, info?.chatsPath, isDesktop ? "chats/<chatId>/chat.json" : "localStorage");
+    setAppInfoText(appInfoMediaPath, info?.mediaPath, isDesktop ? "chats/<chatId>/media" : "Browser blob/data URLs");
+
+    if (appInfoUpdateStatus) {
+        const status = String(updateStateInfo?.status || "").trim();
+        appInfoUpdateStatus.textContent = updateStateInfo?.message || "Update status unavailable";
+        appInfoUpdateStatus.dataset.state = getUpdateBadgeState(status);
+    }
+
+    const desktopKeys = Array.isArray(info?.settingsKeys) ? info.settingsKeys : null;
+    const keys = desktopKeys
+        ? [...desktopKeys, "faunaChatSessions -> chats/<chatId>/chat.json"]
+        : getWebStoredFaunaKeys();
+    renderAppInfoStoredKeys(keys);
+}
+
+function toggleAppInfoSection(toggle) {
+    const section = toggle?.closest("[data-app-info-section]");
+    const bodyId = toggle?.getAttribute("aria-controls") || "";
+    const body = bodyId ? document.getElementById(bodyId) : section?.querySelector(".app-info-section-body");
+    if (!section || !body) return;
+
+    const willExpand = toggle.getAttribute("aria-expanded") !== "true";
+    toggle.setAttribute("aria-expanded", String(willExpand));
+    section.classList.toggle("is-collapsed", !willExpand);
+    body.hidden = !willExpand;
+}
+
+function getAppCacheStorageKeys() {
+    return [
+        OPENAI_SPEECH_CACHE_STORAGE_KEY,
+        OPENAI_VOICE_PREVIEW_CACHE_STORAGE_KEY,
+        OPENAI_TRANSCRIPTION_CACHE_STORAGE_KEY,
+        OPENAI_FILE_CACHE_STORAGE_KEY,
+        OPENAI_MODEL_CATALOG_STORAGE_KEY,
+        OPENROUTER_MODEL_CAPABILITIES_STORAGE_KEY
+    ].filter(Boolean);
+}
+
+function clearWebCacheStorageKeys() {
+    let removed = 0;
+    getAppCacheStorageKeys().forEach(key => {
+        if (safeLocalStorageGet(key) !== null) removed += 1;
+        safeLocalStorageRemove(key);
+    });
+    openAiFileCache = [];
+    cachedOpenAiCatalogModels = [];
+    ollamaModelCapabilities.clear?.();
+    return removed;
+}
+
+async function clearBrowserCacheStorage() {
+    if (!window.caches?.keys) return 0;
+    const keys = await window.caches.keys().catch(() => []);
+    let removed = 0;
+    for (const key of keys) {
+        if (/fauna|openai|voice|speech|image|media|model/i.test(key)) {
+            if (await window.caches.delete(key).catch(() => false)) removed += 1;
+        }
+    }
+    return removed;
+}
+
+function removeVoiceRecordingPlayersFromHtml(html = "") {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    template.content.querySelectorAll(".voice-recording-player").forEach(player => player.remove());
+    return template.innerHTML;
+}
+
+function stripVoiceRecordingsFromLocalChatState() {
+    let updatedMessages = 0;
+    let removedPlayers = 0;
+    conversationHistory.forEach(message => {
+        if (message?.voiceRecording) {
+            delete message.voiceRecording;
+            updatedMessages += 1;
+        }
+    });
+    chatSessions.forEach(session => {
+        if (Array.isArray(session.conversationHistory)) {
+            session.conversationHistory.forEach(message => {
+                if (message?.voiceRecording) {
+                    delete message.voiceRecording;
+                    updatedMessages += 1;
+                }
+            });
+        }
+        if (typeof session.chatHtml === "string" && session.chatHtml.includes("voice-recording-player")) {
+            const cleanedHtml = removeVoiceRecordingPlayersFromHtml(session.chatHtml);
+            if (cleanedHtml !== session.chatHtml) {
+                session.chatHtml = cleanedHtml;
+                removedPlayers += 1;
+            }
+        }
+        if (Array.isArray(session.domNodes)) {
+            session.domNodes.forEach(node => {
+                node?.querySelectorAll?.(".voice-recording-player").forEach(player => {
+                    player.remove();
+                    removedPlayers += 1;
+                });
+            });
+        }
+    });
+    chat?.querySelectorAll(".voice-recording-player").forEach(player => {
+        player.remove();
+        removedPlayers += 1;
+    });
+    if (updatedMessages > 0 || removedPlayers > 0) {
+        persistChatSessions();
+    }
+    return updatedMessages + removedPlayers;
+}
+
+async function clearAppCacheFromSettings() {
+    const approved = await showApprovalDialog({
+        title: "Clear app cache?",
+        message: "This deletes temporary voice clips, speech clips, cached transcriptions, uploaded-file cache entries, model metadata, and local app cache files.",
+        details: [
+            "Chats and generated images/artifacts stay unless they are temporary voice or speech cache files.",
+            "Models, API keys, settings, and memories are not reset.",
+            "Voice recording players that point to deleted temporary clips will be removed from saved chats."
+        ],
+        confirmLabel: "Clear cache"
+    });
+    if (!approved) return;
+
+    if (appCacheClearBtn) appCacheClearBtn.disabled = true;
+    try {
+        stopAssistantTtsPlayback?.();
+        clearVoicePreviewAudio?.();
+        const desktopResult = await getFaunaDesktopApi()?.clearAppCache?.();
+        const removedStorageKeys = clearWebCacheStorageKeys();
+        const removedBrowserCaches = await clearBrowserCacheStorage();
+        const strippedRecordings = stripVoiceRecordingsFromLocalChatState();
+        await updateAppInfoPane();
+        const removedFiles = Number(desktopResult?.removedTemporaryFiles || 0);
+        const removedDirs = Number(desktopResult?.removedCacheDirectories || 0);
+        const summary = [
+            removedFiles ? `${removedFiles} temporary files` : "",
+            removedDirs ? `${removedDirs} cache folders` : "",
+            removedStorageKeys ? `${removedStorageKeys} cache keys` : "",
+            removedBrowserCaches ? `${removedBrowserCaches} browser caches` : "",
+            strippedRecordings ? `${strippedRecordings} voice references` : ""
+        ].filter(Boolean).join(", ");
+        showToast(summary ? `Cache cleared: ${summary}.` : "Cache cleared.", "success");
+    } catch (err) {
+        showToast(`Cache cleanup failed: ${err.message}`, "error");
+    } finally {
+        if (appCacheClearBtn) appCacheClearBtn.disabled = false;
+    }
+}
+
+function showResetAppDialog() {
+    return new Promise(resolve => {
+        const overlay = document.createElement("div");
+        overlay.className = "approval-modal";
+        overlay.setAttribute("role", "presentation");
+
+        const dialog = document.createElement("section");
+        dialog.className = "approval-dialog app-reset-dialog";
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-labelledby", "resetAppDialogTitle");
+
+        const titleNode = document.createElement("h2");
+        titleNode.id = "resetAppDialogTitle";
+        titleNode.textContent = "Reset Fauna?";
+
+        const messageNode = document.createElement("p");
+        messageNode.textContent = "This resets the whole app on this device. It cannot be undone.";
+
+        const details = document.createElement("ul");
+        details.className = "approval-detail-list";
+        [
+            "Deletes local settings, provider choices, caches, memories, shortcuts, and workspace bridge configuration.",
+            "Deletes local chats and generated media/artifact folders from AppData.",
+            "The app reloads into a fresh state after reset."
+        ].forEach(text => {
+            const item = document.createElement("li");
+            item.textContent = text;
+            details.appendChild(item);
+        });
+
+        const filesOption = createMandatoryResetCheckbox("I understand files, images, generated media, artifacts, and voice clips will be deleted.");
+        const chatsOption = createMandatoryResetCheckbox("I understand all chats and chat history will be deleted.");
+
+        const actions = document.createElement("div");
+        actions.className = "approval-actions";
+
+        const cancelButton = document.createElement("button");
+        cancelButton.className = "provider-btn provider-btn-secondary";
+        cancelButton.type = "button";
+        cancelButton.textContent = "Cancel";
+
+        const confirmButton = document.createElement("button");
+        confirmButton.className = "provider-btn provider-btn-danger";
+        confirmButton.type = "button";
+        confirmButton.textContent = "Reset app";
+        confirmButton.disabled = true;
+
+        const updateConfirmState = () => {
+            confirmButton.disabled = !(filesOption.input.checked && chatsOption.input.checked);
+        };
+
+        const close = (approved) => {
+            document.removeEventListener("keydown", onKeyDown);
+            overlay.remove();
+            resolve({
+                approved,
+                confirmFiles: approved && filesOption.input.checked,
+                confirmChats: approved && chatsOption.input.checked
+            });
+        };
+
+        const onKeyDown = (event) => {
+            if (event.key === "Escape") close(false);
+        };
+
+        filesOption.input.addEventListener("change", updateConfirmState);
+        chatsOption.input.addEventListener("change", updateConfirmState);
+        cancelButton.addEventListener("click", () => close(false));
+        confirmButton.addEventListener("click", () => {
+            if (!confirmButton.disabled) close(true);
+        });
+        overlay.addEventListener("click", event => {
+            if (event.target === overlay) close(false);
+        });
+        document.addEventListener("keydown", onKeyDown);
+
+        actions.append(cancelButton, confirmButton);
+        dialog.append(titleNode, messageNode, details, filesOption.label, chatsOption.label, actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        window.setTimeout(() => cancelButton.focus(), 0);
+    });
+}
+
+function createMandatoryResetCheckbox(text) {
+    const label = document.createElement("label");
+    label.className = "approval-checkbox-option approval-checkbox-required";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    const span = document.createElement("span");
+    span.textContent = text;
+    label.append(input, span);
+    return { label, input };
+}
+
+function clearAllWebFaunaStorage() {
+    try {
+        Object.keys(localStorage)
+            .filter(key => key.startsWith("fauna"))
+            .forEach(key => localStorage.removeItem(key));
+    } catch {
+        getAppCacheStorageKeys().forEach(key => safeLocalStorageRemove(key));
+        safeLocalStorageRemove(CHAT_SESSIONS_STORAGE_KEY);
+        safeLocalStorageRemove(ACTIVE_CHAT_SESSION_STORAGE_KEY);
+    }
+}
+
+async function resetAppFromSettings() {
+    const approval = await showResetAppDialog();
+    if (!approval.approved || !approval.confirmFiles || !approval.confirmChats) return;
+
+    if (appResetBtn) appResetBtn.disabled = true;
+    try {
+        stopAssistantTtsPlayback?.();
+        clearVoicePreviewAudio?.();
+        await getFaunaDesktopApi()?.resetAppData?.({
+            confirmFiles: true,
+            confirmChats: true
+        });
+        clearAllWebFaunaStorage();
+        await clearBrowserCacheStorage();
+        showToast("Fauna reset complete. Reloading...", "success");
+        window.setTimeout(() => window.location.reload(), 650);
+    } catch (err) {
+        showToast(`Reset failed: ${err.message}`, "error");
+        if (appResetBtn) appResetBtn.disabled = false;
+    }
+}
+
+let cachedKeyboardShortcutOverrides = null;
+let shortcutRecorderActionId = "";
+let shortcutRecorderDraft = null;
+let shortcutRecorderReturnFocus = null;
+
+function getShortcutAction(actionId) {
+    return KEYBOARD_SHORTCUT_ACTIONS.find(action => action.id === actionId) || null;
+}
+
+function normalizeShortcutKey(key = "") {
+    const value = String(key || "").trim();
+    if (!value) return "";
+    if (value === " ") return "Space";
+    if (value.length === 1 && /[a-z]/i.test(value)) return value.toUpperCase();
+    const aliases = {
+        Esc: "Escape",
+        Del: "Delete",
+        " ": "Space",
+        ArrowLeft: "Left",
+        ArrowRight: "Right",
+        ArrowUp: "Up",
+        ArrowDown: "Down"
+    };
+    return aliases[value] || value;
+}
+
+function parseShortcutString(value = "") {
+    const parts = String(value || "").split("+").map(part => part.trim()).filter(Boolean);
+    if (parts.length === 0) return null;
+    const shortcut = { ctrl: false, alt: false, shift: false, meta: false, key: "" };
+    parts.forEach(part => {
+        const lower = part.toLowerCase();
+        if (lower === "ctrl" || lower === "control") shortcut.ctrl = true;
+        else if (lower === "alt" || lower === "option") shortcut.alt = true;
+        else if (lower === "shift") shortcut.shift = true;
+        else if (lower === "meta" || lower === "cmd" || lower === "command" || lower === "win" || lower === "windows") shortcut.meta = true;
+        else shortcut.key = normalizeShortcutKey(part);
+    });
+    return shortcut.key ? shortcut : null;
+}
+
+function normalizeShortcutValue(value) {
+    if (value === null) return null;
+    if (typeof value === "string") return parseShortcutString(value);
+    if (!value || typeof value !== "object") return null;
+    const shortcut = {
+        ctrl: Boolean(value.ctrl),
+        alt: Boolean(value.alt),
+        shift: Boolean(value.shift),
+        meta: Boolean(value.meta),
+        key: normalizeShortcutKey(value.key)
+    };
+    return shortcut.key || shortcut.ctrl || shortcut.alt || shortcut.shift || shortcut.meta ? shortcut : null;
+}
+
+function isAllowedSingleKeyShortcut(shortcut) {
+    return normalizeShortcutKey(shortcut?.key).toLowerCase() === "enter";
+}
+
+function isValidShortcut(shortcut) {
+    return Boolean(
+        shortcut?.key
+        && (
+            shortcut.ctrl
+            || shortcut.alt
+            || shortcut.shift
+            || shortcut.meta
+            || isAllowedSingleKeyShortcut(shortcut)
+        )
+    );
+}
+
+function shortcutFromEvent(event) {
+    const modifierKeys = new Set(["Control", "Shift", "Alt", "Meta"]);
+    const key = modifierKeys.has(event.key) ? "" : normalizeShortcutKey(event.key);
+    return {
+        ctrl: Boolean(event.ctrlKey || event.key === "Control"),
+        alt: Boolean(event.altKey || event.key === "Alt"),
+        shift: Boolean(event.shiftKey || event.key === "Shift"),
+        meta: Boolean(event.metaKey || event.key === "Meta"),
+        key
+    };
+}
+
+function shortcutsEqual(a, b) {
+    return Boolean(a && b)
+        && Boolean(a.ctrl) === Boolean(b.ctrl)
+        && Boolean(a.alt) === Boolean(b.alt)
+        && Boolean(a.shift) === Boolean(b.shift)
+        && Boolean(a.meta) === Boolean(b.meta)
+        && normalizeShortcutKey(a.key).toLowerCase() === normalizeShortcutKey(b.key).toLowerCase();
+}
+
+function getMetaKeyLabel() {
+    return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || "") ? "Cmd" : "Win";
+}
+
+function getShortcutParts(shortcut) {
+    if (!shortcut) return [];
+    return [
+        shortcut.ctrl ? "Ctrl" : "",
+        shortcut.alt ? "Alt" : "",
+        shortcut.shift ? "Shift" : "",
+        shortcut.meta ? getMetaKeyLabel() : "",
+        shortcut.key || ""
+    ].filter(Boolean);
+}
+
+function formatShortcutText(shortcut) {
+    const parts = getShortcutParts(shortcut);
+    return parts.length > 0 ? parts.join(" ") : "Not assigned";
+}
+
+function serializeShortcut(shortcut) {
+    if (!shortcut) return null;
+    return {
+        ctrl: Boolean(shortcut.ctrl),
+        alt: Boolean(shortcut.alt),
+        shift: Boolean(shortcut.shift),
+        meta: Boolean(shortcut.meta),
+        key: normalizeShortcutKey(shortcut.key)
+    };
+}
+
+function readKeyboardShortcutOverrides() {
+    if (cachedKeyboardShortcutOverrides) return cachedKeyboardShortcutOverrides;
+    const raw = safeLocalStorageGet(KEYBOARD_SHORTCUTS_STORAGE_KEY);
+    let parsed = {};
+    try {
+        parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+        parsed = {};
+    }
+    cachedKeyboardShortcutOverrides = parsed && typeof parsed === "object" ? parsed : {};
+    return cachedKeyboardShortcutOverrides;
+}
+
+function writeKeyboardShortcutOverrides(overrides) {
+    cachedKeyboardShortcutOverrides = overrides && typeof overrides === "object" ? overrides : {};
+    safeLocalStorageSet(KEYBOARD_SHORTCUTS_STORAGE_KEY, JSON.stringify(cachedKeyboardShortcutOverrides));
+    renderKeyboardShortcutSettings();
+    updateShortcutBadges();
+}
+
+function resetKeyboardShortcutOverrides() {
+    cachedKeyboardShortcutOverrides = {};
+    safeLocalStorageRemove(KEYBOARD_SHORTCUTS_STORAGE_KEY);
+    renderKeyboardShortcutSettings();
+    updateShortcutBadges();
+}
+
+function getEffectiveKeyboardShortcuts() {
+    const overrides = readKeyboardShortcutOverrides();
+    const shortcuts = {};
+    KEYBOARD_SHORTCUT_ACTIONS.forEach(action => {
+        const hasOverride = Object.prototype.hasOwnProperty.call(overrides, action.id);
+        shortcuts[action.id] = hasOverride
+            ? normalizeShortcutValue(overrides[action.id])
+            : parseShortcutString(action.defaultShortcut);
+    });
+    return shortcuts;
+}
+
+function getShortcutConflict(actionId, shortcut) {
+    if (!isValidShortcut(shortcut)) return null;
+    const shortcuts = getEffectiveKeyboardShortcuts();
+    return KEYBOARD_SHORTCUT_ACTIONS.find(action => (
+        action.id !== actionId
+        && shortcutsEqual(shortcuts[action.id], shortcut)
+    )) || null;
+}
+
+function setKeyboardShortcut(actionId, shortcut) {
+    const action = getShortcutAction(actionId);
+    if (!action) return;
+    const overrides = { ...readKeyboardShortcutOverrides() };
+    const defaultShortcut = parseShortcutString(action.defaultShortcut);
+    if (shortcut === null) {
+        overrides[actionId] = null;
+    } else if (shortcutsEqual(shortcut, defaultShortcut)) {
+        delete overrides[actionId];
+    } else {
+        overrides[actionId] = serializeShortcut(shortcut);
+    }
+    writeKeyboardShortcutOverrides(overrides);
+}
+
+function resetKeyboardShortcut(actionId) {
+    const overrides = { ...readKeyboardShortcutOverrides() };
+    delete overrides[actionId];
+    writeKeyboardShortcutOverrides(overrides);
+}
+
+function renderShortcutKeyCaps(target, shortcut, { emptyText = "Not assigned" } = {}) {
+    if (!target) return;
+    const parts = getShortcutParts(shortcut);
+    if (parts.length === 0) {
+        target.innerHTML = "";
+        const empty = document.createElement("span");
+        empty.className = "shortcut-recorder-empty";
+        empty.textContent = emptyText;
+        target.appendChild(empty);
+        return;
+    }
+    target.replaceChildren(...parts.map(part => {
+        const key = document.createElement("span");
+        key.className = "shortcut-keycap";
+        key.textContent = part;
+        return key;
+    }));
+}
+
+function createShortcutPreview(shortcut) {
+    const preview = document.createElement("span");
+    preview.className = "shortcut-preview";
+    renderShortcutKeyCaps(preview, shortcut);
+    return preview;
+}
+
+function renderKeyboardShortcutSettings() {
+    if (!keyboardShortcutList) return;
+    const shortcuts = getEffectiveKeyboardShortcuts();
+    keyboardShortcutList.replaceChildren(...KEYBOARD_SHORTCUT_ACTIONS.map(action => {
+        const row = document.createElement("div");
+        row.className = "shortcut-settings-row";
+
+        const info = document.createElement("div");
+        info.className = "shortcut-settings-info";
+        const title = document.createElement("span");
+        title.className = "setting-title";
+        title.textContent = action.title;
+        const desc = document.createElement("span");
+        desc.className = "setting-desc";
+        desc.textContent = action.description;
+        info.append(title, desc);
+
+        const controls = document.createElement("div");
+        controls.className = "shortcut-settings-controls";
+        controls.appendChild(createShortcutPreview(shortcuts[action.id]));
+
+        const changeBtn = document.createElement("button");
+        changeBtn.className = "provider-btn provider-btn-secondary shortcut-change-btn";
+        changeBtn.type = "button";
+        changeBtn.textContent = "Change";
+        changeBtn.addEventListener("click", () => openShortcutRecorder(action.id, changeBtn));
+
+        const resetBtn = document.createElement("button");
+        resetBtn.className = "provider-btn provider-btn-ghost shortcut-reset-row-btn";
+        resetBtn.type = "button";
+        resetBtn.textContent = "Reset";
+        resetBtn.addEventListener("click", () => {
+            resetKeyboardShortcut(action.id);
+            showToast(`${action.title} reset to default.`, "info");
+        });
+
+        controls.append(changeBtn, resetBtn);
+        row.append(info, controls);
+        return row;
+    }));
+}
+
+function updateShortcutBadges() {
+    const sendShortcut = getEffectiveKeyboardShortcuts().sendPrompt;
+    if (!sendShortcutBadge) return;
+    sendShortcutBadge.hidden = !sendShortcut;
+    sendShortcutBadge.textContent = formatShortcutText(sendShortcut);
+}
+
+function updateShortcutRecorderUi() {
+    const action = getShortcutAction(shortcutRecorderActionId);
+    if (!action) return;
+    if (shortcutRecorderTitle) shortcutRecorderTitle.textContent = action.title;
+    if (shortcutRecorderSubtitle) shortcutRecorderSubtitle.textContent = "Press keys to assign this shortcut.";
+    renderShortcutKeyCaps(shortcutRecorderKeyCaps, shortcutRecorderDraft, { emptyText: "Press keys" });
+
+    const isValid = isValidShortcut(shortcutRecorderDraft);
+    const conflict = getShortcutConflict(action.id, shortcutRecorderDraft);
+    if (shortcutRecorderHint) {
+        shortcutRecorderHint.textContent = !shortcutRecorderDraft?.key
+            ? "Use Ctrl, Alt, Shift, or Win/Cmd with another key. Enter can be used alone."
+            : !isValid
+                ? "Add Ctrl, Alt, Shift, or Win/Cmd, or press Enter by itself."
+                : conflict
+                    ? `Already used by ${conflict.title}.`
+                    : "Ready to save.";
+        shortcutRecorderHint.dataset.state = conflict ? "error" : isValid ? "ready" : "idle";
+    }
+    if (shortcutRecorderSaveBtn) shortcutRecorderSaveBtn.disabled = !isValid || Boolean(conflict);
+}
+
+function pulseShortcutRecorderKeys() {
+    if (!shortcutRecorderKeyCaps) return;
+    shortcutRecorderKeyCaps.classList.remove("shortcut-recorder-pop");
+    void shortcutRecorderKeyCaps.offsetWidth;
+    shortcutRecorderKeyCaps.classList.add("shortcut-recorder-pop");
+}
+
+function openShortcutRecorder(actionId, returnFocus = null) {
+    const action = getShortcutAction(actionId);
+    if (!shortcutRecorderModal || !action) return;
+    shortcutRecorderActionId = actionId;
+    shortcutRecorderDraft = getEffectiveKeyboardShortcuts()[actionId];
+    shortcutRecorderReturnFocus = returnFocus instanceof HTMLElement
+        ? returnFocus
+        : document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    updateShortcutRecorderUi();
+    shortcutRecorderModal.hidden = false;
+    shortcutRecorderModal.setAttribute("aria-hidden", "false");
+    window.setTimeout(() => shortcutRecorderModal.querySelector(".shortcut-recorder-dialog")?.focus?.({ preventScroll: true }), 0);
+}
+
+function closeShortcutRecorder({ returnFocus = true } = {}) {
+    if (!shortcutRecorderModal || shortcutRecorderModal.hidden) return;
+    shortcutRecorderModal.hidden = true;
+    shortcutRecorderModal.setAttribute("aria-hidden", "true");
+    shortcutRecorderActionId = "";
+    shortcutRecorderDraft = null;
+    if (returnFocus && shortcutRecorderReturnFocus && document.contains(shortcutRecorderReturnFocus)) {
+        shortcutRecorderReturnFocus.focus({ preventScroll: true });
+    }
+    shortcutRecorderReturnFocus = null;
+}
+
+function saveShortcutRecorderDraft() {
+    if (!shortcutRecorderActionId || !isValidShortcut(shortcutRecorderDraft)) return;
+    const action = getShortcutAction(shortcutRecorderActionId);
+    const conflict = getShortcutConflict(shortcutRecorderActionId, shortcutRecorderDraft);
+    if (!action || conflict) {
+        if (conflict) showToast(`${formatShortcutText(shortcutRecorderDraft)} is already used by ${conflict.title}.`, "warning");
+        return;
+    }
+    setKeyboardShortcut(shortcutRecorderActionId, shortcutRecorderDraft);
+    showToast(`${action.title} shortcut saved.`, "success");
+    closeShortcutRecorder();
+}
+
+function clearShortcutRecorderShortcut() {
+    const action = getShortcutAction(shortcutRecorderActionId);
+    if (!action) return;
+    setKeyboardShortcut(shortcutRecorderActionId, null);
+    showToast(`${action.title} shortcut cleared.`, "info");
+    closeShortcutRecorder();
+}
+
+function resetShortcutRecorderShortcut() {
+    const action = getShortcutAction(shortcutRecorderActionId);
+    if (!action) return;
+    resetKeyboardShortcut(shortcutRecorderActionId);
+    showToast(`${action.title} reset to default.`, "info");
+    closeShortcutRecorder();
+}
+
+function isShortcutRecorderOpen() {
+    return Boolean(shortcutRecorderModal && !shortcutRecorderModal.hidden);
+}
+
+function isKeyboardShortcutEvent(event, actionId) {
+    const shortcut = getEffectiveKeyboardShortcuts()[actionId];
+    return Boolean(shortcut && shortcutsEqual(shortcutFromEvent(event), shortcut));
+}
+
+function getKeyboardShortcutActionForEvent(event) {
+    const eventShortcut = shortcutFromEvent(event);
+    if (!isValidShortcut(eventShortcut)) return null;
+    const shortcuts = getEffectiveKeyboardShortcuts();
+    return KEYBOARD_SHORTCUT_ACTIONS.find(action => shortcutsEqual(shortcuts[action.id], eventShortcut)) || null;
+}
+
+function isEditableShortcutTarget(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    const tagName = target.tagName.toLowerCase();
+    return target.isContentEditable || ["input", "textarea", "select"].includes(tagName);
+}
+
+function hasBlockingShortcutModalOpen() {
+    return Boolean(
+        (settingsModal && !settingsModal.hidden)
+        || (openAiCatalogModal && !openAiCatalogModal.hidden)
+        || (libraryPickerModal && !libraryPickerModal.hidden)
+        || (document.getElementById("codeWorkbenchOverlay") && !document.getElementById("codeWorkbenchOverlay").hidden)
+        || (document.getElementById("imageLightbox") && !document.getElementById("imageLightbox").hidden)
+    );
+}
+
+function toggleSidebarFromShortcut() {
+    const sidebar = document.getElementById("sidebar");
+    if (window.matchMedia?.("(max-width: 768px)")?.matches) {
+        if (sidebar?.classList.contains("open")) sidebarController.close();
+        else sidebarController.open();
+        return;
+    }
+    sidebarController.toggleCollapsed();
+}
+
+function executeKeyboardShortcutAction(actionId) {
+    switch (actionId) {
+        case "sendPrompt":
+            if (!isGenerating) void processWorkspaceEntry();
+            return true;
+        case "focusPrompt":
+            setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: true, closeSidebar: false, updateUrl: true, urlMode: "replace" });
+            return true;
+        case "newChat":
+            startNewChatSession({ notify: true, urlMode: "replace" });
+            return true;
+        case "openSettings":
+            openSettingsModal();
+            return true;
+        case "toggleSidebar":
+            toggleSidebarFromShortcut();
+            return true;
+        case "openLibrary":
+            setWorkspaceView(WORKSPACE_VIEW_LIBRARY, { closeSidebar: false, updateUrl: true });
+            return true;
+        case "openChat":
+            setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: false, closeSidebar: false, updateUrl: true });
+            return true;
+        case "toggleTools":
+            toolsBtn?.click();
+            return true;
+        case "toggleVoice":
+            voiceButton?.click();
+            return true;
+        case "checkUpdates":
+            void checkFaunaAppUpdate({ manual: true });
+            return true;
+        default:
+            return false;
+    }
+}
+
+function handleGlobalKeyboardShortcut(event) {
+    if (event.defaultPrevented || isShortcutRecorderOpen()) return;
+    const action = getKeyboardShortcutActionForEvent(event);
+    if (!action) return;
+    if (hasBlockingShortcutModalOpen()) return;
+    if (isEditableShortcutTarget(event.target) && !event.ctrlKey && !event.metaKey && !event.altKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    executeKeyboardShortcutAction(action.id);
+}
+
+function handleShortcutRecorderKeydown(event) {
+    if (!isShortcutRecorderOpen()) return;
+    if (event.key === "Tab") return;
+    if (event.key === "Escape") {
+        event.preventDefault();
+        closeShortcutRecorder();
+        return;
+    }
+
+    const nextShortcut = shortcutFromEvent(event);
+    if (!nextShortcut.key && !(nextShortcut.ctrl || nextShortcut.alt || nextShortcut.shift || nextShortcut.meta)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    shortcutRecorderDraft = nextShortcut;
+    updateShortcutRecorderUi();
+    pulseShortcutRecorderKeys();
 }
 
 [settingsOpenBtn, mobileSettingsOpenBtn].forEach(button => {
@@ -549,13 +1580,93 @@ settingsModal?.addEventListener("click", event => {
 });
 
 settingsModal?.addEventListener("click", event => {
+    const appInfoToggle = event.target.closest("[data-app-info-toggle]");
+    if (!appInfoToggle) return;
+    event.preventDefault();
+    toggleAppInfoSection(appInfoToggle);
+});
+
+settingsModal?.addEventListener("click", event => {
     if (event.target.closest("[data-settings-close]")) {
         closeSettingsModal();
     }
 });
 
+keyboardShortcutsResetBtn?.addEventListener("click", () => {
+    resetKeyboardShortcutOverrides();
+    showToast("Keyboard shortcuts reset to defaults.", "info");
+});
+
+appCacheClearBtn?.addEventListener("click", () => {
+    void clearAppCacheFromSettings();
+});
+
+appResetBtn?.addEventListener("click", () => {
+    void resetAppFromSettings();
+});
+
+completionNotificationsToggle?.addEventListener("change", event => {
+    completionNotificationsEnabled = Boolean(event.target.checked);
+    saveCompletionNotificationSetting(COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY, completionNotificationsEnabled);
+    if (completionNotificationsEnabled && getNotificationPermissionState() === "default") {
+        void requestCompletionNotificationPermission({ silent: false });
+    }
+    renderNotificationSettings();
+});
+
+completionSoundToggle?.addEventListener("change", event => {
+    completionSoundEnabled = Boolean(event.target.checked);
+    saveCompletionNotificationSetting(COMPLETION_SOUND_ENABLED_STORAGE_KEY, completionSoundEnabled);
+    renderNotificationSettings();
+});
+
+completionOnlyUnfocusedToggle?.addEventListener("change", event => {
+    completionOnlyUnfocused = Boolean(event.target.checked);
+    saveCompletionNotificationSetting(COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY, completionOnlyUnfocused);
+    renderNotificationSettings();
+});
+
+completionBackgroundOnlyToggle?.addEventListener("change", event => {
+    completionBackgroundOnly = Boolean(event.target.checked);
+    saveCompletionNotificationSetting(COMPLETION_BACKGROUND_ONLY_STORAGE_KEY, completionBackgroundOnly);
+    renderNotificationSettings();
+});
+
+completionSoundVolume?.addEventListener("input", event => {
+    completionSoundVolumeLevel = normalizeCompletionSoundVolume(event.target.value);
+    safeLocalStorageSet(COMPLETION_SOUND_VOLUME_STORAGE_KEY, String(completionSoundVolumeLevel));
+    renderNotificationSettings();
+});
+
+notificationPermissionBtn?.addEventListener("click", () => {
+    void requestCompletionNotificationPermission({ silent: false });
+});
+
+notificationTestBtn?.addEventListener("click", () => {
+    void testCompletionNotificationAlert();
+});
+
+shortcutRecorderModal?.addEventListener("click", event => {
+    if (event.target.closest("[data-shortcut-recorder-close]")) {
+        closeShortcutRecorder();
+    }
+});
+
+shortcutRecorderSaveBtn?.addEventListener("click", saveShortcutRecorderDraft);
+shortcutRecorderClearBtn?.addEventListener("click", clearShortcutRecorderShortcut);
+shortcutRecorderResetBtn?.addEventListener("click", resetShortcutRecorderShortcut);
+document.addEventListener("keydown", handleShortcutRecorderKeydown, true);
+document.addEventListener("keydown", handleGlobalKeyboardShortcut);
+updateShortcutBadges();
+renderKeyboardShortcutSettings();
+initializeNotificationSettings();
+
 document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
+        if (isShortcutRecorderOpen()) {
+            closeShortcutRecorder();
+            return;
+        }
         if (openAiCatalogModal && !openAiCatalogModal.hidden) {
             if (openAiCatalogFiltersMenu && !openAiCatalogFiltersMenu.hidden) {
                 closeOpenAiCatalogFilters();
@@ -631,6 +1742,7 @@ memoryOpenCommandBtn?.addEventListener("click", () => {
     input.style.height = `${input.scrollHeight}px`;
     input.focus();
     updateTokenDisplay();
+    scheduleComposerDraftSave({ render: true });
     renderSlashCommandPalette();
 });
 
@@ -1371,9 +2483,30 @@ function getCachedOpenAiTranscription(cacheKey) {
     return text;
 }
 
-function saveLocalTranscriptionCacheEntry(cacheKey, text, blob) {
+function normalizeTranscriptionRecordingMetadata(recording = null) {
+    if (!recording || typeof recording !== "object") return null;
+    const url = String(recording.url || recording.source || "").trim();
+    const path = String(recording.path || recording.filePath || "").trim();
+    if (!url && !path) return null;
+    const metadata = {
+        url,
+        path,
+        mimeType: String(recording.mimeType || recording.type || "").trim(),
+        size: String(recording.size || ""),
+        provider: String(recording.provider || "").trim(),
+        transcript: String(recording.transcript || "").trim(),
+        createdAt: String(recording.createdAt || new Date().toISOString()).trim()
+    };
+    Object.keys(metadata).forEach(key => {
+        if (!metadata[key]) delete metadata[key];
+    });
+    return metadata;
+}
+
+function saveLocalTranscriptionCacheEntry(cacheKey, text, blob, recording = null) {
     if (!isAiCachingEnabled || !cacheKey || !String(text || "").trim()) return;
     const cache = pruneOpenAiTranscriptionCache(readOpenAiTranscriptionCache());
+    const recordingMetadata = normalizeTranscriptionRecordingMetadata(recording);
     cache[cacheKey] = {
         provider: "local",
         engine: getLocalVoiceTranscription(),
@@ -1382,20 +2515,23 @@ function saveLocalTranscriptionCacheEntry(cacheKey, text, blob) {
         type: blob?.type || "audio/webm",
         size: Number(blob?.size || 0) || 0,
         text: String(text || "").trim(),
+        ...(recordingMetadata ? { recording: recordingMetadata } : {}),
         createdAt: new Date().toISOString(),
         lastUsedAt: new Date().toISOString()
     };
     safeLocalStorageSet(OPENAI_TRANSCRIPTION_CACHE_STORAGE_KEY, JSON.stringify(pruneOpenAiTranscriptionCache(cache)));
 }
 
-function saveOpenAiTranscriptionCacheEntry(cacheKey, text, blob) {
+function saveOpenAiTranscriptionCacheEntry(cacheKey, text, blob, recording = null) {
     if (!isAiCachingEnabled || !cacheKey || !String(text || "").trim()) return;
     const cache = pruneOpenAiTranscriptionCache(readOpenAiTranscriptionCache());
+    const recordingMetadata = normalizeTranscriptionRecordingMetadata(recording);
     cache[cacheKey] = {
         model: getOpenAiTranscriptionModel(),
         type: blob?.type || "audio/webm",
         size: Number(blob?.size || 0) || 0,
         text: String(text || "").trim(),
+        ...(recordingMetadata ? { recording: recordingMetadata } : {}),
         createdAt: new Date().toISOString(),
         lastUsedAt: new Date().toISOString()
     };
@@ -1613,9 +2749,54 @@ async function installOllamaWithApproval() {
     }
 }
 
+async function startOllamaHttpService() {
+    if (localModelsStartBtn) localModelsStartBtn.disabled = true;
+    if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = true;
+    setLocalModelsStatus("Starting Ollama", "missing");
+
+    try {
+        const desktopApi = getFaunaDesktopApi();
+        if (desktopApi?.startOllama) {
+            const result = await desktopApi.startOllama();
+            if (!result?.ok) {
+                if (result?.downloadUrl) window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
+                throw new Error(result?.message || "Ollama could not be started.");
+            }
+            showToast(result.message || "Ollama HTTP is starting.", result.status === "running" ? "info" : "success");
+        } else if (hasWorkspaceBridgeAccess()) {
+            const command = [
+                "$ErrorActionPreference = 'Stop'",
+                "$ollama = (Get-Command ollama -ErrorAction SilentlyContinue).Source",
+                "if (-not $ollama) { throw 'Ollama is not installed or is not on PATH.' }",
+                "Start-Process -FilePath $ollama -ArgumentList 'serve' -WindowStyle Hidden"
+            ].join("; ");
+            const result = await runWorkspaceCommand(command, ".", 20);
+            if (result.exitCode !== 0) {
+                throw new Error((result.stderr || result.stdout || "Ollama start command failed.").trim());
+            }
+            showToast("Ollama HTTP start command was sent.", "success");
+        } else {
+            window.open(OLLAMA_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
+            throw new Error("Enable the Local Workspace Bridge or use the desktop app to start Ollama from Fauna.");
+        }
+
+        await new Promise(resolve => window.setTimeout(resolve, 900));
+        await checkOllamaStatus();
+        return isOllamaReachable;
+    } catch (err) {
+        setLocalModelsStatus("Start failed", "missing");
+        showToast(`Ollama start failed: ${err.message}`, "error");
+        return false;
+    } finally {
+        if (localModelsStartBtn) localModelsStartBtn.disabled = false;
+        if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = false;
+    }
+}
+
 async function installMissingOllamaModels() {
     if (localModelsInstallBtn) localModelsInstallBtn.disabled = true;
     if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = true;
+    if (localModelsStartBtn) localModelsStartBtn.disabled = true;
     try {
         await checkOllamaStatus();
         if (!isOllamaReachable) {
@@ -1654,6 +2835,32 @@ async function installMissingOllamaModels() {
     } finally {
         if (localModelsInstallBtn) localModelsInstallBtn.disabled = false;
         if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = false;
+        if (localModelsStartBtn) localModelsStartBtn.disabled = false;
+    }
+}
+
+async function installLocalVoicePipeline() {
+    if (localVoiceInstallBtn) localVoiceInstallBtn.disabled = true;
+    try {
+        const approved = await showApprovalDialog({
+            title: "Install local voice support?",
+            message: "Fauna can start Ollama and install the local models it uses. Whisper and local voice endpoints still need to run on your machine.",
+            details: [
+                "Starts the Ollama HTTP service if Ollama is installed.",
+                "Pulls missing local Ollama models used by chat and vision.",
+                "Whisper and Moshi/Qwen3-Omni endpoints remain self-hosted at the configured URLs."
+            ],
+            confirmLabel: "Continue"
+        });
+        if (!approved) return;
+
+        if (!isOllamaReachable) {
+            await startOllamaHttpService();
+        }
+        await installMissingOllamaModels();
+        showToast("Local voice setup action finished. Check your Whisper and voice endpoint servers before starting voice chat.", "info");
+    } finally {
+        if (localVoiceInstallBtn) localVoiceInstallBtn.disabled = false;
     }
 }
 
@@ -1749,8 +2956,16 @@ localModelsRefreshBtn?.addEventListener("click", async () => {
     await checkOllamaStatus();
 });
 
+localModelsStartBtn?.addEventListener("click", () => {
+    void startOllamaHttpService();
+});
+
 localModelsInstallBtn?.addEventListener("click", () => {
     installMissingOllamaModels();
+});
+
+localVoiceInstallBtn?.addEventListener("click", () => {
+    void installLocalVoicePipeline();
 });
 
 openAiSaveBtn?.addEventListener("click", () => {

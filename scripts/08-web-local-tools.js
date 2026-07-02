@@ -7,7 +7,7 @@ async function inspectUrlInBrowser(url, signal = null) {
         },
         signal
     });
-    markGenerationConnectionEstablished();
+    markGenerationConnectionEstablished(signal);
     const contentType = res.headers.get("content-type") || "";
     const raw = await res.text();
     if (!res.ok) {
@@ -779,7 +779,7 @@ async function requestWorkspaceBridge(path, options = {}) {
         if (err.name === "AbortError") throw err;
         throw createWorkspaceBridgeNetworkError(path, err);
     }
-    markGenerationConnectionEstablished();
+    markGenerationConnectionEstablished(options.signal);
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
         if (path === OPENAI_BRIDGE_PATH) {
@@ -895,11 +895,11 @@ function extractDirectReadPaths(text) {
     return [...paths].slice(0, 5);
 }
 
-async function listWorkspaceTree(path = ".", depth = 2, signal = null) {
+async function listWorkspaceTree(path = ".", depth = 2, signal = null, limit = 220) {
     const params = new URLSearchParams({
         path: path || ".",
         depth: String(Math.max(0, Math.min(5, Number(depth) || 2))),
-        limit: "220"
+        limit: String(Math.max(1, Math.min(800, Number(limit) || 220)))
     });
     return requestWorkspaceBridge(`/tree?${params.toString()}`, { signal });
 }
@@ -922,6 +922,171 @@ async function runWorkspaceCommand(command, cwd = ".", timeout = 20, signal = nu
         },
         signal
     });
+}
+
+function normalizeWorkspaceToolLimit(value, fallback, min, max) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return fallback;
+    return Math.max(min, Math.min(max, Math.floor(numeric)));
+}
+
+function normalizeWorkspaceSearchQuery(toolCall = {}) {
+    return String(toolCall.query || toolCall.pattern || toolCall.text || toolCall.name || "").trim();
+}
+
+function globToRegex(glob = "") {
+    const value = String(glob || "").trim();
+    if (!value || value === "*") return null;
+    const escaped = value
+        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".");
+    return new RegExp(`^${escaped}$`, "i");
+}
+
+function matchesWorkspaceGlob(filePath, glob = "") {
+    const regex = globToRegex(glob);
+    if (!regex) return true;
+    const normalizedPath = String(filePath || "").replace(/\\/g, "/");
+    const fileName = normalizedPath.split("/").pop() || normalizedPath;
+    return regex.test(normalizedPath) || regex.test(fileName);
+}
+
+function getWorkspaceTreeFiles(result = {}) {
+    return (result.entries || [])
+        .filter(entry => entry?.type !== "directory" && entry?.path)
+        .map(entry => ({
+            path: String(entry.path),
+            size: Number(entry.size || 0) || 0
+        }));
+}
+
+function formatWorkspaceFileSearchResult(result = {}) {
+    const files = result.files || [];
+    const lines = files.map(file => {
+        const size = typeof file.size === "number" && file.size > 0 ? ` (${file.size.toLocaleString()} bytes)` : "";
+        return `[file] ${file.path}${size}`;
+    });
+    const truncated = result.truncated ? "\n[Search truncated by result limit]" : "";
+    return `Workspace file search for "${result.query || "*"}" under ${result.path || "."}:\n${lines.join("\n") || "[No matching files]"}${truncated}`;
+}
+
+function formatWorkspaceTextSearchResult(result = {}) {
+    const matches = result.matches || [];
+    const lines = matches.map(match => `${match.path}:${match.line}: ${match.text}`);
+    const truncated = result.truncated ? "\n[Search truncated by file or match limit]" : "";
+    return `Workspace text search for "${result.query}" under ${result.path || "."}:\n${lines.join("\n") || "[No matches]"}${truncated}`;
+}
+
+function getWorkspaceSearchInclude(toolCall = {}) {
+    const include = toolCall.include || toolCall.glob || toolCall.fileGlob || toolCall.files;
+    if (Array.isArray(include)) return include.map(item => String(item || "").trim()).filter(Boolean).slice(0, 8);
+    const clean = String(include || "").trim();
+    return clean ? clean.split(",").map(item => item.trim()).filter(Boolean).slice(0, 8) : [];
+}
+
+function isLikelyTextWorkspaceFile(filePath = "") {
+    return /\.(?:[cm]?[jt]sx?|jsonc?|html?|css|scss|sass|mdx?|txt|ya?ml|toml|ini|env|py|ps1|sh|bash|zsh|bat|cmd|java|kt|kts|swift|go|rs|c|cc|cpp|h|hpp|cs|php|rb|sql|xml|svg|vue|svelte)$/i.test(String(filePath || ""));
+}
+
+function workspaceSearchPathMatches(filePath, query, includeGlobs = []) {
+    const normalized = String(filePath || "").replace(/\\/g, "/");
+    if (includeGlobs.length > 0 && !includeGlobs.some(glob => matchesWorkspaceGlob(normalized, glob))) return false;
+    if (!query) return true;
+    return normalized.toLowerCase().includes(String(query).toLowerCase());
+}
+
+async function searchWorkspaceFiles(toolCall = {}, signal = null) {
+    const path = cleanWorkspaceToolPath(toolCall.path || ".");
+    const query = normalizeWorkspaceSearchQuery(toolCall);
+    const depth = normalizeWorkspaceToolLimit(toolCall.depth, 5, 0, 5);
+    const limit = normalizeWorkspaceToolLimit(toolCall.limit || toolCall.maxResults, 80, 1, 200);
+    const includeGlobs = getWorkspaceSearchInclude(toolCall);
+    const tree = await listWorkspaceTree(path, depth, signal, 800);
+    const files = getWorkspaceTreeFiles(tree)
+        .filter(file => workspaceSearchPathMatches(file.path, query, includeGlobs))
+        .slice(0, limit);
+    return {
+        path: tree.path || path,
+        query,
+        files,
+        truncated: Boolean(tree.truncated) || getWorkspaceTreeFiles(tree).length > files.length && files.length >= limit
+    };
+}
+
+function buildTextSearchMatcher(toolCall = {}) {
+    const query = normalizeWorkspaceSearchQuery(toolCall);
+    if (!query) throw new Error("search_text requires a query.");
+    const caseSensitive = Boolean(toolCall.caseSensitive);
+    const useRegex = Boolean(toolCall.regex || toolCall.regexp);
+    if (useRegex) {
+        const flags = caseSensitive ? "" : "i";
+        const regex = new RegExp(query, flags);
+        return {
+            query,
+            matches: line => regex.test(line)
+        };
+    }
+    const needle = caseSensitive ? query : query.toLowerCase();
+    return {
+        query,
+        matches: line => {
+            const haystack = caseSensitive ? String(line || "") : String(line || "").toLowerCase();
+            return haystack.includes(needle);
+        }
+    };
+}
+
+async function searchWorkspaceText(toolCall = {}, signal = null) {
+    const path = cleanWorkspaceToolPath(toolCall.path || ".");
+    const depth = normalizeWorkspaceToolLimit(toolCall.depth, 5, 0, 5);
+    const maxFiles = normalizeWorkspaceToolLimit(toolCall.maxFiles || toolCall.fileLimit, 80, 1, 160);
+    const maxMatches = normalizeWorkspaceToolLimit(toolCall.maxMatches || toolCall.limit, 120, 1, 240);
+    const includeGlobs = getWorkspaceSearchInclude(toolCall);
+    const matcher = buildTextSearchMatcher(toolCall);
+    const tree = await listWorkspaceTree(path, depth, signal, 800);
+    const candidateFiles = getWorkspaceTreeFiles(tree)
+        .filter(file => includeGlobs.length ? includeGlobs.some(glob => matchesWorkspaceGlob(file.path, glob)) : isLikelyTextWorkspaceFile(file.path))
+        .slice(0, maxFiles);
+    const matches = [];
+
+    for (const file of candidateFiles) {
+        if (matches.length >= maxMatches) break;
+        const result = await readWorkspaceFile(file.path, signal);
+        const lines = String(result.content || "").replace(/\r\n/g, "\n").split("\n");
+        for (let index = 0; index < lines.length; index += 1) {
+            if (matches.length >= maxMatches) break;
+            const line = lines[index];
+            if (!matcher.matches(line)) continue;
+            matches.push({
+                path: result.path || file.path,
+                line: index + 1,
+                text: getToolDetailSnippet(line, 220)
+            });
+        }
+    }
+
+    return {
+        path: tree.path || path,
+        query: matcher.query,
+        matches,
+        truncated: Boolean(tree.truncated) || candidateFiles.length >= maxFiles || matches.length >= maxMatches
+    };
+}
+
+async function readWorkspaceFiles(paths = [], signal = null) {
+    const cleanPaths = (Array.isArray(paths) ? paths : String(paths || "").split(","))
+        .map(path => cleanWorkspaceToolPath(path))
+        .filter(path => path && path !== ".")
+        .slice(0, 8);
+    if (!cleanPaths.length) throw new Error("read_files requires one or more paths.");
+    const results = [];
+    for (const path of cleanPaths) {
+        results.push(await readWorkspaceFile(path, signal));
+    }
+    return results
+        .map(formatWorkspaceFileResult)
+        .join("\n\n---\n\n");
 }
 
 async function getWorkspaceContextForPrompt(text, signal = null) {
@@ -1045,11 +1210,46 @@ function getFaunaNativeToolDefinitions({
                 })
             },
             {
+                name: "search_files",
+                description: "Search local workspace file names and paths, optionally narrowed by glob.",
+                parameters: createFaunaToolParameterSchema({
+                    query: { type: "string", description: "Filename or path text to find." },
+                    path: { type: "string", description: "Workspace-relative starting directory." },
+                    depth: { type: "number", description: "Directory depth from 0 to 5." },
+                    include: { type: "string", description: "Optional glob such as *.js or scripts/*.js." },
+                    limit: { type: "number", description: "Maximum results, capped by Fauna." }
+                })
+            },
+            {
+                name: "search_text",
+                description: "Search text inside local workspace files and return line-numbered matches.",
+                parameters: createFaunaToolParameterSchema({
+                    query: { type: "string", description: "Literal text or regex pattern to find." },
+                    path: { type: "string", description: "Workspace-relative starting directory." },
+                    include: { type: "string", description: "Optional glob such as *.js or styles/*.css." },
+                    caseSensitive: { type: "boolean" },
+                    regex: { type: "boolean" },
+                    maxFiles: { type: "number" },
+                    maxMatches: { type: "number" }
+                }, ["query"])
+            },
+            {
                 name: "read_file",
                 description: "Read a file from the configured local workspace.",
                 parameters: createFaunaToolParameterSchema({
                     path: { type: "string", description: "Workspace-relative file path." }
                 }, ["path"])
+            },
+            {
+                name: "read_files",
+                description: "Read several local workspace files in one tool call.",
+                parameters: createFaunaToolParameterSchema({
+                    paths: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "Workspace-relative file paths."
+                    }
+                }, ["paths"])
             },
             {
                 name: "run_command",
@@ -1349,6 +1549,32 @@ function getFaunaToolCallSignature(toolCall = {}) {
             path: normalizeFaunaToolPathForSignature(toolCall.path || ".")
         });
     }
+    if (tool === "read_files") {
+        const paths = Array.isArray(toolCall.paths) ? toolCall.paths : String(toolCall.paths || toolCall.path || "").split(",");
+        return JSON.stringify({
+            tool,
+            paths: paths.map(path => normalizeFaunaToolPathForSignature(path)).filter(Boolean).slice(0, 8)
+        });
+    }
+    if (tool === "search_files") {
+        return JSON.stringify({
+            tool,
+            query: normalizeWorkspaceSearchQuery(toolCall),
+            path: normalizeFaunaToolPathForSignature(toolCall.path || "."),
+            include: getWorkspaceSearchInclude(toolCall).join(","),
+            depth: Math.max(0, Math.min(5, Number(toolCall.depth) || 5))
+        });
+    }
+    if (tool === "search_text") {
+        return JSON.stringify({
+            tool,
+            query: normalizeWorkspaceSearchQuery(toolCall),
+            path: normalizeFaunaToolPathForSignature(toolCall.path || "."),
+            include: getWorkspaceSearchInclude(toolCall).join(","),
+            caseSensitive: Boolean(toolCall.caseSensitive),
+            regex: Boolean(toolCall.regex || toolCall.regexp)
+        });
+    }
     if (tool === "run_command") {
         return JSON.stringify({
             tool,
@@ -1488,6 +1714,9 @@ function getFaunaToolProgressLabel(toolCall) {
     if (toolCall?.tool === "delete_memory") return "Updating memories...";
     if (toolCall?.tool === "run_command") return "Running local terminal command...";
     if (toolCall?.tool === "read_file") return "Reading local file...";
+    if (toolCall?.tool === "read_files") return "Reading local files...";
+    if (toolCall?.tool === "search_files") return "Searching local files...";
+    if (toolCall?.tool === "search_text") return "Searching local text...";
     return "Inspecting local workspace...";
 }
 
@@ -1499,7 +1728,8 @@ function getFaunaToolActivityKind(toolCall) {
     if (isTimeToolName(toolCall?.tool)) return "timer";
     if (isMemoryToolName(toolCall?.tool)) return "memory";
     if (toolCall?.tool === "run_command") return "terminal";
-    if (toolCall?.tool === "read_file") return "file";
+    if (toolCall?.tool === "read_file" || toolCall?.tool === "read_files") return "file";
+    if (toolCall?.tool === "search_files" || toolCall?.tool === "search_text") return "search";
     return "workspace";
 }
 
@@ -1536,6 +1766,12 @@ function getFaunaToolActivityDetail(toolCall) {
     if (toolCall?.tool === "delete_memory") return getToolDetailSnippet(toolCall.target || toolCall.id || toolCall.index || toolCall.text || "Memory");
     if (toolCall?.tool === "run_command") return toolCall.command || "Local command";
     if (toolCall?.tool === "read_file") return toolCall.path || "Local file";
+    if (toolCall?.tool === "read_files") {
+        const paths = Array.isArray(toolCall.paths) ? toolCall.paths : String(toolCall.paths || "").split(",");
+        return getToolDetailSnippet(paths.filter(Boolean).join(", ") || "Local files");
+    }
+    if (toolCall?.tool === "search_files") return getToolDetailSnippet(normalizeWorkspaceSearchQuery(toolCall) || toolCall.path || "Files");
+    if (toolCall?.tool === "search_text") return getToolDetailSnippet(normalizeWorkspaceSearchQuery(toolCall) || "Text");
     return toolCall?.path || ".";
 }
 
@@ -1563,6 +1799,8 @@ function getFaunaToolActivityInput(toolCall) {
     if (toolCall?.tool === "delete_memory") return String(toolCall.target || toolCall.id || toolCall.index || toolCall.text || "").trim();
     if (toolCall?.tool === "run_command") return String(toolCall.command || "").trim();
     if (toolCall?.tool === "read_file") return String(toolCall.path || "").trim();
+    if (toolCall?.tool === "read_files") return (Array.isArray(toolCall.paths) ? toolCall.paths : String(toolCall.paths || "").split(",")).filter(Boolean).join(", ");
+    if (toolCall?.tool === "search_files" || toolCall?.tool === "search_text") return normalizeWorkspaceSearchQuery(toolCall);
     return String(toolCall?.path || ".").trim();
 }
 
@@ -1633,9 +1871,18 @@ async function executeFaunaToolCall(toolCall, signal = null) {
     if (toolCall.tool === "workspace_tree") {
         return formatWorkspaceTreeResult(await listWorkspaceTree(toolCall.path || ".", toolCall.depth || 2, signal));
     }
+    if (toolCall.tool === "search_files") {
+        return formatWorkspaceFileSearchResult(await searchWorkspaceFiles(toolCall, signal));
+    }
+    if (toolCall.tool === "search_text") {
+        return formatWorkspaceTextSearchResult(await searchWorkspaceText(toolCall, signal));
+    }
     if (toolCall.tool === "read_file") {
         if (!toolCall.path) throw new Error("read_file requires a path.");
         return formatWorkspaceFileResult(await readWorkspaceFile(toolCall.path, signal));
+    }
+    if (toolCall.tool === "read_files") {
+        return readWorkspaceFiles(toolCall.paths || toolCall.path || [], signal);
     }
     if (toolCall.tool === "run_command") {
         if (!toolCall.command) throw new Error("run_command requires a command.");
@@ -1646,10 +1893,20 @@ async function executeFaunaToolCall(toolCall, signal = null) {
 
 async function retryImageToolCallInBubble(target, request, visibleText = "") {
     if (isGenerating || !target) return;
+    if (isActiveChatArchived()) {
+        showToast("Archived chats are read-only. Restore the chat before retrying.", "warning");
+        return;
+    }
 
-    activeRequestController = new AbortController();
-    const generationSignal = activeRequestController.signal;
-    setGeneratingBusy(true);
+    const generationSession = ensureWritableActiveChatSession();
+    if (!generationSession) return;
+    const generationSessionId = generationSession.id;
+    const runHistory = cloneConversationHistory(conversationHistory);
+    let runTokenTotal = sessionTotalTokens;
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
+    setGeneratingBusy(true, { sessionId: generationSessionId, controller: generationController });
     prepareBubbleForRetry(target);
 
     const activity = createImageGenerationToolActivity(target, {
@@ -1665,22 +1922,34 @@ async function retryImageToolCallInBubble(target, request, visibleText = "") {
             signal: generationSignal,
             options: request,
             activity,
-            label: "Generated image"
+            label: "Generated image",
+            sessionId: generationSessionId
         });
         const historyContent = getGeneratedImageHistoryContent("Generated image", generated.prompt);
         const content = [String(visibleText || "").trim(), historyContent].filter(Boolean).join("\n\n");
         let messageIndex = updateAssistantHistoryForBubble(target, content);
+        if (messageIndex !== null && runHistory[messageIndex]?.role === "assistant") {
+            runHistory[messageIndex] = {
+                ...runHistory[messageIndex],
+                content,
+                createdAt: new Date().toISOString()
+            };
+        }
         if (messageIndex === null) {
-            conversationHistory.push({
+            runHistory.push({
                 role: "assistant",
                 content,
                 createdAt: new Date().toISOString()
             });
-            messageIndex = conversationHistory.length - 1;
+            messageIndex = runHistory.length - 1;
         }
         setupAssistantActions(target.parentElement, getGeneratedMediaCopyText(generated.imageUrl, content), {
             messageIndex,
             canFork: true
+        });
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
         });
         showToast("Image generation retried.", "success");
     } catch (err) {
@@ -1692,10 +1961,12 @@ async function retryImageToolCallInBubble(target, request, visibleText = "") {
             onRetry: () => retryImageToolCallInBubble(target, request, visibleText)
         });
     } finally {
-        activeRequestController = null;
-        setGeneratingBusy(false);
+        finishChatGeneration(generationSessionId, generationController);
         updateTokenDisplay();
-        saveCurrentSession();
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
     }
 }
 
@@ -1734,7 +2005,8 @@ async function executeImageGenerationToolCall(toolCall, signal = null, {
             signal,
             options: request,
             activity,
-            label: "Generated image"
+            label: "Generated image",
+            sessionId: getGenerationSessionIdForSignal(signal)
         });
         const historyContent = getGeneratedImageHistoryContent("Generated image", generated.prompt);
         return {

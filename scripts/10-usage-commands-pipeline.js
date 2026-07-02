@@ -846,7 +846,7 @@ async function handleSlashCommandSubmission(textValue) {
 sendButton.onclick = processWorkspaceEntry;
 input.addEventListener("keydown", e => {
     if (handleSlashCommandKeydown(e)) return;
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (isKeyboardShortcutEvent(e, "sendPrompt")) {
         e.preventDefault();
         if (!isGenerating) processWorkspaceEntry();
     }
@@ -860,6 +860,7 @@ input.addEventListener("input", () => {
     input.style.height = input.scrollHeight + "px";
     scheduleComposerSafeAreaUpdate();
     updateTokenDisplay();
+    scheduleComposerDraftSave();
     renderSlashCommandPalette();
 });
 input.addEventListener("focus", renderSlashCommandPalette);
@@ -870,6 +871,45 @@ document.addEventListener("click", event => {
     closeCommandMenu();
 });
 
+function shouldUseRecentGeneratedImageReference(text, files = []) {
+    if (!text || getImageFiles(files).length > 0) return false;
+    return /(?:\b(?:this|that|it|last|latest|generated|previous|above)\b[\s\S]{0,48}\b(?:image|picture|photo|artwork|render)\b|\b(?:edit|change|modify|describe|analyze|analyse|see|look at|enhance|recolor|background|brighter|darker)\b[\s\S]{0,48}\b(?:it|this|that|image|picture|photo)\b|\b(?:image|picture|photo)\b[\s\S]{0,48}\b(?:you made|you generated|above|last|previous)\b)/i.test(text);
+}
+
+function getLatestGeneratedImageElement() {
+    const images = Array.from(chat?.querySelectorAll?.(".output-node img.generated-image, .output-node .generated-image-card img.generated-image") || []);
+    return images.reverse().find(img => {
+        const src = String(img.getAttribute("src") || img.currentSrc || img.src || "").trim();
+        return src && !src.includes("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==");
+    }) || null;
+}
+
+async function createFileFromGeneratedImageElement(img) {
+    const src = String(img?.getAttribute("src") || img?.currentSrc || img?.src || "").trim();
+    if (!src) return null;
+    const response = await fetch(src);
+    if (!response.ok) throw new Error(`Generated image responded with HTTP ${response.status}`);
+    const blob = await response.blob();
+    const type = blob.type || "image/png";
+    const extension = getMimeExtension(type, "png");
+    const file = new File([blob], `generated-image.${extension}`, { type });
+    setFilePersistentPreviewSource(file, src);
+    return file;
+}
+
+async function getRecentGeneratedImageReferenceFiles(text, files = []) {
+    if (!shouldUseRecentGeneratedImageReference(text, files)) return [];
+    const latestImage = getLatestGeneratedImageElement();
+    if (!latestImage) return [];
+    try {
+        const file = await createFileFromGeneratedImageElement(latestImage);
+        return file ? [file] : [];
+    } catch (err) {
+        console.warn("Could not attach recent generated image for context:", err);
+        return [];
+    }
+}
+
 async function processWorkspaceEntry(options = {}) {
     if (isGenerating) return;
 
@@ -878,6 +918,11 @@ async function processWorkspaceEntry(options = {}) {
     const textValue = (hasRetryPayload ? options.textValue || "" : input.value).trim();
     const sourceFiles = Array.isArray(options?.files) ? options.files : attachedFiles;
     if (!textValue && sourceFiles.length === 0) return;
+
+    if (isActiveChatArchived()) {
+        showToast("Archived chats are read-only. Restore the chat before writing.", "warning");
+        return;
+    }
 
     if (await handleSlashCommandSubmission(textValue)) {
         return;
@@ -895,14 +940,22 @@ async function processWorkspaceEntry(options = {}) {
         return;
     }
 
-    activeRequestController = new AbortController();
-    const generationSignal = activeRequestController.signal;
+    const generationSession = ensureWritableActiveChatSession();
+    if (!generationSession) return;
+    const generationSessionId = generationSession.id;
+    if (isSessionGenerating(generationSessionId)) return;
+
+    const runHistory = cloneConversationHistory(conversationHistory);
+    let runTokenTotal = sessionTotalTokens;
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
     const speakThisReply = shouldSpeakNextReply && textValue.length > 0;
     const videoPrompt = getVideoCommandPrompt(textValue);
     const imagePrompt = getImageCommandPrompt(textValue);
     shouldSpeakNextReply = false;
 
-    setGeneratingBusy(true);
+    setGeneratingBusy(true, { sessionId: generationSessionId, controller: generationController });
     if (isOpenAiProvider() && isOpenAiVoiceSessionActive && speakThisReply) {
         setVoiceSessionStatus("Thinking", 0.34);
     }
@@ -912,13 +965,17 @@ async function processWorkspaceEntry(options = {}) {
         chat.style.display = "block";
         isChatPinnedToBottom = true;
 
-        const currentFiles = [...sourceFiles];
+        const currentFiles = [
+            ...sourceFiles,
+            ...await getRecentGeneratedImageReferenceFiles(textValue, sourceFiles)
+        ];
         await ensurePersistentImagePreviewSources(currentFiles);
         if (!hasRetryPayload) {
             input.value = "";
             input.style.height = "auto";
             previewContainer.innerHTML = "";
             attachedFiles = [];
+            clearSessionComposerDraft(generationSessionId);
             updateTokenDisplay();
             scheduleComposerSafeAreaUpdate();
         }
@@ -929,15 +986,21 @@ async function processWorkspaceEntry(options = {}) {
         }
 
         const userMessageCreatedAt = new Date().toISOString();
+        const voiceRecording = normalizeVoiceRecordingMetadata(options?.voiceRecording);
         const userBubble = options?.skipUserBubble === true
             ? null
             : addRenderNode(textValue, "user", currentFiles, {
-                createdAt: userMessageCreatedAt
+                createdAt: userMessageCreatedAt,
+                voiceRecording
             });
 
         if (videoPrompt !== null) {
             await processVideoGeneration(videoPrompt, currentFiles, generationSignal, {
-                userCreatedAt: userMessageCreatedAt
+                userCreatedAt: userMessageCreatedAt,
+                sessionId: generationSessionId,
+                history: runHistory,
+                getTokenTotal: () => runTokenTotal,
+                setTokenTotal: value => { runTokenTotal = value; }
             });
             scrollChatToBottom();
             return;
@@ -945,7 +1008,11 @@ async function processWorkspaceEntry(options = {}) {
 
         if (imagePrompt !== null) {
             await processImageGeneration(imagePrompt, currentFiles, generationSignal, {
-                userCreatedAt: userMessageCreatedAt
+                userCreatedAt: userMessageCreatedAt,
+                sessionId: generationSessionId,
+                history: runHistory,
+                getTokenTotal: () => runTokenTotal,
+                setTokenTotal: value => { runTokenTotal = value; }
             });
             scrollChatToBottom();
             return;
@@ -953,7 +1020,11 @@ async function processWorkspaceEntry(options = {}) {
 
         if (isImageEditRequest(textValue, currentFiles)) {
             await processImageEdit(textValue, currentFiles, generationSignal, {
-                userCreatedAt: userMessageCreatedAt
+                userCreatedAt: userMessageCreatedAt,
+                sessionId: generationSessionId,
+                history: runHistory,
+                getTokenTotal: () => runTokenTotal,
+                setTokenTotal: value => { runTokenTotal = value; }
             });
             scrollChatToBottom();
             return;
@@ -1149,24 +1220,38 @@ async function processWorkspaceEntry(options = {}) {
             content: messageContent,
             createdAt: userMessageCreatedAt
         };
+        if (voiceRecording) {
+            userMessageObject.voiceRecording = voiceRecording;
+        }
         if (base64Images.length > 0) {
             userMessageObject.images = base64Images;
         }
         if (openAiImageFileIds.length > 0) {
             userMessageObject.openAiImageFileIds = openAiImageFileIds;
         }
-        conversationHistory.push(userMessageObject);
-        const userHistoryIndex = conversationHistory.length - 1;
+        runHistory.push(userMessageObject);
+        if (isChatSessionVisible(generationSessionId)) {
+            conversationHistory = cloneConversationHistory(runHistory);
+        }
+        const userHistoryIndex = runHistory.length - 1;
         const userMessageNode = userBubble?.closest?.(".message-node.user-node");
         if (userMessageNode) {
             userMessageNode.dataset.historyIndex = String(userHistoryIndex);
             userMessageNode.dataset.createdAt = userMessageCreatedAt;
         }
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
 
         try {
+            const requestOptions = {
+                ...getActiveChatRequestOptions(),
+                sessionId: generationSessionId
+            };
             const data = await sendOllamaChatWithLocalTools(
-                conversationHistory,
-                getActiveChatRequestOptions(),
+                runHistory,
+                requestOptions,
                 routedModel,
                 generationSignal,
                 aiBubble,
@@ -1175,14 +1260,22 @@ async function processWorkspaceEntry(options = {}) {
             const tokenUsage = getProviderTokenUsage(data);
             const assistantMessage = getAssistantMessageForConversation(data, routedModel);
             attachTokenUsage(assistantMessage, tokenUsage);
-            conversationHistory.push(assistantMessage);
-            const assistantIndex = conversationHistory.length - 1;
+            runHistory.push(assistantMessage);
+            if (isChatSessionVisible(generationSessionId)) {
+                conversationHistory = cloneConversationHistory(runHistory);
+            }
+            const assistantIndex = runHistory.length - 1;
 
-            addSessionTokens(tokenUsage, { message: assistantMessage });
+            runTokenTotal += recordSessionTokenUsage(generationSessionId, tokenUsage, { message: assistantMessage });
             await renderAssistantResponse(data, aiBubble, webSources, generationSignal, speakThisReply, {
+                sessionId: generationSessionId,
                 messageIndex: assistantIndex,
                 alreadyRendered: data.__faunaAlreadyRendered === true,
                 preserveRenderedContent: data.__faunaPreserveRenderedContent === true
+            });
+            updateStoredSessionFromGeneration(generationSessionId, {
+                history: runHistory,
+                tokenTotal: runTokenTotal
             });
 
         } catch (e) {
@@ -1198,13 +1291,136 @@ async function processWorkspaceEntry(options = {}) {
 
         scrollChatToBottom();
     } finally {
-        activeRequestController = null;
-        setGeneratingBusy(false);
+        finishChatGeneration(generationSessionId, generationController);
         updateTokenDisplay();
-        saveCurrentSession();
-        if (isOpenAiProvider() && isOpenAiVoiceSessionActive) {
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
+        if (isChatSessionVisible(generationSessionId) && isOpenAiProvider() && isOpenAiVoiceSessionActive) {
             scheduleOpenAiVoiceRearm();
         }
     }
 }
 
+function focusMainWindowComposer() {
+    setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: true, closeSidebar: false, updateUrl: true, urlMode: "replace" });
+    window.setTimeout(() => focusComposerInput({ force: true }), 0);
+}
+
+function inferAttachmentMimeType(name = "") {
+    const extension = String(name || "").split(/[?#]/)[0].split(".").pop()?.toLowerCase() || "";
+    const types = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        webp: "image/webp",
+        gif: "image/gif",
+        svg: "image/svg+xml",
+        pdf: "application/pdf",
+        txt: "text/plain",
+        md: "text/markdown",
+        js: "text/javascript",
+        py: "text/x-python",
+        json: "application/json",
+        csv: "text/csv",
+        html: "text/html",
+        css: "text/css"
+    };
+    return types[extension] || "application/octet-stream";
+}
+
+function getFileNameFromPath(filePath = "") {
+    return String(filePath || "").split(/[\\/]/).filter(Boolean).pop() || "attachment";
+}
+
+async function createDesktopAttachmentFile(attachment = {}) {
+    const api = getFaunaDesktopApi();
+    const filePath = String(attachment.path || attachment.filePath || "").trim();
+    if (!api || !filePath) return null;
+
+    const previewUrl = api.filePathToUrl?.(filePath) || "";
+    if (!previewUrl) return null;
+
+    const response = await fetch(previewUrl);
+    if (!response.ok) throw new Error(`Could not read ${getFileNameFromPath(filePath)} (${response.status})`);
+    const blob = await response.blob();
+    const name = String(attachment.name || "").trim() || getFileNameFromPath(filePath);
+    const type = String(attachment.type || "").trim() || blob.type || inferAttachmentMimeType(name);
+    const file = new File([blob], name, { type });
+    defineHiddenFileValue(file, "__faunaDesktopFilePath", filePath);
+    defineHiddenFileValue(file, "__faunaDesktopPreviewSrc", previewUrl);
+    return file;
+}
+
+async function createDesktopAttachmentFiles(attachments = []) {
+    const files = [];
+    for (const attachment of Array.isArray(attachments) ? attachments : []) {
+        const file = await createDesktopAttachmentFile(attachment);
+        if (file) files.push(file);
+    }
+    return files;
+}
+
+function applyDesktopQuickModelSelection(payload = {}) {
+    const provider = payload.provider === AI_PROVIDER_OPENAI ? AI_PROVIDER_OPENAI : AI_PROVIDER_LOCAL;
+    const modelId = normalizeModelId(payload.modelId);
+    setActiveAiProvider(provider, { refreshStatus: false });
+    if (modelId) {
+        setActiveModel(modelId, { provider });
+    }
+}
+
+function handleDesktopOpenChatRequest(payload = {}) {
+    const chatId = String(payload.chatId || "").trim();
+    if (!chatId) {
+        focusMainWindowComposer();
+        return;
+    }
+    if (chatSessions.some(session => session.id === chatId && !session.archived)) {
+        activateChatSession(chatId, { closeSidebar: false, urlMode: "replace" });
+        focusComposerInput({ force: true });
+        return;
+    }
+    showToast("That recent chat is no longer available.", "warning");
+    focusMainWindowComposer();
+}
+
+function handleDesktopNewChatRequest() {
+    startNewChatSession({ notify: true, urlMode: "replace" });
+}
+
+async function handleDesktopQuickPromptRequest(payload = {}) {
+    const prompt = String(payload.prompt || "").trim();
+    focusMainWindowComposer();
+    if (!input) return;
+
+    applyDesktopQuickModelSelection(payload);
+
+    let files = [];
+    try {
+        files = await createDesktopAttachmentFiles(payload.attachments);
+    } catch (err) {
+        showToast(`Quick attachment failed: ${err.message}`, "error");
+    }
+
+    if (!prompt && files.length === 0) return;
+    input.value = prompt;
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+    updateTokenDisplay();
+    scheduleComposerDraftSave({ render: true });
+    window.setTimeout(() => {
+        if (isGenerating) return;
+        input.value = "";
+        input.style.height = "auto";
+        scheduleComposerDraftSave({ immediate: true, render: true });
+        void processWorkspaceEntry({ textValue: prompt, files });
+    }, 0);
+}
+
+const desktopQuickApi = getFaunaDesktopApi()?.quick;
+desktopQuickApi?.onOpenChat?.(handleDesktopOpenChatRequest);
+desktopQuickApi?.onNewChat?.(handleDesktopNewChatRequest);
+desktopQuickApi?.onPrompt?.(handleDesktopQuickPromptRequest);
+void desktopQuickApi?.rendererReady?.();

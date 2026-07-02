@@ -1396,6 +1396,27 @@ function addSessionTokens(usage, metadata = {}) {
     return normalized.total;
 }
 
+function recordSessionTokenUsage(sessionId, usage, metadata = {}) {
+    const normalized = normalizeTokenUsage(usage);
+    if (!normalized) {
+        updateTokenDisplay();
+        return 0;
+    }
+    const event = recordTokenUsageEvent(normalized, {
+        ...metadata,
+        sessionId: sessionId || metadata.sessionId || activeSessionId || ""
+    });
+    const trackedUsage = event ? { ...normalized, eventId: event.id } : normalized;
+    if (metadata.message && trackedUsage.eventId) {
+        metadata.message.tokenUsage = trackedUsage;
+    }
+    if (!sessionId || sessionId === activeSessionId) {
+        sessionTotalTokens += normalized.total;
+        updateTokenDisplay();
+    }
+    return normalized.total;
+}
+
 function isImageAttachment(file) {
     return Boolean(file?.type?.startsWith("image/"));
 }

@@ -299,14 +299,24 @@ function buildClarifyingAnswerDisplay(state) {
 
 async function submitClarifyingAnswers() {
     if (!activeClarifyingQuestion || isGenerating) return;
+    if (isActiveChatArchived()) {
+        showToast("Archived chats are read-only. Restore the chat before writing.", "warning");
+        return;
+    }
+    const generationSession = ensureWritableActiveChatSession();
+    if (!generationSession) return;
+    const generationSessionId = generationSession.id;
     const state = finalizeClarifyingQuestionStopwatch(activeClarifyingQuestion);
     const payload = buildClarifyingAnswerPayload(state);
     const displayText = buildClarifyingAnswerDisplay(state);
+    const runHistory = cloneConversationHistory(conversationHistory);
+    let runTokenTotal = sessionTotalTokens;
 
     clearClarifyingQuestionComposer();
-    activeRequestController = new AbortController();
-    const generationSignal = activeRequestController.signal;
-    setGeneratingBusy(true);
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
+    setGeneratingBusy(true, { sessionId: generationSessionId, controller: generationController });
     let aiBubble = null;
 
     try {
@@ -316,20 +326,27 @@ async function submitClarifyingAnswers() {
         const userBubble = addRenderNode(displayText, "user", [], {
             createdAt: userMessageCreatedAt
         });
-        conversationHistory.push({
+        runHistory.push({
             role: "user",
             content: payload,
             createdAt: userMessageCreatedAt
         });
         const userMessageNode = userBubble?.closest?.(".message-node.user-node");
         if (userMessageNode) {
-            userMessageNode.dataset.historyIndex = String(conversationHistory.length - 1);
+            userMessageNode.dataset.historyIndex = String(runHistory.length - 1);
         }
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
 
         aiBubble = addRenderNode("__thinking__", "output");
         const data = await sendOllamaChatWithLocalTools(
-            conversationHistory,
-            getActiveChatRequestOptions(),
+            runHistory,
+            {
+                ...getActiveChatRequestOptions(),
+                sessionId: generationSessionId
+            },
             OLLAMA_MODEL,
             generationSignal,
             aiBubble,
@@ -338,23 +355,30 @@ async function submitClarifyingAnswers() {
         const tokenUsage = getProviderTokenUsage(data);
         const assistantMessage = getAssistantMessageForConversation(data, OLLAMA_MODEL);
         attachTokenUsage(assistantMessage, tokenUsage);
-        conversationHistory.push(assistantMessage);
-        const assistantIndex = conversationHistory.length - 1;
-        addSessionTokens(tokenUsage, { message: assistantMessage });
+        runHistory.push(assistantMessage);
+        const assistantIndex = runHistory.length - 1;
+        runTokenTotal += recordSessionTokenUsage(generationSessionId, tokenUsage, { message: assistantMessage });
         await renderAssistantResponse(data, aiBubble, [], generationSignal, false, {
+            sessionId: generationSessionId,
             messageIndex: assistantIndex,
             alreadyRendered: data.__faunaAlreadyRendered === true,
             preserveRenderedContent: data.__faunaPreserveRenderedContent === true
+        });
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
         });
         scrollChatToBottom();
     } catch (err) {
         if (!aiBubble) aiBubble = addRenderNode("__thinking__", "output");
         renderErrorCard(aiBubble, err);
     } finally {
-        activeRequestController = null;
-        setGeneratingBusy(false);
+        finishChatGeneration(generationSessionId, generationController);
         updateTokenDisplay();
-        saveCurrentSession();
+        updateStoredSessionFromGeneration(generationSessionId, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
     }
 }
 
@@ -384,7 +408,9 @@ function getAssistantMessageForConversation(data, fallbackModel = getCurrentMode
 
 async function renderAssistantResponse(data, aiBubble, webSources = [], signal = null, speakThisReply = false, options = {}) {
     const rawContent = data?.message?.content || "";
-    applyAssistantChatTitle(rawContent);
+    const responseSessionId = options.sessionId || activeSessionId || "";
+    const responseIsVisible = !responseSessionId || responseSessionId === activeSessionId;
+    applyAssistantChatTitle(rawContent, responseSessionId);
     const questionRequest = parseClarifyingQuestionRequest(rawContent);
     const assistantMessage = getAssistantMessageForConversation(data);
     const displayContent = String(data.__faunaDisplayContent || assistantMessage.content || "");
@@ -392,7 +418,8 @@ async function renderAssistantResponse(data, aiBubble, webSources = [], signal =
     const messageIndex = Number.isInteger(options.messageIndex) ? options.messageIndex : null;
     const alreadyRendered = options.alreadyRendered === true;
     const preserveRenderedContent = options.preserveRenderedContent === true;
-    const shouldPlayVoiceReply = speakThisReply
+    const shouldPlayVoiceReply = responseIsVisible
+        && speakThisReply
         && isVoiceReplyEnabled
         && (!isOpenAiProvider() || isOpenAiVoiceSessionActive);
     const realtimeSpeechReply = shouldPlayVoiceReply && !alreadyRendered ? createRealtimeSpeechReply(signal) : null;
@@ -421,10 +448,10 @@ async function renderAssistantResponse(data, aiBubble, webSources = [], signal =
     applyAssistantMemoryRequests(rawContent);
     if (shouldPlayVoiceReply) {
         realtimeSpeechReply?.finish();
-    } else if (isOpenAiProvider() && isOpenAiVoiceSessionActive) {
+    } else if (responseIsVisible && isOpenAiProvider() && isOpenAiVoiceSessionActive) {
         scheduleOpenAiVoiceRearm(undefined, { cue: true });
     }
-    if (questionRequest) {
+    if (questionRequest && responseIsVisible) {
         showClarifyingQuestionComposer(questionRequest);
     }
     return assistantMessage;
@@ -442,7 +469,8 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     };
     const maxStepsAtATime = normalizeAgentMaxStepsAtATime(options.agent_max_steps_at_a_time ?? activeAgentMaxStepsAtATime);
     const maxStepsPerRun = normalizeAgentMaxStepsPerRun(options.agent_max_steps_per_run ?? activeAgentMaxStepsPerRun);
-    const requireChatTitle = shouldRequestAssistantChatTitle(messages);
+    const requestSessionId = options.sessionId || activeSessionId || "";
+    const requireChatTitle = shouldRequestAssistantChatTitle(messages, requestSessionId);
     const workingMessages = [
         { role: "system", content: buildAssistantSystemPrompt(allowLocalTools, requireChatTitle, allowWebTools, allowToolCalls, allowLocationTools) },
         ...cloneConversationHistory(messages)
@@ -459,7 +487,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
         const streamRenderer = progressTarget
             && streamOptions.enabled !== false
             && isAiStreamingActive()
-            ? createAssistantStreamRenderer(progressTarget, signal)
+            ? createAssistantStreamRenderer(progressTarget, signal, { sessionId: requestSessionId })
             : null;
         let data;
         try {
@@ -471,7 +499,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
             throw err;
         }
         lastData = data;
-        applyAssistantChatTitle(data.message?.content);
+        applyAssistantChatTitle(data.message?.content, requestSessionId);
         const toolCalls = getFaunaToolCallsFromAssistantData(data);
         if (toolCalls.length > 0 && !allowToolCalls) {
             if (data.message) {
@@ -926,6 +954,7 @@ function addAttachedFile(file, { notify = true } = {}) {
     attachedFiles.push(file);
     renderPreviewPill(file);
     scheduleComposerSafeAreaUpdate();
+    scheduleComposerDraftSave({ render: true });
     return true;
 }
 
@@ -1342,6 +1371,7 @@ function renderPreviewPill(file) {
         pill.remove();
         updateTokenDisplay();
         scheduleComposerSafeAreaUpdate();
+        scheduleComposerDraftSave({ immediate: true, render: true });
     };
     pill.append(icon);
     pill.append(meta);
@@ -1362,31 +1392,125 @@ function getImageFiles(files) {
     return files.filter(file => file.type.startsWith("image/"));
 }
 
+function isSessionGenerating(sessionId) {
+    return Boolean(sessionId && activeGenerationRecords.has(sessionId));
+}
+
+function hasUnreadGenerationCompletion(sessionId) {
+    return Boolean(sessionId && completedGenerationSessionIds.has(sessionId));
+}
+
+function clearUnreadGenerationCompletion(sessionId, { renderHistory = true } = {}) {
+    if (!sessionId || !completedGenerationSessionIds.delete(sessionId)) return;
+    if (renderHistory) renderChatHistory?.();
+}
+
+function markUnreadGenerationCompletion(sessionId, { notify = true } = {}) {
+    if (!sessionId || sessionId === activeSessionId) return;
+    completedGenerationSessionIds.add(sessionId);
+    if (notify && typeof notifyChatGenerationCompleted === "function") {
+        notifyChatGenerationCompleted(sessionId);
+    }
+}
+
+function getGenerationRecordForSession(sessionId = activeSessionId) {
+    return sessionId ? activeGenerationRecords.get(sessionId) || null : null;
+}
+
+function getGenerationRecordForSignal(signal = null) {
+    if (!signal) return null;
+    for (const record of activeGenerationRecords.values()) {
+        if (record.controller?.signal === signal) return record;
+    }
+    return null;
+}
+
+function getGenerationSessionIdForSignal(signal = null) {
+    return getGenerationRecordForSignal(signal)?.sessionId || activeSessionId || "";
+}
+
+function syncActiveGenerationState() {
+    const record = getGenerationRecordForSession(activeSessionId);
+    activeRequestController = record?.controller || null;
+    isGenerating = Boolean(record);
+    hasGenerationConnectionBeenMade = Boolean(record?.hasConnection);
+    document.body?.classList.toggle("chat-generation-active", isGenerating);
+    document.body?.classList.toggle("chat-generation-background-active", activeGenerationRecords.size > (isGenerating ? 1 : 0));
+    document.body?.classList.toggle("archived-chat-active", typeof isActiveChatArchived === "function" && isActiveChatArchived());
+}
+
+function updateGenerationUi({ renderHistory = true } = {}) {
+    syncActiveGenerationState();
+    updateGenerationStopButtonVisibility();
+    updateSendButtonState();
+    updateComposerCapabilityUi();
+    updateVoiceButtonAvailability?.();
+    if (renderHistory) renderChatHistory?.();
+}
+
+function beginChatGeneration(sessionId, controller) {
+    if (!sessionId || !controller) return null;
+    clearUnreadGenerationCompletion(sessionId, { renderHistory: false });
+    const record = {
+        sessionId,
+        controller,
+        hasConnection: false,
+        startedAt: new Date().toISOString()
+    };
+    activeGenerationRecords.set(sessionId, record);
+    updateGenerationUi();
+    return record;
+}
+
+function finishChatGeneration(sessionId, controller = null) {
+    const record = getGenerationRecordForSession(sessionId);
+    const wasRunning = Boolean(record && (!controller || record.controller === controller));
+    const wasAborted = Boolean(record?.controller?.signal?.aborted || controller?.signal?.aborted);
+    const wasActiveSession = sessionId === activeSessionId;
+    if (record && (!controller || record.controller === controller)) {
+        activeGenerationRecords.delete(sessionId);
+    }
+    if (wasRunning && !wasAborted) {
+        if (!wasActiveSession) {
+            markUnreadGenerationCompletion(sessionId, { notify: false });
+        } else {
+            clearUnreadGenerationCompletion(sessionId, { renderHistory: false });
+        }
+        if (typeof notifyChatGenerationCompleted === "function") {
+            notifyChatGenerationCompleted(sessionId);
+        }
+    } else if (wasActiveSession) {
+        clearUnreadGenerationCompletion(sessionId, { renderHistory: false });
+    }
+    updateGenerationUi();
+}
+
 function updateGenerationStopButtonVisibility() {
     if (!stopButton) return;
     const voiceModeActive = document.body?.classList.contains("voice-chat-active");
-    const generationAbortPending = Boolean(activeRequestController?.signal?.aborted);
+    const generationAbortPending = Boolean(getGenerationRecordForSession(activeSessionId)?.controller?.signal?.aborted);
     stopButton.hidden = !isGenerating || voiceModeActive || generationAbortPending || !hasGenerationConnectionBeenMade;
     stopButton.disabled = false;
 }
 
-function markGenerationConnectionEstablished() {
-    if (!isGenerating || hasGenerationConnectionBeenMade) return;
-    hasGenerationConnectionBeenMade = true;
-    updateGenerationStopButtonVisibility();
-    updateSendButtonState();
-    updateComposerCapabilityUi();
+function markGenerationConnectionEstablished(signal = null) {
+    const record = getGenerationRecordForSignal(signal) || getGenerationRecordForSession(activeSessionId);
+    if (!record || record.hasConnection) return;
+    record.hasConnection = true;
+    updateGenerationUi();
 }
 
 function updateSendButtonState() {
     if (!sendButton) return;
 
+    const archived = typeof isActiveChatArchived === "function" && isActiveChatArchived();
     const isLoadingConnection = isGenerating && !hasGenerationConnectionBeenMade;
     const idleState = sendButton.querySelector("[data-send-state='idle']");
     const loadingState = sendButton.querySelector("[data-send-state='loading']");
-    const label = isLoadingConnection ? "Working on message" : "Send message";
+    const label = archived ? "Archived chats are read-only" : isLoadingConnection ? "Working on message" : "Send message";
 
     sendButton.hidden = isGenerating && hasGenerationConnectionBeenMade;
+    sendButton.disabled = isGenerating || archived;
     sendButton.setAttribute("aria-busy", isGenerating ? "true" : "false");
     sendButton.setAttribute("aria-label", label);
     sendButton.dataset.tooltip = label;
@@ -1397,60 +1521,27 @@ function updateSendButtonState() {
     if (loadingState) {
         loadingState.hidden = !isLoadingConnection;
     }
+
+    if (input) {
+        input.disabled = isGenerating || archived;
+        input.placeholder = archived ? "Archived chat is read-only" : "Message Fauna";
+    }
 }
 
-function setGeneratingBusy(busy) {
-    isGenerating = busy;
-    hasGenerationConnectionBeenMade = false;
-
-    document.querySelectorAll("button, input, textarea, select").forEach(control => {
-        if (
-            control === stopButton
-            || control === settingsOpenBtn
-            || control === mobileSettingsOpenBtn
-            || control === settingsCloseBtn
-            || control === themeToggle
-            || control === mobileThemeToggle
-            || control === voiceStopButton
-            || control === voiceQuickSettingsBtn
-            || control === voiceMicToggleBtn
-            || control === voiceReplyToggleBtn
-            || control === windowBackBtn
-            || control === windowForwardBtn
-            || control === windowUpdateBtn
-            || control === windowUpdateInstallBtn
-            || control === windowMinimizeBtn
-            || control === windowMaximizeBtn
-            || control === windowCloseBtn
-            || control.closest?.("#voiceQuickPanel")
-            || control.closest?.("#appWindowBar")
-            || control.matches?.("[data-accent-choice]")
-        ) {
-            control.disabled = false;
-            return;
-        }
-        if (busy) {
-            if (!disabledButtonStates.has(control)) {
-                disabledButtonStates.set(control, control.disabled);
-            }
-            control.disabled = true;
-        } else {
-            control.disabled = disabledButtonStates.get(control) || false;
-        }
-    });
-
-    if (!busy) {
-        disabledButtonStates.clear();
+function setGeneratingBusy(busy, options = {}) {
+    const sessionId = options.sessionId || activeSessionId || "";
+    const controller = options.controller || activeRequestController || null;
+    if (busy) {
+        beginChatGeneration(sessionId, controller);
+    } else {
+        finishChatGeneration(sessionId, controller);
     }
-
-    updateGenerationStopButtonVisibility();
-    updateSendButtonState();
-    updateComposerCapabilityUi();
 }
 
 function cancelActiveGeneration() {
-    if (!activeRequestController) return;
-    activeRequestController.abort();
+    const record = getGenerationRecordForSession(activeSessionId);
+    if (!record?.controller) return;
+    record.controller.abort();
     updateGenerationStopButtonVisibility();
     showToast("Generation stopped.", "info");
 }
@@ -1638,6 +1729,7 @@ function applySlashCommandSuggestion(command) {
     input.style.height = "auto";
     input.style.height = `${input.scrollHeight}px`;
     updateTokenDisplay();
+    scheduleComposerDraftSave({ render: true });
     hideSlashCommandPalette();
     input.focus();
 }
@@ -1729,6 +1821,7 @@ function clearComposerText() {
     hideSlashCommandPalette();
     closeCommandMenu();
     updateTokenDisplay();
+    scheduleComposerDraftSave({ immediate: true, render: true });
 }
 
 function showChatSurface() {
@@ -1907,6 +2000,7 @@ function setComposerCommandText(text) {
     input.style.height = "auto";
     input.style.height = `${input.scrollHeight}px`;
     updateTokenDisplay();
+    scheduleComposerDraftSave({ render: true });
     input.focus();
 }
 

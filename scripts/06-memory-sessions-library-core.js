@@ -60,21 +60,21 @@ function stripChatTitleRequest(content) {
     return String(content || "").replace(CHAT_TITLE_RE, "").trim();
 }
 
-function shouldRequestAssistantChatTitle(messages = conversationHistory) {
+function shouldRequestAssistantChatTitle(messages = conversationHistory, sessionId = activeSessionId) {
     const hasAssistantReply = (Array.isArray(messages) ? messages : [])
         .some(message => message?.role === "assistant");
     if (hasAssistantReply) return false;
 
-    const session = getActiveSession();
+    const session = sessionId ? getChatSessionById(sessionId) : getActiveSession();
     return !(session?.manualTitle || session?.assistantTitle);
 }
 
-function applyAssistantChatTitle(content) {
+function applyAssistantChatTitle(content, sessionId = activeSessionId) {
     const title = parseChatTitleRequest(content);
     if (!title || title === "Current Session") return false;
 
-    let session = getActiveSession();
-    if (!session && activeChatHasContent()) {
+    let session = sessionId ? getChatSessionById(sessionId) : getActiveSession();
+    if (!session && (!sessionId || sessionId === activeSessionId) && activeChatHasContent()) {
         session = createChatSession();
         chatSessions.unshift(session);
         activeSessionId = session.id;
@@ -87,7 +87,7 @@ function applyAssistantChatTitle(content) {
     session.assistantTitle = true;
     session.updatedAt = new Date().toISOString();
     persistChatSessions();
-    updateActiveChatTitle();
+    if (session.id === activeSessionId) updateActiveChatTitle();
     renderChatHistory();
     return true;
 }
@@ -105,10 +105,58 @@ function createChatSession(overrides = {}) {
         assistantTitle: false,
         chatHtml: "",
         conversationHistory: [],
+        composerDraft: createEmptyComposerDraft(),
         sessionTotalTokens: 0,
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER,
         ...overrides
     };
+}
+
+function createEmptyComposerDraft() {
+    return {
+        text: "",
+        attachments: [],
+        updatedAt: ""
+    };
+}
+
+function normalizeStoredComposerDraft(raw) {
+    if (!raw || typeof raw !== "object") return createEmptyComposerDraft();
+    return {
+        text: String(raw.text || ""),
+        attachments: Array.isArray(raw.attachments)
+            ? raw.attachments.map(normalizeStoredComposerDraftAttachment).filter(Boolean)
+            : [],
+        updatedAt: String(raw.updatedAt || "")
+    };
+}
+
+function normalizeStoredComposerDraftAttachment(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const path = String(raw.path || raw.filePath || "").trim();
+    const sourceSrc = String(raw.sourceSrc || raw.src || "").trim();
+    const pathName = typeof getFileNameFromPath === "function" ? getFileNameFromPath(path) : path.split(/[\\/]/).filter(Boolean).pop();
+    const name = String(raw.name || pathName || "attachment").trim();
+    if (!path && !sourceSrc && !raw.liveOnly) return null;
+    return {
+        name,
+        type: String(raw.type || (typeof inferAttachmentMimeType === "function" ? inferAttachmentMimeType(name) : "") || "application/octet-stream"),
+        size: Number(raw.size || 0) || 0,
+        lastModified: Number(raw.lastModified || 0) || 0,
+        path,
+        sourceSrc,
+        librarySourceKey: String(raw.librarySourceKey || ""),
+        librarySourceId: String(raw.librarySourceId || "")
+    };
+}
+
+function composerDraftHasContent(draft) {
+    if (!draft) return false;
+    return Boolean(
+        String(draft.text || "").trim()
+        || (Array.isArray(draft.attachments) && draft.attachments.length > 0)
+        || (Array.isArray(draft.liveFiles) && draft.liveFiles.length > 0)
+    );
 }
 
 function normalizeStoredChatSession(raw) {
@@ -130,6 +178,7 @@ function normalizeStoredChatSession(raw) {
         assistantTitle: Boolean(raw.assistantTitle),
         chatHtml: sanitizeChatHtmlMediaSources(typeof raw.chatHtml === "string" ? raw.chatHtml : ""),
         conversationHistory,
+        composerDraft: normalizeStoredComposerDraft(raw.composerDraft),
         sessionTotalTokens: Math.max(historyTokenTotal, trustedStoredTotal || 0),
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER
     });
@@ -154,24 +203,252 @@ function getActiveSession() {
     return chatSessions.find(session => session.id === activeSessionId) || null;
 }
 
+function getChatSessionById(sessionId) {
+    return chatSessions.find(session => session.id === sessionId) || null;
+}
+
+function isActiveChatArchived() {
+    return Boolean(getActiveSession()?.archived);
+}
+
+function isChatSessionVisible(sessionId) {
+    return Boolean(
+        sessionId
+        && activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND
+        && activeSessionId === sessionId
+    );
+}
+
 function chatSessionHasContent(session) {
     if (!session) return false;
     return Boolean(
         session.chatHtml?.trim() ||
         session.domNodes?.length ||
-        session.conversationHistory?.length
+        session.conversationHistory?.length ||
+        composerDraftHasContent(session.composerDraft)
     );
 }
 
 function activeChatHasContent() {
-    return Boolean(chat?.children.length || conversationHistory.length);
+    return Boolean(chat?.children.length || conversationHistory.length || getCurrentComposerDraftHasContent());
+}
+
+function serializeComposerDraftAttachment(file) {
+    if (!(file instanceof File)) return null;
+    const desktopPath = String(file.__faunaDesktopFilePath || "").trim();
+    const desktopPreview = String(file.__faunaDesktopPreviewSrc || "").trim();
+    const persistentSrc = String(file.__faunaPersistentPreviewSrc || file.__faunaLibrarySourceSrc || desktopPreview || "").trim();
+    const sourceSrc = desktopPath
+        ? ""
+        : /^(?:https?:|data:|fauna-app:|fauna-file:|file:)/i.test(persistentSrc)
+            ? persistentSrc
+            : "";
+
+    return {
+        name: file.name || "attachment",
+        type: file.type || (typeof inferAttachmentMimeType === "function" ? inferAttachmentMimeType(file.name) : "") || "application/octet-stream",
+        size: Number(file.size || 0) || 0,
+        lastModified: Number(file.lastModified || 0) || 0,
+        path: desktopPath,
+        sourceSrc,
+        librarySourceKey: String(file.__faunaLibrarySourceKey || ""),
+        librarySourceId: String(file.__faunaLibrarySourceId || ""),
+        liveOnly: !desktopPath && !sourceSrc
+    };
+}
+
+function captureComposerDraft() {
+    const files = Array.from(attachedFiles || []).filter(file => file instanceof File);
+    const attachments = files.map(serializeComposerDraftAttachment).filter(Boolean);
+    return {
+        text: input?.value || "",
+        attachments,
+        liveFiles: files,
+        updatedAt: new Date().toISOString()
+    };
+}
+
+function serializeComposerDraftForStorage(draft = createEmptyComposerDraft()) {
+    const normalized = normalizeStoredComposerDraft(draft);
+    const attachments = Array.isArray(normalized.attachments)
+        ? normalized.attachments.filter(attachment => !attachment.liveOnly && (attachment.path || attachment.sourceSrc))
+        : [];
+    return {
+        text: normalized.text,
+        attachments,
+        updatedAt: normalized.updatedAt || ""
+    };
+}
+
+function getCurrentComposerDraftHasContent() {
+    if (String(input?.value || "").trim()) return true;
+    return Array.isArray(attachedFiles) && attachedFiles.length > 0;
+}
+
+function setComposerTextValue(text = "") {
+    if (!input) return;
+    input.value = String(text || "");
+    input.style.height = "auto";
+    if (input.value) input.style.height = `${input.scrollHeight}px`;
+}
+
+function clearSessionComposerDraft(sessionId, { persist = false, render = false } = {}) {
+    const session = getChatSessionById(sessionId);
+    if (!session) return;
+    session.composerDraft = createEmptyComposerDraft();
+    if (persist) persistChatSessions();
+    if (render) renderChatHistory();
+}
+
+function persistActiveComposerDraft({ render = false, updateUrl = true } = {}) {
+    if (activeWorkspaceView !== WORKSPACE_VIEW_PLAYGROUND) return null;
+    const draft = captureComposerDraft();
+    let session = getActiveSession();
+    let shouldRender = render;
+    if (!session && !composerDraftHasContent(draft)) return null;
+    if (!session) {
+        session = createChatSession();
+        chatSessions.unshift(session);
+        activeSessionId = session.id;
+        updateActiveChatTitle();
+        if (updateUrl) updateWorkspaceUrlFragment({ replace: true });
+        shouldRender = true;
+    }
+
+    const hasStoredChatContent = Boolean(
+        session.chatHtml?.trim()
+        || session.domNodes?.length
+        || session.conversationHistory?.length
+    );
+    if (!composerDraftHasContent(draft) && !hasStoredChatContent) {
+        chatSessions = chatSessions.filter(item => item.id !== session.id);
+        if (activeSessionId === session.id) activeSessionId = null;
+        persistChatSessions();
+        updateActiveChatTitle();
+        if (updateUrl) updateWorkspaceUrlFragment({ replace: true });
+        renderChatHistory();
+        return null;
+    }
+
+    session.composerDraft = draft;
+    if (!session.manualTitle && !session.assistantTitle && !session.conversationHistory?.length) {
+        const previousTitle = session.title;
+        session.title = deriveSessionTitle(session);
+        if (session.title !== previousTitle) {
+            shouldRender = true;
+            updateActiveChatTitle();
+        }
+    }
+    session.updatedAt = draft.updatedAt || new Date().toISOString();
+    persistChatSessions();
+    if (shouldRender) renderChatHistory();
+    return session;
+}
+
+function scheduleComposerDraftSave({ immediate = false, render = false } = {}) {
+    if (isRestoringComposerDraft) return;
+    if (composerDraftSaveTimer) {
+        window.clearTimeout(composerDraftSaveTimer);
+        composerDraftSaveTimer = null;
+    }
+    if (immediate) {
+        persistActiveComposerDraft({ render });
+        return;
+    }
+    composerDraftSaveTimer = window.setTimeout(() => {
+        composerDraftSaveTimer = null;
+        persistActiveComposerDraft({ render });
+    }, COMPOSER_DRAFT_SAVE_DEBOUNCE_MS);
+}
+
+function getHtmlForSessionNodes(nodes = []) {
+    const host = document.createElement("div");
+    nodes.forEach(node => {
+        if (node instanceof Node) host.appendChild(node.cloneNode(true));
+    });
+    return sanitizeChatHtmlMediaSources(host.innerHTML || "");
+}
+
+function snapshotVisibleChatIntoSession(session, {
+    history = conversationHistory,
+    tokenTotal = sessionTotalTokens
+} = {}) {
+    if (!session) return null;
+    session.chatHtml = sanitizeChatHtmlMediaSources(chat?.innerHTML || "");
+    session.domNodes = chat ? Array.from(chat.childNodes) : [];
+    session.conversationHistory = cloneConversationHistory(history);
+    session.composerDraft = captureComposerDraft();
+    session.sessionTotalTokens = tokenTotal;
+    session.sessionTokenSource = TOKEN_USAGE_SOURCE_PROVIDER;
+    if (!session.manualTitle && !session.assistantTitle) {
+        session.title = deriveSessionTitle(session);
+    }
+    session.updatedAt = new Date().toISOString();
+    syncUsageToolEventsFromSession(session, { html: session.chatHtml });
+    return session;
+}
+
+function updateStoredSessionFromGeneration(sessionId, {
+    history = [],
+    tokenTotal = 0,
+    render = true
+} = {}) {
+    const session = getChatSessionById(sessionId);
+    if (!session) return null;
+
+    if (isChatSessionVisible(sessionId)) {
+        conversationHistory = cloneConversationHistory(history);
+        sessionTotalTokens = tokenTotal;
+        snapshotVisibleChatIntoSession(session, { history, tokenTotal });
+        updateTokenDisplay();
+        updateActiveChatTitle();
+    } else {
+        session.conversationHistory = cloneConversationHistory(history);
+        session.sessionTotalTokens = tokenTotal;
+        session.sessionTokenSource = TOKEN_USAGE_SOURCE_PROVIDER;
+        if (Array.isArray(session.domNodes) && session.domNodes.length > 0) {
+            session.chatHtml = getHtmlForSessionNodes(session.domNodes);
+        }
+        if (!session.manualTitle && !session.assistantTitle) {
+            session.title = deriveSessionTitle(session);
+        }
+        session.updatedAt = new Date().toISOString();
+        syncUsageToolEventsFromSession(session, { html: session.chatHtml });
+    }
+
+    persistChatSessions();
+    if (render) renderChatHistory();
+    refreshUsageSettingsPaneIfVisible();
+    refreshLibraryViewIfActive();
+    return session;
+}
+
+function ensureWritableActiveChatSession() {
+    const active = getActiveSession();
+    if (active?.archived) {
+        showToast("Archived chats are read-only. Restore the chat before writing.", "warning");
+        return null;
+    }
+    if (active) return active;
+
+    const session = createChatSession();
+    chatSessions.unshift(session);
+    activeSessionId = session.id;
+    persistChatSessions();
+    renderChatHistory();
+    updateActiveChatTitle();
+    if (activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND) {
+        updateWorkspaceUrlFragment({ replace: true });
+    }
+    return session;
 }
 
 function deriveSessionTitle(session = getActiveSession()) {
     const firstUserMessage = (session?.conversationHistory || conversationHistory)
         .find(message => message.role === "user" && message.content);
+    const draftText = session?.composerDraft?.text || (session?.id === activeSessionId ? input?.value : "");
     const firstUserBubble = chat?.querySelector(".user-node .bubble")?.textContent;
-    return cleanSessionTitle(firstUserMessage?.content || firstUserBubble || session?.title || "Current Session");
+    return cleanSessionTitle(firstUserMessage?.content || firstUserBubble || draftText || session?.title || "Current Session");
 }
 
 function updateActiveChatTitle() {
@@ -257,6 +534,7 @@ function serializeChatSession(session, options = {}) {
         assistantTitle: Boolean(session.assistantTitle),
         chatHtml: includeHtml ? sanitizeChatHtmlMediaSources(session.chatHtml || "") : "",
         conversationHistory: conversation,
+        composerDraft: serializeComposerDraftForStorage(session.composerDraft),
         sessionTotalTokens: normalizeTokenCount(session.sessionTotalTokens) || 0,
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER
     };
@@ -363,16 +641,7 @@ function saveCurrentSession({ render = true, updateUrl = true } = {}) {
         createdActiveSession = true;
     }
 
-    session.chatHtml = sanitizeChatHtmlMediaSources(chat?.innerHTML || "");
-    session.domNodes = chat ? Array.from(chat.childNodes) : [];
-    session.conversationHistory = cloneConversationHistory(conversationHistory);
-    session.sessionTotalTokens = sessionTotalTokens;
-    session.sessionTokenSource = TOKEN_USAGE_SOURCE_PROVIDER;
-    if (!session.manualTitle && !session.assistantTitle) {
-        session.title = deriveSessionTitle(session);
-    }
-    session.updatedAt = new Date().toISOString();
-    syncUsageToolEventsFromSession(session, { html: session.chatHtml });
+    snapshotVisibleChatIntoSession(session);
 
     persistChatSessions();
     updateActiveChatTitle();
@@ -428,18 +697,222 @@ function createSessionMenuItem(action, label, iconMarkup, onSelect) {
     return button;
 }
 
+function formatChatInfoDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Unknown";
+    return date.toLocaleString([], {
+        dateStyle: "medium",
+        timeStyle: "short"
+    });
+}
+
+function createChatInfoRow(label, value) {
+    const row = document.createElement("div");
+    row.className = "chat-info-row";
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = String(value || "None");
+    row.append(labelNode, valueNode);
+    return row;
+}
+
+function getChatInfoStats(session) {
+    const history = Array.isArray(session?.conversationHistory) ? session.conversationHistory : [];
+    const draft = session?.composerDraft || createEmptyComposerDraft();
+    return {
+        messages: history.length,
+        userMessages: history.filter(message => message?.role === "user").length,
+        assistantMessages: history.filter(message => message?.role === "assistant").length,
+        tokens: normalizeTokenCount(session?.sessionTotalTokens) || 0,
+        draftText: String(draft.text || "").trim().length,
+        draftAttachments: (Array.isArray(draft.attachments) ? draft.attachments.length : 0)
+            || (Array.isArray(draft.liveFiles) ? draft.liveFiles.length : 0)
+    };
+}
+
+function openChatRenameDialog(sessionId) {
+    const session = getChatSessionById(sessionId);
+    if (!session) return;
+    setChatTitleEditing(false);
+
+    const overlay = document.createElement("div");
+    overlay.className = "approval-modal";
+    overlay.setAttribute("role", "presentation");
+
+    const dialog = document.createElement("section");
+    dialog.className = "approval-dialog chat-rename-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "chatRenameDialogTitle");
+
+    const titleNode = document.createElement("h2");
+    titleNode.id = "chatRenameDialogTitle";
+    titleNode.textContent = "Rename chat";
+
+    const inputLabel = document.createElement("label");
+    inputLabel.className = "chat-rename-field";
+    const inputLabelText = document.createElement("span");
+    inputLabelText.textContent = "Chat name";
+    const nameInput = document.createElement("input");
+    nameInput.className = "settings-input chat-rename-input";
+    nameInput.type = "text";
+    nameInput.maxLength = 80;
+    nameInput.value = session.title || "Current Session";
+    nameInput.setAttribute("aria-label", "Chat name");
+    inputLabel.append(inputLabelText, nameInput);
+
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "provider-btn provider-btn-secondary";
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.className = "provider-btn provider-btn-primary";
+    saveButton.type = "button";
+    saveButton.textContent = "Save";
+
+    const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        overlay.remove();
+    };
+    const save = () => {
+        const nextTitle = cleanSessionTitle(nameInput.value, 80);
+        session.title = nextTitle;
+        session.manualTitle = true;
+        session.assistantTitle = false;
+        session.updatedAt = new Date().toISOString();
+        persistChatSessions();
+        if (session.id === activeSessionId) updateActiveChatTitle();
+        renderChatHistory();
+        showToast("Chat name updated.", "success");
+        close();
+    };
+    const onKeyDown = event => {
+        if (event.key === "Escape") close();
+        if (event.key === "Enter" && document.activeElement === nameInput) {
+            event.preventDefault();
+            save();
+        }
+    };
+
+    cancelButton.addEventListener("click", close);
+    saveButton.addEventListener("click", save);
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+
+    actions.append(cancelButton, saveButton);
+    dialog.append(titleNode, inputLabel, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => {
+        nameInput.focus();
+        nameInput.select();
+    }, 0);
+}
+
+function openChatInfoDialog(sessionId) {
+    let session = getChatSessionById(sessionId);
+    if (!session) return;
+    if (session.id === activeSessionId) {
+        session = saveCurrentSession({ render: false, updateUrl: false }) || session;
+    }
+    const stats = getChatInfoStats(session);
+    const status = [
+        session.pinned ? "Pinned" : "",
+        session.archived ? "Archived" : "Active",
+        typeof isSessionGenerating === "function" && isSessionGenerating(session.id) ? "Generating" : ""
+    ].filter(Boolean).join(" / ");
+
+    const overlay = document.createElement("div");
+    overlay.className = "approval-modal";
+    overlay.setAttribute("role", "presentation");
+
+    const dialog = document.createElement("section");
+    dialog.className = "approval-dialog chat-info-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "chatInfoDialogTitle");
+
+    const titleNode = document.createElement("h2");
+    titleNode.id = "chatInfoDialogTitle";
+    titleNode.textContent = "Chat info";
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "chat-info-title";
+    subtitle.textContent = session.title || "Current Session";
+
+    const grid = document.createElement("div");
+    grid.className = "chat-info-grid";
+    grid.append(
+        createChatInfoRow("Status", status),
+        createChatInfoRow("Created", formatChatInfoDate(session.createdAt)),
+        createChatInfoRow("Updated", formatChatInfoDate(session.updatedAt)),
+        createChatInfoRow("Messages", `${stats.messages} (${stats.userMessages} user, ${stats.assistantMessages} AI)`),
+        createChatInfoRow("Session tokens", stats.tokens.toLocaleString()),
+        createChatInfoRow("Composer draft", stats.draftText || stats.draftAttachments ? `${stats.draftText} chars, ${stats.draftAttachments} attachments` : "None"),
+        createChatInfoRow("Chat ID", session.id)
+    );
+
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const closeButton = document.createElement("button");
+    closeButton.className = "provider-btn provider-btn-secondary";
+    closeButton.type = "button";
+    closeButton.textContent = "Close";
+    const renameButton = document.createElement("button");
+    renameButton.className = "provider-btn provider-btn-primary";
+    renameButton.type = "button";
+    renameButton.textContent = "Rename";
+
+    const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        overlay.remove();
+    };
+    const onKeyDown = event => {
+        if (event.key === "Escape") close();
+    };
+    closeButton.addEventListener("click", close);
+    renameButton.addEventListener("click", () => {
+        close();
+        openChatRenameDialog(session.id);
+    });
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+
+    actions.append(closeButton, renameButton);
+    dialog.append(titleNode, subtitle, grid, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => closeButton.focus(), 0);
+}
+
 function createChatSessionRow(session) {
+    const generating = typeof isSessionGenerating === "function" && isSessionGenerating(session.id) === true;
+    const generationComplete = typeof hasUnreadGenerationCompletion === "function" && hasUnreadGenerationCompletion(session.id) === true;
     const row = document.createElement("div");
     row.className = "chat-session-row";
     row.classList.toggle("active", session.id === activeSessionId);
     row.classList.toggle("pinned", session.pinned);
     row.classList.toggle("archived", session.archived);
+    row.classList.toggle("generating", generating);
+    row.classList.toggle("generation-complete", generationComplete);
     row.classList.toggle("menu-drop-up", session.archived);
+    row.setAttribute("aria-busy", String(generating));
 
     const mainButton = document.createElement("button");
     mainButton.type = "button";
     mainButton.className = "history-item chat-session-main";
-    mainButton.setAttribute("aria-label", session.title);
+    mainButton.setAttribute("aria-label", generating
+        ? `${session.title} is generating`
+        : generationComplete
+            ? `${session.title} has a completed reply`
+            : session.title);
     mainButton.setAttribute("aria-current", session.id === activeSessionId ? "page" : "false");
     const dot = document.createElement("span");
     dot.className = "dot";
@@ -449,6 +922,14 @@ function createChatSessionRow(session) {
     label.textContent = session.title;
     mainButton.append(dot, label);
     mainButton.addEventListener("click", () => activateChatSession(session.id));
+
+    const activitySpinner = document.createElement("span");
+    activitySpinner.className = "chat-session-generating-spinner";
+    activitySpinner.setAttribute("aria-hidden", "true");
+
+    const completionDot = document.createElement("span");
+    completionDot.className = "chat-session-complete-dot";
+    completionDot.setAttribute("aria-hidden", "true");
 
     const menuWrap = document.createElement("div");
     menuWrap.className = "chat-session-menu-wrap";
@@ -471,6 +952,20 @@ function createChatSessionRow(session) {
     menu.className = "chat-session-menu";
     menu.setAttribute("role", "menu");
     menu.hidden = true;
+
+    const renameButton = createSessionMenuItem(
+        "rename",
+        "Rename chat",
+        '<path d="M12 20h9"></path><path d="m16.5 3.5 4 4L7 21l-4 1 1-4 12.5-14.5Z"></path>',
+        () => openChatRenameDialog(session.id)
+    );
+
+    const infoButton = createSessionMenuItem(
+        "info",
+        "Chat info",
+        '<circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path>',
+        () => openChatInfoDialog(session.id)
+    );
 
     const pinButton = createSessionMenuItem(
         "pin",
@@ -504,9 +999,13 @@ function createChatSessionRow(session) {
         updateArchivedMenuOverflow();
     });
 
-    menu.append(pinButton, archiveButton, deleteButton);
+    menu.append(renameButton, infoButton);
+    if (!session.archived) {
+        menu.append(pinButton);
+    }
+    menu.append(archiveButton, deleteButton);
     menuWrap.append(menuButton, menu);
-    row.append(mainButton, menuWrap);
+    row.append(mainButton, activitySpinner, completionDot, menuWrap);
     return row;
 }
 
@@ -565,6 +1064,7 @@ function setArchivedChatHistoryCollapsed(collapsed, { persist = true } = {}) {
 }
 
 function clearComposerDraft() {
+    composerDraftRestoreToken += 1;
     if (input) {
         input.value = "";
         input.style.height = "auto";
@@ -676,6 +1176,7 @@ function renderChatFromConversationHistoryFallback(history = conversationHistory
         const bubble = addRenderNode(visibleContent, role, [], {
             historyIndex: index,
             createdAt: message.createdAt,
+            voiceRecording: message.voiceRecording,
             forceScroll: false
         });
 
@@ -692,12 +1193,83 @@ function renderChatFromConversationHistoryFallback(history = conversationHistory
     });
 }
 
+async function createComposerDraftFileFromAttachment(attachment = {}) {
+    if (attachment.liveFile instanceof File) return attachment.liveFile;
+
+    if (attachment.path && typeof createDesktopAttachmentFile === "function") {
+        return createDesktopAttachmentFile(attachment);
+    }
+
+    const sourceSrc = String(attachment.sourceSrc || "").trim();
+    if (!sourceSrc || !/^(?:https?:|data:|fauna-app:|fauna-file:|file:)/i.test(sourceSrc)) return null;
+
+    const response = await fetch(sourceSrc);
+    if (!response.ok) throw new Error(`Could not restore ${attachment.name || "attachment"} (${response.status})`);
+    const blob = await response.blob();
+    const name = attachment.name || "attachment";
+    const type = attachment.type || blob.type || (typeof inferAttachmentMimeType === "function" ? inferAttachmentMimeType(name) : "") || "application/octet-stream";
+    const file = new File([blob], name, {
+        type,
+        lastModified: Number(attachment.lastModified || Date.now())
+    });
+    setFilePersistentPreviewSource?.(file, sourceSrc);
+    if (attachment.librarySourceKey || attachment.librarySourceId) {
+        defineHiddenFileValue?.(file, "__faunaLibrarySourceKey", attachment.librarySourceKey || "");
+        defineHiddenFileValue?.(file, "__faunaLibrarySourceId", attachment.librarySourceId || "");
+        defineHiddenFileValue?.(file, "__faunaLibrarySourceSrc", sourceSrc);
+    }
+    return file;
+}
+
+async function restoreComposerDraftAttachments(draft, restoreToken) {
+    const serializedAttachments = Array.isArray(draft?.attachments) ? draft.attachments : [];
+    const liveFiles = Array.isArray(draft?.liveFiles) ? draft.liveFiles.filter(file => file instanceof File) : [];
+    const restoredFiles = [...liveFiles];
+
+    for (const attachment of serializedAttachments) {
+        try {
+            const file = await createComposerDraftFileFromAttachment(attachment);
+            if (file) restoredFiles.push(file);
+        } catch (err) {
+            console.warn("Could not restore composer draft attachment:", err);
+        }
+    }
+
+    if (restoreToken !== composerDraftRestoreToken) return;
+    attachedFiles = [];
+    if (previewContainer) previewContainer.innerHTML = "";
+    restoredFiles.forEach(file => {
+        if (!isDuplicateAttachment(file)) {
+            attachedFiles.push(file);
+            renderPreviewPill(file);
+        }
+    });
+    updateTokenDisplay();
+    scheduleComposerSafeAreaUpdate();
+}
+
+function restoreComposerDraft(draft = createEmptyComposerDraft()) {
+    const restoreToken = ++composerDraftRestoreToken;
+    isRestoringComposerDraft = true;
+    try {
+        setComposerTextValue(draft?.text || "");
+        attachedFiles = [];
+        if (previewContainer) previewContainer.innerHTML = "";
+        updateTokenDisplay();
+        scheduleComposerSafeAreaUpdate();
+    } finally {
+        isRestoringComposerDraft = false;
+    }
+    void restoreComposerDraftAttachments(draft, restoreToken);
+}
+
 function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
     if (!session) return;
     if (closeWorkbench) closeCodeWorkbench();
     conversationHistory = cloneConversationHistory(session.conversationHistory);
     sessionTotalTokens = Math.max(sumHistoryTokenUsage(conversationHistory), normalizeTokenCount(session.sessionTotalTokens) || 0);
     clearComposerDraft();
+    restoreComposerDraft(session.composerDraft);
 
     if (chat) {
         if (session.domNodes?.length) {
@@ -718,6 +1290,7 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
 
     updateTokenDisplay();
     updateActiveChatTitle();
+    updateGenerationUi?.({ renderHistory: false });
 }
 
 function restoreEmptyChatDraft({ render = true, persist = true, updateUrl = true } = {}) {
@@ -737,6 +1310,7 @@ function restoreEmptyChatDraft({ render = true, persist = true, updateUrl = true
 
     updateTokenDisplay();
     updateActiveChatTitle();
+    updateGenerationUi?.({ renderHistory: false });
     if (persist) persistChatSessions();
     if (render) renderChatHistory();
     if (updateUrl && activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND) {
@@ -754,12 +1328,16 @@ function activateChatSession(sessionId, { captureCurrent = true, closeSidebar = 
         saveCurrentSession({ render: false, updateUrl: false });
     }
     activeSessionId = sessionId;
+    if (typeof clearUnreadGenerationCompletion === "function") {
+        clearUnreadGenerationCompletion(sessionId, { renderHistory: false });
+    }
     restoreChatSessionToView(session, { closeWorkbench: isSwitchingSessions });
     if (activeWorkspaceView !== WORKSPACE_VIEW_PLAYGROUND) {
         setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { closeSidebar: false, updateUrl: false });
     }
     persistChatSessions();
     renderChatHistory();
+    updateGenerationUi?.({ renderHistory: false });
     if (closeSidebar) sidebarController.close();
     if (updateUrl) updateWorkspaceUrlFragment({ replace: urlMode === "replace" });
 }
@@ -788,6 +1366,10 @@ function getNextVisibleSessionId(excludeId) {
 function toggleChatSessionPinned(sessionId) {
     const session = chatSessions.find(item => item.id === sessionId);
     if (!session) return;
+    if (session.archived) {
+        showToast("Archived chats cannot be pinned. Restore the chat first.", "warning");
+        return;
+    }
     if (session.id === activeSessionId) saveCurrentSession({ render: false });
     session.pinned = !session.pinned;
     session.updatedAt = new Date().toISOString();

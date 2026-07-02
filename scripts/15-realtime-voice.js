@@ -889,8 +889,13 @@ function updateVoiceButtonAvailability() {
     let canUse = false;
     let label = "Voice Input";
     let tooltip = "Voice input";
+    const archived = typeof isActiveChatArchived === "function" && isActiveChatArchived();
 
-    if (isOpenAiProvider()) {
+    if (archived) {
+        canUse = false;
+        label = "Voice unavailable";
+        tooltip = "Archived chats are read-only";
+    } else if (isOpenAiProvider()) {
         canUse = supportsOpenAiVoiceRecording();
         label = "OpenAI voice chat";
         tooltip = "OpenAI voice chat";
@@ -1114,14 +1119,19 @@ async function startOpenAiVoiceRecording({ rearm = false } = {}) {
         try {
             setVoiceSessionStatus("Transcribing", 0.34);
             showToast(usingOpenAiVoice ? "Transcribing voice input..." : "Transcribing with Whisper...", "info");
+            const audioBlob = new Blob(chunks, { type });
+            let voiceRecording = await saveVoiceRecordingBlob(audioBlob, {
+                provider: usingOpenAiVoice ? "openai" : "local"
+            });
             const transcript = usingOpenAiVoice
-                ? await transcribeOpenAiAudio(new Blob(chunks, { type }))
-                : await transcribeLocalAudio(new Blob(chunks, { type }));
+                ? await transcribeOpenAiAudio(audioBlob, null, voiceRecording)
+                : await transcribeLocalAudio(audioBlob, null, voiceRecording);
             if (!transcript.trim()) {
                 if (usingOpenAiVoice) scheduleOpenAiVoiceRearm();
                 else setVoiceChatActive(false);
                 return;
             }
+            voiceRecording = mergeVoiceRecordingTranscript(voiceRecording, transcript);
 
             isVoiceInputUpdate = true;
             input.value = transcript.trim();
@@ -1132,7 +1142,7 @@ async function startOpenAiVoiceRecording({ rearm = false } = {}) {
             if (!isGenerating) {
                 setVoiceSessionStatus("Thinking", 0.34);
                 void playVoiceSessionCue("thinking", { dedupeMs: 900 });
-                await processWorkspaceEntry();
+                await processWorkspaceEntry({ voiceRecording });
             } else {
                 if (usingOpenAiVoice) scheduleOpenAiVoiceRearm();
                 else setVoiceChatActive(false);

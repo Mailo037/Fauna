@@ -1099,6 +1099,15 @@ a:focus-visible {
     box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
 }
 
+.user-node .voice-recording-player {
+    align-self: flex-start;
+    margin-top: 8px;
+}
+
+.voice-recording-player .assistant-tts-waveform {
+    width: min(188px, 42vw);
+}
+
 .assistant-tts-toggle {
     position: relative;
     display: inline-grid;

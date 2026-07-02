@@ -576,7 +576,7 @@ window.setInterval(() => updateTimeGreeting(), GREETING_REFRESH_MS);
 
 document.querySelectorAll(".suggestion-card[data-prompt]").forEach(card => {
     card.addEventListener("click", () => {
-        if (isGenerating) return;
+        if (isGenerating || isActiveChatArchived()) return;
         input.value = card.dataset.prompt || "";
         input.dispatchEvent(new Event("input"));
         input.focus();
@@ -593,7 +593,7 @@ async function checkOllamaStatus() {
         const data = await res.json().catch(() => ({}));
         isOllamaReachable = true;
         installedOllamaModels = Array.isArray(data.models)
-            ? data.models.map(model => normalizeModelId(model.name)).filter(Boolean)
+            ? data.models.map(model => normalizeModelId(model?.name || model?.model || model?.id)).filter(Boolean)
             : [];
         await refreshOllamaModelCapabilities(installedOllamaModels);
         localModelOptions = getLocalModelSwitcherOptions();
@@ -1033,7 +1033,7 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
                     stream: shouldStream
                 })
             });
-            markGenerationConnectionEstablished();
+            markGenerationConnectionEstablished(signal);
             hasCheckedOllamaStatus = true;
             isOllamaReachable = true;
 
@@ -1212,7 +1212,7 @@ async function openAiFetch(path, { method = "POST", headers = {}, body = null, s
             if (err.name === "AbortError") throw err;
             throw createWorkspaceBridgeNetworkError(OPENAI_BRIDGE_PATH, err);
         }
-        markGenerationConnectionEstablished();
+        markGenerationConnectionEstablished(signal);
         return normalizeOpenAiStreamBridgeResponse(res);
     }
 

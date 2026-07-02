@@ -267,6 +267,72 @@ body,
     color: rgba(255, 255, 255, 0.75) !important;
 }
 
+.chat-session-generating-spinner {
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.16);
+    border-top-color: color-mix(in srgb, var(--accent) 72%, #ffffff);
+    border-radius: 50%;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%);
+    transition: opacity 0.14s var(--ease);
+    animation: chatSessionSpinner 0.86s linear infinite;
+    z-index: 4;
+}
+
+.chat-session-complete-dot {
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.75);
+    transition: opacity 0.14s var(--ease), transform 0.14s var(--ease);
+    z-index: 4;
+}
+
+.chat-session-row.generating:not(:hover):not(:focus-within):not(.menu-open) .chat-session-generating-spinner {
+    opacity: 1;
+}
+
+.chat-session-row.generation-complete:not(.generating):not(:hover):not(:focus-within):not(.menu-open) .chat-session-complete-dot {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+}
+
+.chat-session-row.generating:not(:hover):not(:focus-within):not(.menu-open) .chat-session-menu-wrap {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.96);
+}
+
+.chat-session-row.generation-complete:not(.generating):not(:hover):not(:focus-within):not(.menu-open) .chat-session-menu-wrap {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.96);
+}
+
+@keyframes chatSessionSpinner {
+    to {
+        transform: translateY(-50%) rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-session-generating-spinner {
+        animation: none;
+    }
+}
+
 /* --- Chat session context menu: settings-modal style --- */
 .chat-session-menu {
     min-width: 180px !important;
@@ -1538,6 +1604,24 @@ body,
 .provider-btn-secondary:hover:not(:disabled) {
     background: #3a3a3a;
     color: #fff;
+}
+
+.provider-btn-danger {
+    border-color: rgba(255, 100, 92, 0.34);
+    background: rgba(255, 100, 92, 0.13);
+    color: #ffb6b0;
+}
+
+.provider-btn-danger:hover:not(:disabled) {
+    border-color: rgba(255, 120, 112, 0.5);
+    background: rgba(255, 100, 92, 0.2);
+    color: #fff;
+}
+
+.provider-btn-danger:disabled {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: #2f2f2f;
+    color: rgba(255, 255, 255, 0.32);
 }
 
 .provider-btn-ghost {

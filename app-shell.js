@@ -150,7 +150,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260702-window-updates");
+        await import("./script.js?v=20260703-chat-drafts");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));

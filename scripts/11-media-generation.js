@@ -148,7 +148,8 @@ async function generateImageIntoBubble(container, prompt, {
     signal = null,
     options = {},
     activity = null,
-    label = "Generated image"
+    label = "Generated image",
+    sessionId = ""
 } = {}) {
     const imageOptions = normalizeImageGenerationOptions(options);
     const effectivePrompt = buildEffectiveImagePrompt(prompt, imageOptions);
@@ -163,7 +164,8 @@ async function generateImageIntoBubble(container, prompt, {
         kind: "image",
         prompt: effectivePrompt,
         label,
-        extension: imageOptions.format || "png"
+        extension: imageOptions.format || "png",
+        chatId: sessionId || getGenerationSessionIdForSignal(signal)
     });
     updateImageGenerationToolActivity(activity, "Preparing preview");
     await preloadImage(generatedImageUrl, signal);
@@ -185,22 +187,65 @@ function getImageGenerationFailureMessage(error) {
             : "Fauna could not create the image. Check your connection and try again.";
 }
 
+function getGenerationHistory(options = {}) {
+    return Array.isArray(options.history) ? options.history : conversationHistory;
+}
+
+function pushGenerationHistoryMessage(options = {}, message) {
+    const history = getGenerationHistory(options);
+    history.push(message);
+    if (options.sessionId && isChatSessionVisible(options.sessionId)) {
+        conversationHistory = cloneConversationHistory(history);
+    }
+    return history.length - 1;
+}
+
+function syncGenerationHistorySnapshot(options = {}) {
+    if (!options.sessionId) return;
+    updateStoredSessionFromGeneration(options.sessionId, {
+        history: getGenerationHistory(options),
+        tokenTotal: typeof options.getTokenTotal === "function" ? options.getTokenTotal() : sessionTotalTokens
+    });
+}
+
+function addGenerationTokenUsage(options = {}, usage, metadata = {}) {
+    const sessionId = options.sessionId || activeSessionId || "";
+    const added = recordSessionTokenUsage(sessionId, usage, metadata);
+    if (typeof options.getTokenTotal === "function" && typeof options.setTokenTotal === "function") {
+        options.setTokenTotal(options.getTokenTotal() + added);
+    }
+    return added;
+}
+
 async function retryImageGenerationInBubble(target, prompt, options = {}) {
     if (isGenerating || !target) return;
 
-    activeRequestController = new AbortController();
-    const generationSignal = activeRequestController.signal;
-    setGeneratingBusy(true);
+    const retrySession = ensureWritableActiveChatSession();
+    if (!retrySession) return;
+    const runHistory = cloneConversationHistory(conversationHistory);
+    let runTokenTotal = sessionTotalTokens;
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
+    setGeneratingBusy(true, { sessionId: retrySession.id, controller: generationController });
     prepareBubbleForRetry(target);
 
     try {
-        const didGenerate = await renderImageGenerationAttempt(target, prompt, generationSignal, options);
+        const didGenerate = await renderImageGenerationAttempt(target, prompt, generationSignal, {
+            ...options,
+            sessionId: retrySession.id,
+            history: runHistory,
+            getTokenTotal: () => runTokenTotal,
+            setTokenTotal: value => { runTokenTotal = value; }
+        });
         if (didGenerate) showToast("Image generation retried.", "success");
     } finally {
-        activeRequestController = null;
-        setGeneratingBusy(false);
+        finishChatGeneration(retrySession.id, generationController);
         updateTokenDisplay();
-        saveCurrentSession();
+        updateStoredSessionFromGeneration(retrySession.id, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
     }
 }
 
@@ -219,18 +264,20 @@ async function renderImageGenerationAttempt(aiBubble, prompt, signal = null, opt
             signal,
             options,
             activity: imageActivity,
-            label: "Generated image"
+            label: "Generated image",
+            sessionId: options.sessionId || ""
         });
         const historyContent = getGeneratedImageHistoryContent("Generated image", generated.prompt);
-        conversationHistory.push({
+        const assistantIndex = pushGenerationHistoryMessage(options, {
             role: "assistant",
             content: historyContent,
             createdAt: new Date().toISOString()
         });
         setupAssistantActions(aiBubble.parentElement, getGeneratedMediaCopyText(generated.imageUrl, historyContent), {
-            messageIndex: conversationHistory.length - 1,
+            messageIndex: assistantIndex,
             canFork: true
         });
+        syncGenerationHistorySnapshot(options);
         return true;
     } catch (e) {
         updateImageGenerationToolActivity(imageActivity, e.name === "AbortError" ? "Stopped" : "Failed", "done");
@@ -266,11 +313,12 @@ async function processImageGeneration(prompt, currentFiles, signal = null, optio
         noteBubble.style.color = "#f59e0b";
     }
 
-    conversationHistory.push({
+    pushGenerationHistoryMessage(options, {
         role: "user",
         content: `[Image prompt] ${prompt}`,
         createdAt: options.userCreatedAt || new Date().toISOString()
     });
+    syncGenerationHistorySnapshot(options);
 
     const aiBubble = addRenderNode("__thinking__", "output");
     await renderImageGenerationAttempt(aiBubble, prompt, signal, options);
@@ -287,19 +335,31 @@ function getImageEditFailureMessage(error) {
 async function retryImageEditInBubble(target, requestText, imageFiles) {
     if (isGenerating || !target) return;
 
-    activeRequestController = new AbortController();
-    const generationSignal = activeRequestController.signal;
-    setGeneratingBusy(true);
+    const retrySession = ensureWritableActiveChatSession();
+    if (!retrySession) return;
+    const runHistory = cloneConversationHistory(conversationHistory);
+    let runTokenTotal = sessionTotalTokens;
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
+    setGeneratingBusy(true, { sessionId: retrySession.id, controller: generationController });
     prepareBubbleForRetry(target);
 
     try {
-        const didEdit = await renderImageEditAttempt(target, requestText, imageFiles, generationSignal);
+        const didEdit = await renderImageEditAttempt(target, requestText, imageFiles, generationSignal, {
+            sessionId: retrySession.id,
+            history: runHistory,
+            getTokenTotal: () => runTokenTotal,
+            setTokenTotal: value => { runTokenTotal = value; }
+        });
         if (didEdit) showToast("Image edit retried.", "success");
     } finally {
-        activeRequestController = null;
-        setGeneratingBusy(false);
+        finishChatGeneration(retrySession.id, generationController);
         updateTokenDisplay();
-        saveCurrentSession();
+        updateStoredSessionFromGeneration(retrySession.id, {
+            history: runHistory,
+            tokenTotal: runTokenTotal
+        });
     }
 }
 
@@ -324,7 +384,8 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
                 kind: "image",
                 prompt: requestText,
                 label: "Generated edit",
-                extension: "png"
+                extension: "png",
+                chatId: options.sessionId || getGenerationSessionIdForSignal(signal)
             });
             updateImageGenerationToolActivity(imageActivity, "Preparing preview");
             await preloadImage(imageUrl, signal);
@@ -332,31 +393,33 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
             renderGeneratedImage(aiBubble, requestText, imageUrl, "Generated edit", isSensitiveImagePrompt(requestText));
             const historyContent = getGeneratedImageHistoryContent("Generated image edit", requestText);
 
-            conversationHistory.push({
+            pushGenerationHistoryMessage(options, {
                 role: "user",
                 content: `[Image edit request] ${requestText}`,
                 createdAt: options.userCreatedAt || new Date().toISOString()
             });
-            conversationHistory.push({
+            const assistantIndex = pushGenerationHistoryMessage(options, {
                 role: "assistant",
                 content: historyContent,
                 createdAt: new Date().toISOString()
             });
             setupAssistantActions(aiBubble.parentElement, getGeneratedMediaCopyText(imageUrl, historyContent), {
-                messageIndex: conversationHistory.length - 1,
+                messageIndex: assistantIndex,
                 canFork: true
             });
+            syncGenerationHistorySnapshot(options);
             return true;
         }
 
         updateImageGenerationToolActivity(imageActivity, "Writing prompt");
-        const editPrompt = await buildImageEditPrompt(requestText, imageFiles, signal);
+        const editPrompt = await buildImageEditPrompt(requestText, imageFiles, signal, options);
         let imageUrl = buildImageGenerationUrl(editPrompt);
         imageUrl = await persistGeneratedMediaSource(imageUrl, {
             kind: "image",
             prompt: editPrompt,
             label: "Generated edit",
-            extension: "png"
+            extension: "png",
+            chatId: options.sessionId || getGenerationSessionIdForSignal(signal)
         });
 
         updateImageGenerationToolActivity(imageActivity, "Rendering edit");
@@ -365,20 +428,21 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
         renderGeneratedImage(aiBubble, editPrompt, imageUrl, "Generated edit", isSensitiveImagePrompt(`${requestText} ${editPrompt}`));
         const historyContent = getGeneratedImageHistoryContent("Generated image edit", editPrompt);
 
-        conversationHistory.push({
+        pushGenerationHistoryMessage(options, {
             role: "user",
             content: `[Image edit request] ${requestText}`,
             createdAt: options.userCreatedAt || new Date().toISOString()
         });
-        conversationHistory.push({
+        const assistantIndex = pushGenerationHistoryMessage(options, {
             role: "assistant",
             content: historyContent,
             createdAt: new Date().toISOString()
         });
         setupAssistantActions(aiBubble.parentElement, getGeneratedMediaCopyText(imageUrl, historyContent), {
-            messageIndex: conversationHistory.length - 1,
+            messageIndex: assistantIndex,
             canFork: true
         });
+        syncGenerationHistorySnapshot(options);
         return true;
     } catch (e) {
         updateImageGenerationToolActivity(imageActivity, e.name === "AbortError" ? "Stopped" : "Failed", "done");
@@ -412,7 +476,7 @@ async function processImageEdit(requestText, currentFiles, signal = null, option
     await renderImageEditAttempt(aiBubble, requestText, imageFiles, signal, options);
 }
 
-async function buildImageEditPrompt(requestText, imageFiles, signal = null) {
+async function buildImageEditPrompt(requestText, imageFiles, signal = null, options = {}) {
     const base64Images = [];
 
     for (const file of imageFiles.slice(0, 3)) {
@@ -439,7 +503,7 @@ async function buildImageEditPrompt(requestText, imageFiles, signal = null) {
     const prompt = data?.message?.content?.trim();
     if (!prompt) throw new Error("No edit prompt returned");
 
-    addSessionTokens(getProviderTokenUsage(data), {
+    addGenerationTokenUsage(options, getProviderTokenUsage(data), {
         model: IMAGE_EDIT_MODEL,
         provider: getCurrentProviderLabel()
     });
@@ -462,11 +526,12 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
         noteBubble.style.color = "#f59e0b";
     }
 
-    conversationHistory.push({
+    pushGenerationHistoryMessage(options, {
         role: "user",
         content: `[Video prompt, 10 seconds] ${prompt}`,
         createdAt: options.userCreatedAt || new Date().toISOString()
     });
+    syncGenerationHistorySnapshot(options);
 
     const aiBubble = addRenderNode("__thinking__", "output");
     renderCreationProgress(aiBubble, {
@@ -485,20 +550,22 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
             kind: "video",
             prompt,
             label: videoResult.label,
-            extension: videoResult.extension || "mp4"
+            extension: videoResult.extension || "mp4",
+            chatId: options.sessionId || getGenerationSessionIdForSignal(signal)
         });
 
         updateCreationProgress(aiBubble, "Encoding clip", 2);
         renderGeneratedVideo(aiBubble, prompt, videoUrl, videoResult.extension, videoResult.label);
-        conversationHistory.push({
+        const assistantIndex = pushGenerationHistoryMessage(options, {
             role: "assistant",
             content: `Generated Wan video clip for: ${prompt}\n\n${videoUrl}`,
             createdAt: new Date().toISOString()
         });
         setupAssistantActions(aiBubble.parentElement, videoUrl, {
-            messageIndex: conversationHistory.length - 1,
+            messageIndex: assistantIndex,
             canFork: true
         });
+        syncGenerationHistorySnapshot(options);
     } catch (e) {
         if (e.name === "AbortError") {
             renderErrorCard(aiBubble, e, {
@@ -525,20 +592,22 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
                 kind: "video",
                 prompt,
                 label: "Fallback animated clip",
-                extension: videoResult.extension || "mp4"
+                extension: videoResult.extension || "mp4",
+                chatId: options.sessionId || getGenerationSessionIdForSignal(signal)
             });
 
             updateCreationProgress(aiBubble, "Finalizing clip", 2);
             renderGeneratedVideo(aiBubble, prompt, videoUrl, videoResult.extension, "Fallback animated clip");
-            conversationHistory.push({
+            const assistantIndex = pushGenerationHistoryMessage(options, {
                 role: "assistant",
                 content: `Wan was unavailable, so Fauna generated a fallback 10 second animated clip for: ${prompt}\n\n${videoUrl}`,
                 createdAt: new Date().toISOString()
             });
             setupAssistantActions(aiBubble.parentElement, videoUrl, {
-                messageIndex: conversationHistory.length - 1,
+                messageIndex: assistantIndex,
                 canFork: true
             });
+            syncGenerationHistorySnapshot(options);
         } catch (fallbackError) {
             renderErrorCard(aiBubble, fallbackError, {
                 title: fallbackError.name === "AbortError" ? "Video generation stopped" : "Video generation failed",
@@ -666,7 +735,7 @@ async function generateWanVideo(prompt, signal = null) {
         signal,
         body: JSON.stringify({ prompt: workflow })
     });
-    markGenerationConnectionEstablished();
+    markGenerationConnectionEstablished(signal);
 
     if (!queueRes.ok) {
         throw new Error(`ComfyUI rejected the Wan workflow (${queueRes.status})`);
@@ -697,7 +766,7 @@ async function waitForComfyHistory(promptId, baseUrl, signal = null) {
     while (Date.now() - startedAt < timeoutMs) {
         throwIfAborted(signal);
         const res = await fetch(`${baseUrl}/history/${encodeURIComponent(promptId)}`, { signal });
-        markGenerationConnectionEstablished();
+        markGenerationConnectionEstablished(signal);
         if (res.ok) {
             const history = await res.json();
             const result = history[promptId];
@@ -755,7 +824,7 @@ function sleep(ms, signal = null) {
 }
 
 function preloadImage(src, signal = null) {
-    markGenerationConnectionEstablished();
+    markGenerationConnectionEstablished(signal);
     return new Promise((resolve, reject) => {
         if (signal?.aborted) {
             reject(new DOMException("Generation stopped", "AbortError"));
@@ -773,7 +842,7 @@ function preloadImage(src, signal = null) {
 }
 
 function loadImageElement(src, signal = null) {
-    markGenerationConnectionEstablished();
+    markGenerationConnectionEstablished(signal);
     return new Promise((resolve, reject) => {
         if (signal?.aborted) {
             reject(new DOMException("Generation stopped", "AbortError"));

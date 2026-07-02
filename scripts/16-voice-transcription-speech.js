@@ -59,7 +59,83 @@ function startBrowserSpeechRecognition() {
     mediaRecognition.start();
 }
 
-async function transcribeOpenAiAudio(blob, signal = null) {
+function getAudioFileExtensionForMimeType(mimeType = "") {
+    const clean = String(mimeType || "").split(";")[0].trim().toLowerCase();
+    const map = {
+        "audio/webm": "webm",
+        "audio/mp4": "m4a",
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/ogg": "ogg"
+    };
+    return map[clean] || (clean.includes("mp4") ? "m4a" : clean.includes("wav") ? "wav" : "webm");
+}
+
+function normalizeSavedAudioRecording(result = {}, blob = null, {
+    provider = "voice",
+    transcript = ""
+} = {}) {
+    if (!result?.ok || !result.url) return null;
+    return {
+        url: String(result.url || "").trim(),
+        path: String(result.path || "").trim(),
+        mimeType: String(result.mimeType || blob?.type || "audio/webm").trim(),
+        size: String(result.size || blob?.size || 0),
+        provider: String(provider || "voice").trim(),
+        transcript: String(transcript || "").trim(),
+        createdAt: new Date().toISOString()
+    };
+}
+
+function ensureVoiceRecordingChatSessionId() {
+    if (!isFaunaDesktopApp()) return activeSessionId || getActiveSession?.()?.id || "";
+    let session = getActiveSession?.() || null;
+    if (!session) {
+        session = createChatSession();
+        chatSessions.unshift(session);
+        activeSessionId = session.id;
+        updateActiveChatTitle?.();
+        if (activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND) {
+            updateWorkspaceUrlFragment?.({ replace: true });
+        }
+    }
+    return session.id || ensureDesktopArtifactChatSessionId();
+}
+
+async function saveVoiceRecordingBlob(blob, {
+    provider = "voice",
+    transcript = ""
+} = {}) {
+    const api = getFaunaDesktopApi();
+    if (!api?.saveGeneratedMedia || !(blob instanceof Blob) || blob.size <= 0) return null;
+
+    try {
+        const result = await api.saveGeneratedMedia({
+            dataBase64: await blobToBase64(blob),
+            mimeType: blob.type || "audio/webm",
+            extension: getAudioFileExtensionForMimeType(blob.type),
+            kind: "voice-recording",
+            chatId: ensureVoiceRecordingChatSessionId(),
+            label: "Voice recording"
+        });
+        return normalizeSavedAudioRecording(result, blob, { provider, transcript });
+    } catch (err) {
+        console.warn("Could not save voice recording to AppData:", err);
+        return null;
+    }
+}
+
+function mergeVoiceRecordingTranscript(recording, transcript) {
+    if (!recording) return null;
+    return {
+        ...recording,
+        transcript: String(transcript || recording.transcript || "").trim()
+    };
+}
+
+async function transcribeOpenAiAudio(blob, signal = null, recording = null) {
     const cacheKey = await getOpenAiTranscriptionCacheKey(blob);
     throwIfAborted(signal);
     const cachedTranscript = getCachedOpenAiTranscription(cacheKey);
@@ -80,7 +156,7 @@ async function transcribeOpenAiAudio(blob, signal = null) {
         throw new Error(formatOpenAiApiError(data, res.status));
     }
     const transcript = String(data.text || "").trim();
-    saveOpenAiTranscriptionCacheEntry(cacheKey, transcript, blob);
+    saveOpenAiTranscriptionCacheEntry(cacheKey, transcript, blob, mergeVoiceRecordingTranscript(recording, transcript));
     return transcript;
 }
 
@@ -101,7 +177,7 @@ function extractLocalTranscript(data) {
     return "";
 }
 
-async function transcribeLocalAudio(blob, signal = null) {
+async function transcribeLocalAudio(blob, signal = null, recording = null) {
     const cacheKey = await getLocalTranscriptionCacheKey(blob);
     throwIfAborted(signal);
     const cachedTranscript = getCachedOpenAiTranscription(cacheKey);
@@ -135,7 +211,7 @@ async function transcribeLocalAudio(blob, signal = null) {
     } else {
         transcript = (await res.text().catch(() => "")).trim();
     }
-    saveLocalTranscriptionCacheEntry(cacheKey, transcript, blob);
+    saveLocalTranscriptionCacheEntry(cacheKey, transcript, blob, mergeVoiceRecordingTranscript(recording, transcript));
     return transcript;
 }
 
@@ -143,6 +219,10 @@ if (voiceButton) {
     updateVoiceButtonAvailability();
     voiceButton.onclick = async () => {
         if (isGenerating) return;
+        if (isActiveChatArchived()) {
+            showToast("Archived chats are read-only. Restore the chat before starting voice.", "warning");
+            return;
+        }
 
         if (isRecording && stopVoiceInput()) {
             return;

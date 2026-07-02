@@ -80,3 +80,7 @@ After meaningful UI or behavior changes, verify:
 - Check `git status --short --branch` before editing.
 - Do not commit, push, or rewrite history unless the user asks.
 - Keep generated local artifacts out of the repo.
+
+## Desktop Versioning
+
+- After every successfully completed prompt involving the desktop app, increment the app version in `major.minor.bugfix` format.

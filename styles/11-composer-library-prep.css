@@ -11,6 +11,17 @@
     box-shadow: 0 18px 44px rgba(0, 0, 0, 0.2), 0 3px 10px rgba(0, 0, 0, 0.14);
 }
 
+.input-wrapper.has-attachments {
+    top: auto;
+    bottom: 22px;
+}
+
+.input-wrapper.has-attachments .input-container-floating {
+    max-height: min(430px, calc(100dvh - var(--window-bar-height) - 52px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
 .input-container-floating:focus-within {
     border-color: color-mix(in srgb, var(--accent) 44%, rgba(255, 255, 255, 0.14));
     box-shadow:
@@ -184,6 +195,9 @@ textarea#prompt::placeholder {
 .input-container-floating .preview-container {
     gap: 8px;
     padding-bottom: 8px;
+    max-height: min(172px, 28dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .input-container-floating .preview-container:empty {
@@ -204,6 +218,14 @@ textarea#prompt::placeholder {
 }
 
 @media (max-width: 768px) {
+    .input-wrapper.has-attachments {
+        bottom: calc(env(safe-area-inset-bottom) + 12px);
+    }
+
+    .input-wrapper.has-attachments .input-container-floating {
+        max-height: min(430px, calc(100dvh - var(--window-bar-height) - 96px));
+    }
+
     .input-container-floating {
         min-height: 96px;
         padding: 11px;
