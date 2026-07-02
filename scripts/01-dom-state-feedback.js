@@ -1,0 +1,1648 @@
+// Original script.js lines 19-1665.
+const chat = document.getElementById("chat");
+const welcome = document.getElementById("welcome");
+const timeGreeting = document.getElementById("timeGreeting");
+const inputWrapper = document.querySelector(".input-wrapper");
+const composerPanel = document.querySelector(".input-container-floating");
+const clarifyingQuestionComposer = document.getElementById("clarifyingQuestionComposer");
+const input = document.getElementById("prompt");
+const sendButton = document.getElementById("sendButton");
+const slashCommandPalette = document.getElementById("slashCommandPalette");
+const newChatBtn = document.getElementById("newChat");
+const chatHistoryList = document.getElementById("chatHistoryList");
+const chatHistorySection = document.querySelector(".history.sidebar-section");
+const chatHistoryToggle = document.getElementById("chatHistoryToggle");
+const archivedHistorySection = document.getElementById("archivedHistorySection");
+const archivedChatToggle = document.getElementById("archivedChatToggle");
+const archivedChatList = document.getElementById("archivedChatList");
+const chatTitle = document.getElementById("chatTitle");
+const chatTitleInput = document.getElementById("chatTitleInput");
+const chatTitleEditBtn = document.getElementById("chatTitleEditBtn");
+const playgroundNavButton = document.getElementById("playgroundNavButton");
+const libraryNavButton = document.getElementById("libraryNavButton");
+const workspaceNavButtons = document.querySelectorAll("[data-workspace-view]");
+const libraryView = document.getElementById("libraryView");
+const libraryGrid = document.getElementById("libraryGrid");
+const libraryEmpty = document.getElementById("libraryEmpty");
+const librarySummary = document.getElementById("librarySummary");
+const libraryStats = document.getElementById("libraryStats");
+const libraryFilterGroup = document.querySelector(".library-filter-group");
+const libraryFilterButtons = document.querySelectorAll("[data-library-filter]");
+const libraryLayoutGroup = document.querySelector(".library-layout-group");
+const libraryLayoutButtons = document.querySelectorAll("[data-library-layout]");
+const librarySelectionCount = document.getElementById("librarySelectionCount");
+const librarySelectVisibleButton = document.getElementById("librarySelectVisible");
+const libraryClearSelectionButton = document.getElementById("libraryClearSelection");
+const libraryDeleteSelectedButton = document.getElementById("libraryDeleteSelected");
+const libraryUploadButton = document.getElementById("libraryUploadButton");
+const libraryUploadInput = document.getElementById("libraryUploadInput");
+const uploadButton = document.getElementById("uploadButton");
+const attachmentMenu = document.getElementById("attachmentMenu");
+const attachmentUploadFileButton = document.getElementById("attachmentUploadFile");
+const attachmentChooseLibraryButton = document.getElementById("attachmentChooseLibrary");
+const libraryPickerModal = document.getElementById("libraryPickerModal");
+const libraryPickerSearch = document.getElementById("libraryPickerSearch");
+const libraryPickerGrid = document.getElementById("libraryPickerGrid");
+const libraryPickerEmpty = document.getElementById("libraryPickerEmpty");
+const libraryPickerClose = document.getElementById("libraryPickerClose");
+const libraryPickerAttach = document.getElementById("libraryPickerAttach");
+const libraryPickerSelectionCount = document.getElementById("libraryPickerSelectionCount");
+const libraryPickerTypeButtons = document.querySelectorAll("[data-library-picker-type]");
+const libraryPickerSortButtons = document.querySelectorAll("[data-library-picker-sort]");
+const fileInput = document.getElementById("fileInput");
+const previewContainer = document.getElementById("previewContainer");
+const tokenCounter = document.getElementById("tokenCounter");
+
+// Tools & Sandbox Elements
+const toolsBtn = document.getElementById("toolsBtn");
+const toolsDropdown = document.getElementById("toolsDropdown");
+const toggleSandbox = document.getElementById("toggleSandbox");
+const toggleWebSearch = document.getElementById("toggleWebSearch");
+const toggleGrounding = document.getElementById("toggleGrounding");
+const toggleGoogleGrounding = document.getElementById("toggleGoogleGrounding");
+const toggleApproxLocation = document.getElementById("toggleApproxLocation");
+const toggleWorkspaceBridge = document.getElementById("toggleWorkspaceBridge");
+const toggleMemoryBeta = document.getElementById("toggleMemoryBeta");
+const memoryBetaStatus = document.getElementById("memoryBetaStatus");
+const memoryCountLabel = document.getElementById("memoryCountLabel");
+const memoryOpenCommandBtn = document.getElementById("memoryOpenCommandBtn");
+const personaDisplayNameInput = document.getElementById("personaDisplayNameInput");
+const personaCustomInstructionsInput = document.getElementById("personaCustomInstructionsInput");
+const personaSaveBtn = document.getElementById("personaSaveBtn");
+const personaClearBtn = document.getElementById("personaClearBtn");
+const paramTemp = document.getElementById("paramTemp");
+const tempValue = document.getElementById("tempValue");
+const typewriterDuration = document.getElementById("typewriterDuration");
+const typewriterDurationNumber = document.getElementById("typewriterDurationNumber");
+const typewriterDurationValue = document.getElementById("typewriterDurationValue");
+const toggleAiStreaming = document.getElementById("toggleAiStreaming");
+const aiStreamingStatus = document.getElementById("aiStreamingStatus");
+const temperatureStatus = document.getElementById("temperatureStatus");
+const maxOutputTokensInput = document.getElementById("maxOutputTokensInput");
+const topPInput = document.getElementById("topPInput");
+const ollamaTopKInput = document.getElementById("ollamaTopKInput");
+const aiOutputLimitsStatus = document.getElementById("aiOutputLimitsStatus");
+const openAiVerbosityStatus = document.getElementById("openAiVerbosityStatus");
+const openAiVerbosityButtons = document.querySelectorAll("[data-ai-verbosity]");
+const wanEndpointInput = document.getElementById("wanEndpointInput");
+const wanWorkflowInput = document.getElementById("wanWorkflowInput");
+const wanStatus = document.getElementById("wanStatus");
+const wanSaveBtn = document.getElementById("wanSaveBtn");
+const wanTestBtn = document.getElementById("wanTestBtn");
+const wanClearBtn = document.getElementById("wanClearBtn");
+const openAiStatus = document.getElementById("openAiStatus");
+const openAiApiKeyInput = document.getElementById("openAiApiKeyInput");
+const openAiChatModelInput = document.getElementById("openAiChatModelInput");
+const openAiImageModelInput = document.getElementById("openAiImageModelInput");
+const openAiTranscriptionModelInput = document.getElementById("openAiTranscriptionModelInput");
+const openAiRealtimeModelInput = document.getElementById("openAiRealtimeModelInput");
+const openAiChatModelSelectHost = document.getElementById("openAiChatModelSelectHost");
+const openAiImageModelSelectHost = document.getElementById("openAiImageModelSelectHost");
+const openAiTranscriptionModelSelectHost = document.getElementById("openAiTranscriptionModelSelectHost");
+const openAiRealtimeModelSelectHost = document.getElementById("openAiRealtimeModelSelectHost");
+const openAiVoiceInput = document.getElementById("openAiVoiceInput");
+const openAiSaveBtn = document.getElementById("openAiSaveBtn");
+const openAiTestBtn = document.getElementById("openAiTestBtn");
+const openAiClearBtn = document.getElementById("openAiClearBtn");
+const ollamaCatalogBtn = document.getElementById("ollamaCatalogBtn");
+const openAiCatalogBtn = document.getElementById("openAiCatalogBtn");
+const openAiCatalogModal = document.getElementById("openAiCatalogModal");
+const openAiCatalogCloseBtn = document.getElementById("openAiCatalogCloseBtn");
+const openAiCatalogTitle = document.getElementById("openAiCatalogTitle");
+const openAiCatalogSearchInput = document.getElementById("openAiCatalogSearchInput");
+const openAiCatalogFiltersBtn = document.getElementById("openAiCatalogFiltersBtn");
+const openAiCatalogFiltersMenu = document.getElementById("openAiCatalogFiltersMenu");
+const openAiCatalogClearFiltersBtn = document.getElementById("openAiCatalogClearFiltersBtn");
+const openAiCatalogSortGroup = document.querySelector(".model-catalog-sort");
+const openAiCatalogSortButtons = document.querySelectorAll("[data-openai-catalog-sort]");
+const openAiCatalogRefreshBtn = document.getElementById("openAiCatalogRefreshBtn");
+const openAiCatalogStatus = document.getElementById("openAiCatalogStatus");
+const openAiCatalogList = document.getElementById("openAiCatalogList");
+const openAiCatalogEmpty = document.getElementById("openAiCatalogEmpty");
+const aiCachingToggle = document.getElementById("aiCachingToggle");
+const aiCachingToggleLabel = document.getElementById("aiCachingToggleLabel");
+const aiCachingStatus = document.getElementById("aiCachingStatus");
+const providerSegment = document.querySelector(".provider-segment");
+const providerChoiceButtons = document.querySelectorAll("[data-ai-provider]");
+const providerConfigPanels = document.querySelectorAll("[data-provider-config]");
+const localModelList = document.getElementById("localModelList");
+const localModelsStatus = document.getElementById("localModelsStatus");
+const localModelsRefreshBtn = document.getElementById("localModelsRefreshBtn");
+const localModelsInstallBtn = document.getElementById("localModelsInstallBtn");
+const workspaceBridgeEndpointInput = document.getElementById("workspaceBridgeEndpointInput");
+const workspaceBridgeTokenInput = document.getElementById("workspaceBridgeTokenInput");
+const workspaceBridgeStatus = document.getElementById("workspaceBridgeStatus");
+const workspaceBridgeSaveBtn = document.getElementById("workspaceBridgeSaveBtn");
+const workspaceBridgeTestBtn = document.getElementById("workspaceBridgeTestBtn");
+const workspaceBridgeClearBtn = document.getElementById("workspaceBridgeClearBtn");
+const stopButton = document.getElementById("stopButton");
+const settingsOpenBtn = document.getElementById("settingsOpenBtn");
+const mobileSettingsOpenBtn = document.getElementById("mobileSettingsOpenBtn");
+const settingsModal = document.getElementById("settingsModal");
+const settingsCloseBtn = document.getElementById("settingsCloseBtn");
+const settingsTitle = document.getElementById("settingsTitle");
+const settingsNavButtons = document.querySelectorAll("[data-settings-pane]");
+const settingsPanes = document.querySelectorAll("[data-settings-pane-panel]");
+const themeToggle = document.getElementById("themeToggle");
+const mobileThemeToggle = document.getElementById("mobileThemeToggle");
+const themeLabel = document.getElementById("themeLabel");
+const accentButtons = document.querySelectorAll("[data-accent-choice]");
+const accentValue = document.getElementById("accentValue");
+const serviceStatusLabel = document.getElementById("serviceStatusLabel");
+const statusPill = document.getElementById("statusPill");
+const toastRegion = document.getElementById("toastRegion");
+const voiceButton = document.getElementById("voiceButton");
+const voiceBtnIcon = document.getElementById("voiceBtnIcon");
+const voiceOrb = document.getElementById("voiceOrb");
+const voiceSetupNotice = document.getElementById("voiceSetupNotice");
+const voicePreviewBtn = document.getElementById("voicePreviewBtn");
+const voiceNameLabel = document.getElementById("voiceNameLabel");
+const voiceDescLabel = document.getElementById("voiceDescLabel");
+const voiceDots = document.getElementById("voiceDots");
+const voiceChoiceList = document.getElementById("voiceChoiceList");
+const voicePrevBtn = document.getElementById("voicePrevBtn");
+const voiceNextBtn = document.getElementById("voiceNextBtn");
+const voiceAgentStage = document.getElementById("voiceAgentStage");
+const voiceAgentOrb = document.getElementById("voiceAgentOrb");
+const voiceAgentStatus = document.getElementById("voiceAgentStatus");
+const voiceChatControls = document.getElementById("voiceChatControls");
+const voiceMicToggleBtn = document.getElementById("voiceListeningPill");
+const voiceListeningLabel = document.getElementById("voiceListeningLabel");
+const voiceReplyToggleBtn = document.getElementById("voiceReplyToggleBtn");
+const voiceQuickSettingsBtn = document.getElementById("voiceQuickSettingsBtn");
+const voiceQuickPanel = document.getElementById("voiceQuickPanel");
+const voiceQuickVoiceLabel = document.getElementById("voiceQuickVoiceLabel");
+const voiceQuickVoiceChoices = document.getElementById("voiceQuickVoiceChoices");
+const voiceSpeedSlider = document.getElementById("voiceSpeedSlider");
+const voiceSpeedValue = document.getElementById("voiceSpeedValue");
+const voiceMicChoices = document.getElementById("voiceMicChoices");
+const voiceOutputChoices = document.getElementById("voiceOutputChoices");
+const voiceStopButton = document.getElementById("voiceStopButton");
+const localVoiceTranscriptionInput = document.getElementById("localVoiceTranscriptionInput");
+const localVoiceTranscriptionSelectHost = document.getElementById("localVoiceTranscriptionSelectHost");
+const localVoiceTranscriptionEndpointInput = document.getElementById("localVoiceTranscriptionEndpointInput");
+const localVoiceTranscriptionModelInput = document.getElementById("localVoiceTranscriptionModelInput");
+const localVoiceReplyModelInput = document.getElementById("localVoiceReplyModelInput");
+const localVoiceReplyModelSelectHost = document.getElementById("localVoiceReplyModelSelectHost");
+const localVoiceReplyEndpointInput = document.getElementById("localVoiceReplyEndpointInput");
+
+let isSandboxEnabled = true;
+let isWebSearchEnabled = true;
+let isGroundingEnabled = true;
+let isGoogleGroundingEnabled = true;
+let isApproxLocationEnabled = true;
+let isWorkspaceBridgeEnabled = false;
+let isMemoryEnabled = false;
+let isAiStreamingEnabled = true;
+let activeTemperature = 0.7;
+let activeMaxOutputTokens = 0;
+let activeTopP = 1;
+let activeOllamaTopK = 40;
+let activeOpenAiVerbosity = "medium";
+let isAiCachingEnabled = false;
+const TOKEN_COUNTER_DEBOUNCE_MS = 280;
+const TOKEN_COUNTER_TIMEOUT_MS = 2500;
+const TOKEN_USAGE_SOURCE_PROVIDER = "provider_usage";
+const OPENAI_TOKENIZER_URL = "https://platform.openai.com/tokenizer";
+const OPENAI_PRICING_PAGE_URL = "https://platform.openai.com/pricing";
+const OPENAI_PRICING_DOCS_URL = "https://developers.openai.com/api/docs/pricing";
+const OPENAI_PRICING_FETCH_TIMEOUT_MS = 10000;
+const USAGE_HEATMAP_DAYS = 365;
+const LARGE_CODE_FILE_CARD_MIN_LINES = 70;
+const LARGE_CODE_FILE_CARD_MIN_CHARS = 2400;
+const CODE_WORKBENCH_PREVIEW_DEBOUNCE_MS = 420;
+const CODE_WORKBENCH_SELECTION_CONTEXT_LINES = 36;
+const CODE_WORKBENCH_SELECTION_MAX_CONTEXT_CHARS = 14000;
+const CODE_FILE_CARD_DIRECTIVE_RE = /^\s*<!--\s*(?:fauna|flora)-(?:file|file-card|preview-card)\s*:\s*([^>]+?)\s*-->\s*$/i;
+const FILE_REFERENCE_EXTENSIONS = new Set([
+    "c", "cc", "cpp", "cs", "css", "go", "h", "hpp", "html", "java", "js", "json", "jsx", "kt", "less", "mjs", "php", "ps1", "py", "rb", "rs", "scss", "sh", "sql", "svelte", "swift", "ts", "tsx", "vue", "xml", "yaml", "yml", "md"
+]);
+const FILE_REFERENCE_PATH_RE = /((?:[A-Za-z]:[\\/][^\s`<>"|,;]+|(?:\.{1,2}[\\/])?(?:[A-Za-z0-9_.-]+[\\/])+[A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+\.(?:c|cc|cpp|cs|css|go|h|hpp|html|java|js|json|jsx|kt|less|mjs|php|ps1|py|rb|rs|scss|sh|sql|svelte|swift|ts|tsx|vue|xml|ya?ml|md)))(?::(\d+))?(?:\s*\((?:line|lines?)\s+(\d+)(?:\s*[-–]\s*(\d+))?\))?/gi;
+const WEBSITE_REFERENCE_URL_RE = /\bhttps?:\/\/[^\s`<>"']+/gi;
+const PREVIEW_HTML_LANGS = new Set(["html", "htm", "xhtml", "svg"]);
+const PREVIEW_JS_LANGS = new Set(["js", "javascript", "mjs", "jsx", "ts", "typescript"]);
+const PREVIEW_CSS_LANGS = new Set(["css"]);
+const TERMINAL_COMMAND_LANGS = new Set(["sh", "bash", "shell", "zsh", "fish", "ps1", "powershell", "pwsh", "cmd", "bat", "batch", "terminal", "console"]);
+const CODE_DOWNLOAD_EXTENSIONS = {
+    html: "html",
+    htm: "html",
+    xhtml: "html",
+    svg: "svg",
+    css: "css",
+    js: "js",
+    javascript: "js",
+    mjs: "mjs",
+    jsx: "jsx",
+    ts: "ts",
+    typescript: "ts",
+    tsx: "tsx",
+    json: "json",
+    py: "py",
+    python: "py",
+    sh: "sh",
+    bash: "sh",
+    shell: "sh",
+    zsh: "sh",
+    fish: "fish",
+    ps1: "ps1",
+    powershell: "ps1",
+    pwsh: "ps1",
+    cmd: "cmd",
+    bat: "bat",
+    batch: "bat",
+    terminal: "sh",
+    console: "sh",
+    md: "md",
+    markdown: "md",
+    sql: "sql",
+    yaml: "yaml",
+    yml: "yml"
+};
+const MEDIA_DATA_URL_PREFIX_RE = /^data:((?:image|video|audio)\/[a-z0-9.+-]+);base64,/i;
+const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+)\)/gi;
+const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
+const GREETING_REFRESH_MS = 5 * 60 * 1000;
+const appStartedAt = new Date();
+const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
+const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
+const LIBRARY_ITEMS_STORAGE_KEY = "faunaLibraryItems";
+const LIBRARY_DELETED_ITEMS_STORAGE_KEY = "faunaDeletedLibraryItems";
+const LIBRARY_LAYOUT_STORAGE_KEY = "faunaLibraryLayout";
+const USAGE_EVENTS_STORAGE_KEY = "faunaUsageEvents";
+const USAGE_TOOL_EVENTS_STORAGE_KEY = "faunaUsageToolEvents";
+const CHAT_HISTORY_COLLAPSED_STORAGE_KEY = "faunaChatHistoryCollapsed";
+const ARCHIVED_CHAT_HISTORY_COLLAPSED_STORAGE_KEY = "faunaArchivedChatHistoryCollapsed";
+const TRANSPARENT_PIXEL_DATA_URL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+const CHAT_STORAGE_PROFILE_FULL = "full";
+const CHAT_STORAGE_PROFILE_ACTIVE_HTML = "active-html";
+const CHAT_STORAGE_PROFILE_HISTORY_ONLY = "history-only";
+const CHAT_STORAGE_PROFILE_MINIMAL = "minimal";
+const WORKSPACE_VIEW_PLAYGROUND = "playground";
+const WORKSPACE_VIEW_LIBRARY = "library";
+const WORKSPACE_URL_FRAGMENT_CHAT = "chat";
+const WORKSPACE_URL_FRAGMENT_LIBRARY = "library";
+const LIBRARY_FILTER_ALL = "all";
+const LIBRARY_LAYOUT_GRID = "grid";
+const LIBRARY_LAYOUT_LIST = "list";
+const LIBRARY_PICKER_TYPE_ALL = "all";
+const LIBRARY_PICKER_SORT_NEWEST = "newest";
+const MAX_CHAT_SESSIONS = 40;
+const TYPEWRITER_MIN_CHARS_PER_FRAME = 1;
+const TYPEWRITER_FRAME_DELAY_MS = 30;
+const TYPEWRITER_DEFAULT_DURATION_SECONDS = 6;
+const TYPEWRITER_MIN_DURATION_SECONDS = 0;
+const TYPEWRITER_MAX_DURATION_SECONDS = 20;
+const TYPEWRITER_MAX_ANIMATION_FRAMES = 240;
+const TYPEWRITER_FADE_MIN_TRAILING_CHARS = 18;
+const TYPEWRITER_FADE_MAX_TRAILING_CHARS = 96;
+const TYPEWRITER_DURATION_STORAGE_KEY = "faunaTypewriterDuration";
+const AI_STREAMING_ENABLED_STORAGE_KEY = "faunaAiStreamingEnabled";
+const AI_TEMPERATURE_STORAGE_KEY = "faunaAiTemperature";
+const AI_MAX_OUTPUT_TOKENS_STORAGE_KEY = "faunaAiMaxOutputTokens";
+const AI_TOP_P_STORAGE_KEY = "faunaAiTopP";
+const OLLAMA_TOP_K_STORAGE_KEY = "faunaOllamaTopK";
+const OPENAI_VERBOSITY_STORAGE_KEY = "faunaOpenAiVerbosity";
+const STREAM_RENDER_THROTTLE_MS = 45;
+const CHAT_AUTO_SCROLL_THRESHOLD = 96;
+const COMPOSER_SAFE_AREA_EXTRA_PX = 36;
+const COMPOSER_SAFE_AREA_DESKTOP_MIN_PX = 172;
+const COMPOSER_SAFE_AREA_MOBILE_MIN_PX = 176;
+const VOICE_CHAT_FOCUS_TOP_OFFSET = 12;
+const VOICE_CHAT_DESKTOP_BASE_BOTTOM_PADDING = 232;
+const VOICE_CHAT_MOBILE_BASE_BOTTOM_PADDING = 218;
+const VOICE_QUICK_PANEL_VIEWPORT_INSET = 12;
+const VOICE_QUICK_PANEL_GAP = 12;
+const VOICE_QUICK_PANEL_MIN_HEIGHT = 96;
+const VOICE_QUICK_PANEL_MAX_HEIGHT = 620;
+const VOICE_MIC_UNMUTED_ICON = `<path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path><path d="M19 11v1a7 7 0 0 1-14 0v-1"></path><path d="M12 19v3"></path>`;
+const VOICE_MIC_MUTED_ICON = `<path d="M12 3a3 3 0 0 1 3 3v4"></path><path d="M9 9v3a3 3 0 0 0 4.1 2.79"></path><path d="M5 11v1a7 7 0 0 0 11.7 5.22"></path><path d="M19 11v1a6.9 6.9 0 0 1-.62 2.86"></path><path d="M12 19v3"></path><path d="M8 22h8"></path><path d="m3 3 18 18"></path>`;
+const VOICE_REPLY_ON_ICON = `<path d="M11 5 6 9H3v6h3l5 4V5Z"></path><path d="M16 9.5a4 4 0 0 1 0 5"></path><path d="M19 7a8 8 0 0 1 0 10"></path>`;
+const VOICE_REPLY_OFF_ICON = `<path d="M11 5 6 9H3v6h3l5 4V5Z"></path><path d="m21 3-18 18"></path><path d="M16 9.5a4 4 0 0 1 .5 1.5"></path><path d="M19 7a8 8 0 0 1 .9 3"></path>`;
+const ASSISTANT_CONTROL_PREFIX = "fauna";
+const LEGACY_ASSISTANT_CONTROL_PREFIX = "flo" + "ra";
+const ASSISTANT_CONTROL_TAG_SUFFIXES = ["chat_title", "tool_call", "question", "memory"];
+const ASSISTANT_CONTROL_TAG_NAMES = ASSISTANT_CONTROL_TAG_SUFFIXES.flatMap(suffix => [
+    `${ASSISTANT_CONTROL_PREFIX}_${suffix}`,
+    `${LEGACY_ASSISTANT_CONTROL_PREFIX}_${suffix}`
+]);
+const ASSISTANT_CONTROL_TAG_NAMES_PATTERN = ASSISTANT_CONTROL_TAG_NAMES.join("|");
+const ASSISTANT_CONTROL_BLOCKS_RE = new RegExp(`<(?:${ASSISTANT_CONTROL_TAG_NAMES_PATTERN})>\\s*[\\s\\S]*?\\s*<\\/(?:${ASSISTANT_CONTROL_TAG_NAMES_PATTERN})>`, "gi");
+const ASSISTANT_CONTROL_OPEN_TO_END_RE = new RegExp(`<(?:${ASSISTANT_CONTROL_TAG_NAMES_PATTERN})>\\s*[\\s\\S]*$`, "i");
+
+function getAssistantControlTagNames(suffix) {
+    return [
+        `${ASSISTANT_CONTROL_PREFIX}_${suffix}`,
+        `${LEGACY_ASSISTANT_CONTROL_PREFIX}_${suffix}`
+    ];
+}
+
+function createAssistantControlTagRegex(suffix, flags = "") {
+    const tagNames = getAssistantControlTagNames(suffix);
+    return new RegExp(`<(?:${tagNames.join("|")})>\\s*([\\s\\S]*?)\\s*<\\/(?:${tagNames.join("|")})>`, flags);
+}
+
+function createAssistantControlOpenRegex(suffix, flags = "") {
+    const tagNames = getAssistantControlTagNames(suffix);
+    return new RegExp(`<(?:${tagNames.join("|")})>\\s*`, flags);
+}
+
+function createAssistantControlOpenToEndRegex(suffix, flags = "") {
+    const tagNames = getAssistantControlTagNames(suffix);
+    return new RegExp(`<(?:${tagNames.join("|")})>\\s*[\\s\\S]*$`, flags);
+}
+
+let activeTypewriterDurationSeconds = normalizeTypewriterDurationSeconds(
+    safeLocalStorageGet(TYPEWRITER_DURATION_STORAGE_KEY)
+);
+const OPENAI_VOICE_SILENCE_THRESHOLD = 0.018;
+const OPENAI_VOICE_SILENCE_HOLD_MS = 950;
+const OPENAI_VOICE_MIN_RECORDING_MS = 650;
+const OPENAI_VOICE_IDLE_TIMEOUT_MS = 10000;
+const OPENAI_VOICE_MAX_RECORDING_MS = 45000;
+const OPENAI_VOICE_MONITOR_INTERVAL_MS = 70;
+const OPENAI_VOICE_RELISTEN_DELAY_MS = 450;
+const VOICE_REALTIME_SPEECH_MIN_CHARS = 24;
+const VOICE_REALTIME_SPEECH_SOFT_CHARS = 72;
+const VOICE_REALTIME_SPEECH_MAX_CHARS = 150;
+const TIME_GREETING_GROUPS = {
+    morning: [
+        "Good morning, Fauna is ready",
+        "Morning, what are we building?",
+        "Fresh start, models ready",
+        "Morning workspace, clean slate"
+    ],
+    afternoon: [
+        "Good afternoon, Fauna is ready",
+        "Afternoon flow, models synced",
+        "Ready for the next idea",
+        "Local workspace, wide awake"
+    ],
+    evening: [
+        "Good evening, Fauna is ready",
+        "Evening mode, calm and ready",
+        "Quiet evening, models synced",
+        "Settle in, Fauna is ready"
+    ],
+    night: [
+        "Late-night mode, Fauna is ready",
+        "Night shift, models ready",
+        "Still awake, still ready",
+        "Midnight workspace, ready when you are"
+    ]
+};
+const PERSONALIZED_TIME_GREETING_GROUPS = {
+    morning: [
+        name => `Good morning, ${name}`,
+        name => `Morning, ${name}. What are we building?`,
+        name => `Fresh start, ${name}`,
+        name => `${name}, Fauna is ready`
+    ],
+    afternoon: [
+        name => `Good afternoon, ${name}`,
+        name => `${name}, ready for the next idea`,
+        name => `Afternoon flow, ${name}`,
+        name => `Local workspace ready, ${name}`
+    ],
+    evening: [
+        name => `Good evening, ${name}`,
+        name => `Evening mode, ${name}`,
+        name => `Quiet evening, ${name}`,
+        name => `Settle in, ${name}`
+    ],
+    night: [
+        name => `Late-night mode, ${name}`,
+        name => `Night shift, ${name}`,
+        name => `Still awake, ${name}`,
+        name => `Midnight workspace, ${name}`
+    ]
+};
+
+// Model Switcher Elements
+const modelLabel = document.getElementById("modelLabel");
+const modelBtn = document.getElementById("modelBtn");
+const modelDropdown = document.getElementById("modelDropdown");
+
+let attachedFiles = [];
+let sessionTotalTokens = 0;
+let usageEvents = [];
+let usageToolEvents = [];
+let persistedLibraryItems = [];
+let deletedLibraryItemKeys = new Set();
+let openAiFileCache = [];
+let composerTokenState = { signature: "", status: "idle", count: null, source: "", error: "" };
+let composerTokenCountTimer = null;
+let composerTokenCountRequestId = 0;
+let activeUsageView = "daily";
+let isGenerating = false;
+let hasGenerationConnectionBeenMade = false;
+let shouldSpeakNextReply = false;
+let isVoiceInputUpdate = false;
+let preferredVoice = null;
+let activeVoiceSpeed = 1;
+let isVoiceReplyEnabled = true;
+let isVoiceMicMuted = false;
+let selectedVoiceMicDeviceId = "default";
+let selectedVoiceOutputDeviceId = "default";
+let mediaRecognition = null;
+let isOpenAiVoiceSessionActive = false;
+let openAiRealtimePeerConnection = null;
+let openAiRealtimeDataChannel = null;
+let openAiRealtimeAudioElement = null;
+let openAiRealtimeAssistantBubble = null;
+let openAiRealtimeAssistantNode = null;
+let openAiRealtimeUserBubble = null;
+let openAiRealtimeUserNode = null;
+let openAiRealtimeAssistantText = "";
+let openAiRealtimeAssistantBaseText = "";
+let openAiRealtimeAssistantRenderedText = "";
+let openAiRealtimeUserText = "";
+let openAiRealtimeUserBaseText = "";
+let openAiRealtimeUserHistoryIndex = null;
+let openAiRealtimeAssistantHistoryIndex = null;
+let openAiRealtimePendingUserTurn = false;
+let openAiRealtimeSessionConnected = false;
+let openAiRealtimeVoiceOutputStarted = false;
+let openAiRealtimeVoiceRestartPromise = null;
+let voiceMediaRecorder = null;
+let voiceMediaStream = null;
+let voiceRecordingChunks = [];
+let voiceAudioContext = null;
+let voiceAnalyser = null;
+let voiceMonitorTimer = null;
+let voiceMaxRecordingTimer = null;
+let voiceRecordingStartedAt = 0;
+let voiceLastSpeechAt = 0;
+let voiceDetectedSpeech = false;
+let voiceShouldSubmitRecording = false;
+let openAiVoiceRearmTimer = null;
+let activeSpeechAudio = null;
+let activeSpeechController = null;
+let activeRealtimeSpeechReply = null;
+let activeAssistantTtsPlayback = null;
+let activeVoicePreviewAudio = null;
+let activeVoicePreviewUrl = null;
+let activeVoicePreviewController = null;
+let activeVoicePreviewId = "";
+let hasShownVoiceOutputWarning = false;
+let isSpeechPlaybackActive = false;
+let isRecording = false;
+let activeRequestController = null;
+let activeCodeWorkbench = null;
+let codeWorkbenchLoadTimer = null;
+let codeWorkbenchEditTimer = null;
+let codeWorkbenchLoadToken = 0;
+const voiceCueLastPlayedAt = new Map();
+const disabledButtonStates = new Map();
+const sidebarController = createSidebarController();
+const imageLightboxController = createImageLightbox();
+let modelSwitcher = null;
+let openAiChatModelSelect = null;
+let openAiImageModelSelect = null;
+let openAiTranscriptionModelSelect = null;
+let openAiRealtimeModelSelect = null;
+let localVoiceTranscriptionSelect = null;
+let localVoiceReplyModelSelect = null;
+let activeWorkspaceView = WORKSPACE_VIEW_PLAYGROUND;
+let activeLibraryFilter = LIBRARY_FILTER_ALL;
+let activeLibraryLayout = safeLocalStorageGet(LIBRARY_LAYOUT_STORAGE_KEY) === LIBRARY_LAYOUT_LIST
+    ? LIBRARY_LAYOUT_LIST
+    : LIBRARY_LAYOUT_GRID;
+let selectedLibraryItemKeys = new Set();
+let libraryPickerReturnFocus = null;
+let libraryPickerSelectedIds = new Set();
+let libraryPickerTypeFilter = LIBRARY_PICKER_TYPE_ALL;
+let libraryPickerSortOrder = LIBRARY_PICKER_SORT_NEWEST;
+let libraryPickerQuery = "";
+let activeGreetingGroup = null;
+let activeClarifyingQuestion = null;
+let isChatTitleEditing = false;
+let settingsReturnFocus = null;
+let isChatPinnedToBottom = true;
+
+function isChatNearBottom() {
+    if (!chat) return true;
+    const remainingScroll = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
+    return remainingScroll <= CHAT_AUTO_SCROLL_THRESHOLD;
+}
+
+function updateChatAutoScrollState() {
+    isChatPinnedToBottom = isChatNearBottom();
+}
+
+function getComposerSafeAreaMinimum() {
+    return window.matchMedia?.("(max-width: 768px)")?.matches
+        ? COMPOSER_SAFE_AREA_MOBILE_MIN_PX
+        : COMPOSER_SAFE_AREA_DESKTOP_MIN_PX;
+}
+
+function updateComposerSafeArea() {
+    if (!chat || !inputWrapper) return;
+    const rect = inputWrapper.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const bottomGap = Math.max(0, viewportHeight - rect.bottom);
+    const safeArea = Math.ceil(rect.height + bottomGap + COMPOSER_SAFE_AREA_EXTRA_PX);
+    chat.style.setProperty("--composer-safe-area", `${Math.max(getComposerSafeAreaMinimum(), safeArea)}px`);
+}
+
+function scheduleComposerSafeAreaUpdate({ scroll = false, force = false } = {}) {
+    window.requestAnimationFrame(() => {
+        updateComposerSafeArea();
+        if (scroll) {
+            scrollChatToBottom({ force, behavior: "auto" });
+        }
+    });
+}
+
+function scrollChatToBottom({ force = false, behavior = "auto" } = {}) {
+    if (!chat) return;
+    if (!force && !isChatPinnedToBottom && !isChatNearBottom()) return;
+
+    chat.scrollTo({
+        top: chat.scrollHeight,
+        behavior
+    });
+    isChatPinnedToBottom = true;
+}
+
+function forceScrollChatToBottom({ behavior = "auto" } = {}) {
+    if (!chat) return;
+    scrollChatToBottom({ force: true, behavior });
+}
+
+function scrollChatNodeToTop(node, { force = false, behavior = "smooth" } = {}) {
+    if (!chat || !(node instanceof Element)) return;
+    if (!force && !isChatPinnedToBottom && !isChatNearBottom()) return;
+
+    const chatRect = chat.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const top = Math.max(0, chat.scrollTop + nodeRect.top - chatRect.top - VOICE_CHAT_FOCUS_TOP_OFFSET);
+    chat.scrollTo({ top, behavior });
+    isChatPinnedToBottom = isChatNearBottom();
+}
+
+function getVoiceTurnFocusNode() {
+    const assistantNode = openAiRealtimeAssistantNode?.parentElement === chat
+        ? openAiRealtimeAssistantNode
+        : chat?.querySelector?.(".message-node.voice-current-assistant-reply");
+    const latestNode = assistantNode || chat?.lastElementChild || null;
+    let cursor = latestNode?.previousElementSibling || null;
+    while (cursor) {
+        if (cursor.classList?.contains("user-node")) return cursor;
+        cursor = cursor.previousElementSibling;
+    }
+    return latestNode;
+}
+
+function updateVoiceChatBottomPadding() {
+    if (!chat || !document.body?.classList.contains("voice-chat-active")) return;
+    const focusNode = getVoiceTurnFocusNode();
+    if (!focusNode) {
+        chat.style.removeProperty("--voice-chat-turn-padding");
+        return;
+    }
+
+    const computedStyle = getComputedStyle(chat);
+    const currentPadding = Number.parseFloat(computedStyle.paddingBottom) || 0;
+    const focusRect = focusNode.getBoundingClientRect();
+    const chatRect = chat.getBoundingClientRect();
+    const focusTop = chat.scrollTop + focusRect.top - chatRect.top;
+    const targetScrollTop = Math.max(0, focusTop - VOICE_CHAT_FOCUS_TOP_OFFSET);
+    const currentMaxScrollTop = Math.max(0, chat.scrollHeight - chat.clientHeight);
+    const exactPadding = currentPadding + targetScrollTop - currentMaxScrollTop;
+    const basePadding = window.matchMedia?.("(max-width: 768px)")?.matches
+        ? VOICE_CHAT_MOBILE_BASE_BOTTOM_PADDING
+        : VOICE_CHAT_DESKTOP_BASE_BOTTOM_PADDING;
+    const nextPadding = Math.max(basePadding, Math.ceil(exactPadding));
+    chat.style.setProperty("--voice-chat-turn-padding", `${nextPadding}px`);
+}
+
+function scrollVoiceChatToFocus({ force = false, behavior = "smooth" } = {}) {
+    if (!chat) return;
+    updateVoiceChatBottomPadding();
+    const focusNode = getVoiceTurnFocusNode();
+    if (!focusNode) return;
+    scrollChatNodeToTop(focusNode, { force, behavior });
+}
+
+let segmentIndicatorFrame = 0;
+
+function setAnimatedSegmentIndicator(group, activeElement) {
+    if (!(group instanceof HTMLElement) || !(activeElement instanceof HTMLElement)) return;
+    const groupRect = group.getBoundingClientRect();
+    const activeRect = activeElement.getBoundingClientRect();
+    if (groupRect.width <= 0 || groupRect.height <= 0 || activeRect.width <= 0 || activeRect.height <= 0) {
+        group.classList.remove("segment-indicator-ready");
+        return;
+    }
+    group.style.setProperty("--segment-indicator-x", `${activeRect.left - groupRect.left}px`);
+    group.style.setProperty("--segment-indicator-y", `${activeRect.top - groupRect.top}px`);
+    group.style.setProperty("--segment-indicator-width", `${activeRect.width}px`);
+    group.style.setProperty("--segment-indicator-height", `${activeRect.height}px`);
+    group.classList.add("segment-indicator-ready");
+}
+
+function updateAnimatedSegmentIndicators() {
+    setAnimatedSegmentIndicator(libraryFilterGroup, libraryFilterGroup?.querySelector(".library-filter.active"));
+    setAnimatedSegmentIndicator(libraryLayoutGroup, libraryLayoutGroup?.querySelector(".library-layout-toggle.active"));
+    setAnimatedSegmentIndicator(openAiCatalogSortGroup, openAiCatalogSortGroup?.querySelector(".model-catalog-sort-btn.active"));
+    setAnimatedSegmentIndicator(providerSegment, providerSegment?.querySelector('.provider-choice[aria-checked="true"]'));
+}
+
+function scheduleAnimatedSegmentIndicators() {
+    if (segmentIndicatorFrame) return;
+    segmentIndicatorFrame = window.requestAnimationFrame(() => {
+        segmentIndicatorFrame = 0;
+        updateAnimatedSegmentIndicators();
+    });
+}
+
+if ("ResizeObserver" in window) {
+    const segmentResizeObserver = new ResizeObserver(() => scheduleAnimatedSegmentIndicators());
+    [libraryFilterGroup, libraryLayoutGroup, openAiCatalogSortGroup, providerSegment].forEach(group => {
+        if (group) segmentResizeObserver.observe(group);
+    });
+}
+
+chat?.addEventListener("scroll", updateChatAutoScrollState, { passive: true });
+window.addEventListener("resize", () => {
+    scheduleAnimatedSegmentIndicators();
+    positionVoiceQuickPanel();
+    updateComposerSafeArea();
+    if (!document.body?.classList.contains("voice-chat-active")) return;
+    scrollVoiceChatToFocus({ behavior: "auto", force: true });
+}, { passive: true });
+
+if (inputWrapper && "ResizeObserver" in window) {
+    new ResizeObserver(() => scheduleComposerSafeAreaUpdate()).observe(inputWrapper);
+}
+
+function setCurrentVoiceAssistantNode(node) {
+    chat?.querySelectorAll(".message-node.voice-current-assistant-reply").forEach(currentNode => {
+        if (currentNode !== node) currentNode.classList.remove("voice-current-assistant-reply");
+    });
+    if (!node) return;
+    node.classList.add("voice-assistant-reply", "voice-current-assistant-reply");
+}
+
+function getTimeGreetingGroup(date = new Date()) {
+    const hour = date.getHours();
+    if (hour >= 5 && hour < 12) return "morning";
+    if (hour >= 12 && hour < 17) return "afternoon";
+    if (hour >= 17 && hour < 22) return "evening";
+    return "night";
+}
+
+function pickRandomGreeting(group) {
+    const displayName = getPersonaDisplayName();
+    if (displayName) {
+        const personalizedGreetings = PERSONALIZED_TIME_GREETING_GROUPS[group] || PERSONALIZED_TIME_GREETING_GROUPS.afternoon;
+        return personalizedGreetings[Math.floor(Math.random() * personalizedGreetings.length)](displayName);
+    }
+    const greetings = TIME_GREETING_GROUPS[group] || TIME_GREETING_GROUPS.afternoon;
+    return greetings[Math.floor(Math.random() * greetings.length)];
+}
+
+function updateTimeGreeting({ forceRandom = false } = {}) {
+    if (!timeGreeting) return;
+    const group = getTimeGreetingGroup();
+    if (!forceRandom && group === activeGreetingGroup) return;
+    activeGreetingGroup = group;
+    timeGreeting.textContent = pickRandomGreeting(group);
+}
+
+function showToast(message, type = "info") {
+    if (!toastRegion) return;
+    const normalizedType = ["success", "error", "warning", "info"].includes(type) ? type : "info";
+    const toastDuration = normalizedType === "error" ? 5200 : 3600;
+    const titles = {
+        success: "Done",
+        error: "Needs attention",
+        warning: "Check this",
+        info: "Notice"
+    };
+    const iconPaths = {
+        success: "M20 6 9 17l-5-5",
+        error: "M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z",
+        warning: "M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z",
+        info: "M12 16v-4m0-4h.01M22 12A10 10 0 1 1 2 12a10 10 0 0 1 20 0Z"
+    };
+
+    const toastTemplate = document.getElementById("toastTemplate");
+    const toast = toastTemplate?.content.firstElementChild?.cloneNode(true);
+    if (!toast) return;
+
+    toast.className = `toast toast-${normalizedType}`;
+    toast.setAttribute("role", normalizedType === "error" ? "alert" : "status");
+    toast.style.setProperty("--toast-duration", `${toastDuration}ms`);
+
+    const iconPath = toast.querySelector(".toast-icon-path");
+    const title = toast.querySelector(".toast-title");
+    const messageNode = toast.querySelector(".toast-message");
+    const close = toast.querySelector(".toast-close");
+    iconPath?.setAttribute("d", iconPaths[normalizedType]);
+    if (title) title.textContent = titles[normalizedType];
+    if (messageNode) messageNode.textContent = message;
+
+    while ([...toastRegion.children].filter(child => !child.classList.contains("leaving")).length >= 4) {
+        const oldestToast = [...toastRegion.children].find(child => !child.classList.contains("leaving"));
+        if (oldestToast?._faunaDismissToast) {
+            oldestToast._faunaDismissToast();
+        } else {
+            oldestToast?.classList.add("leaving");
+            window.setTimeout(() => oldestToast?.remove(), 260);
+        }
+    }
+    toastRegion.appendChild(toast);
+
+    let dismissTimer = null;
+    let dismissStartedAt = 0;
+    let remainingDismissMs = toastDuration;
+    let isDismissed = false;
+    let isHovering = false;
+    let isDragging = false;
+    const dragState = {
+        pointerId: null,
+        startX: 0,
+        currentX: 0,
+        lastX: 0,
+        lastTime: 0,
+        velocityX: 0
+    };
+
+    const clearDismissTimer = () => {
+        if (!dismissTimer) return;
+        window.clearTimeout(dismissTimer);
+        dismissTimer = null;
+    };
+
+    const removeToast = () => {
+        clearDismissTimer();
+        toast.remove();
+    };
+
+    const dismiss = (direction = 0) => {
+        if (isDismissed) return;
+        clearDismissTimer();
+        isDismissed = true;
+        toast.classList.remove("paused", "dragging");
+        toast.style.setProperty("--toast-exit-x", direction !== 0 ? `${direction * 120}%` : "0px");
+        toast.style.setProperty("--toast-exit-y", direction !== 0 ? "0px" : "8px");
+        toast.style.setProperty("--toast-exit-rotate", direction !== 0 ? `${direction * 5}deg` : "0deg");
+        toast.style.transform = "";
+        toast.style.opacity = "";
+        toast.classList.add("leaving");
+        toast.addEventListener("animationend", removeToast, { once: true });
+        window.setTimeout(removeToast, 320);
+    };
+
+    toast._faunaRemoveToast = removeToast;
+    toast._faunaDismissToast = dismiss;
+
+    const scheduleDismiss = () => {
+        if (isDismissed || remainingDismissMs <= 0) return dismiss();
+        clearDismissTimer();
+        dismissStartedAt = performance.now();
+        dismissTimer = window.setTimeout(() => dismiss(), remainingDismissMs);
+    };
+
+    const pauseDismiss = () => {
+        if (isDismissed) return;
+        if (dismissTimer) {
+            remainingDismissMs = Math.max(0, remainingDismissMs - (performance.now() - dismissStartedAt));
+            clearDismissTimer();
+        }
+        toast.classList.add("paused");
+    };
+
+    const resumeDismiss = () => {
+        if (isDismissed || isHovering || isDragging) return;
+        toast.classList.remove("paused");
+        scheduleDismiss();
+    };
+
+    const finishDrag = () => {
+        const dismissThreshold = Math.min(140, toast.offsetWidth * 0.38);
+        const shouldDismiss = Math.abs(dragState.currentX) > dismissThreshold
+            || (Math.abs(dragState.velocityX) > 0.75 && Math.abs(dragState.currentX) > 38);
+
+        isDragging = false;
+        dragState.pointerId = null;
+        toast.classList.remove("dragging");
+
+        if (shouldDismiss) {
+            const direction = dragState.currentX === 0
+                ? Math.sign(dragState.velocityX) || 1
+                : Math.sign(dragState.currentX);
+            dismiss(direction);
+            return;
+        }
+
+        toast.style.transform = "";
+        toast.style.opacity = "";
+        resumeDismiss();
+    };
+
+    toast.addEventListener("pointerenter", () => {
+        isHovering = true;
+        pauseDismiss();
+    });
+
+    toast.addEventListener("pointerleave", () => {
+        isHovering = false;
+        resumeDismiss();
+    });
+
+    toast.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || close?.contains(event.target)) return;
+
+        isDragging = true;
+        dragState.pointerId = event.pointerId;
+        dragState.startX = event.clientX;
+        dragState.currentX = 0;
+        dragState.lastX = event.clientX;
+        dragState.lastTime = performance.now();
+        dragState.velocityX = 0;
+
+        pauseDismiss();
+        toast.classList.add("dragging");
+        toast.setPointerCapture(event.pointerId);
+        event.preventDefault();
+    });
+
+    toast.addEventListener("pointermove", (event) => {
+        if (!isDragging || event.pointerId !== dragState.pointerId) return;
+
+        const now = performance.now();
+        const elapsed = Math.max(1, now - dragState.lastTime);
+        dragState.currentX = event.clientX - dragState.startX;
+        dragState.velocityX = (event.clientX - dragState.lastX) / elapsed;
+        dragState.lastX = event.clientX;
+        dragState.lastTime = now;
+
+        const dragAmount = Math.abs(dragState.currentX);
+        const opacity = Math.max(0.32, 1 - dragAmount / Math.max(240, toast.offsetWidth));
+        toast.style.transform = `translateX(${dragState.currentX}px) rotate(${dragState.currentX / 48}deg)`;
+        toast.style.opacity = String(opacity);
+    });
+
+    toast.addEventListener("pointerup", (event) => {
+        if (!isDragging || event.pointerId !== dragState.pointerId) return;
+        if (toast.hasPointerCapture(event.pointerId)) {
+            toast.releasePointerCapture(event.pointerId);
+        }
+        finishDrag();
+    });
+
+    toast.addEventListener("pointercancel", (event) => {
+        if (!isDragging || event.pointerId !== dragState.pointerId) return;
+        if (toast.hasPointerCapture(event.pointerId)) {
+            toast.releasePointerCapture(event.pointerId);
+        }
+        isDragging = false;
+        dragState.pointerId = null;
+        toast.classList.remove("dragging");
+        toast.style.transform = "";
+        toast.style.opacity = "";
+        resumeDismiss();
+    });
+
+    close?.addEventListener("click", () => dismiss());
+    scheduleDismiss();
+}
+
+function getFriendlyError(error, fallbackTitle = "Something went wrong") {
+    const rawMessage = error?.message || String(error || fallbackTitle);
+    if (error?.name === "AbortError") {
+        return {
+            title: "Generation stopped",
+            message: "Your prompt is safe to edit and run again.",
+            detail: "",
+            canCheckOllama: false
+        };
+    }
+
+    if (/OpenAI requests need the Local Workspace Bridge|OpenAI bridge|local-bridge\.py/i.test(rawMessage)) {
+        return {
+            title: "OpenAI bridge needed",
+            message: "Start the local bridge, save its token, and enable Local Workspace before using OpenAI.",
+            detail: rawMessage,
+            canCheckProvider: false
+        };
+    }
+
+    if (/context_length_exceeded|context window|input exceeds/i.test(rawMessage)) {
+        return {
+            title: "Chat context is too large",
+            message: "Fauna trimmed generated image data from chat context. If this still happens, fork from an earlier response or start a fresh chat.",
+            detail: rawMessage,
+            canCheckProvider: false
+        };
+    }
+
+    if (/workspace bridge|Local workspace bridge|bridge token|127\.0\.0\.1:8765/i.test(rawMessage)) {
+        return {
+            title: "Workspace bridge is unavailable",
+            message: "Start the local bridge, save the current token in Settings, then try the workspace request again.",
+            detail: rawMessage,
+            canCheckOllama: false
+        };
+    }
+
+    if (/No available model|Failed to fetch|Ollama|models? (?:is|are) loaded|localhost:11434/i.test(rawMessage)) {
+        return {
+            title: "Ollama is not reachable",
+            message: "Start Ollama, make sure the selected model is installed, or switch Fauna to OpenAI in Settings.",
+            detail: rawMessage,
+            canCheckOllama: true
+        };
+    }
+
+    if (/OpenAI|api\.openai\.com|API key|401|403|429|quota|rate limit|insufficient_quota|invalid_api_key/i.test(rawMessage)) {
+        return {
+            title: "OpenAI needs attention",
+            message: "Check your API key, model names, account limits, or rate limits in Settings.",
+            detail: rawMessage,
+            canCheckProvider: true
+        };
+    }
+
+    if (/ComfyUI|Wan|workflow|MediaRecorder|MP4|record/i.test(rawMessage)) {
+        return {
+            title: "Video service needs attention",
+            message: "Check the ComfyUI endpoint, Wan workflow JSON, and browser recording support before trying again.",
+            detail: rawMessage,
+            canCheckOllama: false
+        };
+    }
+
+    if (/image|pollinations|vision/i.test(rawMessage)) {
+        return {
+            title: "Image request failed",
+            message: "Check the prompt, attachment type, image model, or provider connection, then try again.",
+            detail: rawMessage,
+            canCheckOllama: /Ollama|model|Failed to fetch/i.test(rawMessage)
+        };
+    }
+
+    return {
+        title: fallbackTitle,
+        message: "Fauna could not complete this request.",
+        detail: rawMessage,
+        canCheckOllama: false
+    };
+}
+
+function renderErrorCard(target, error, options = {}) {
+    if (!target) return;
+    const info = {
+        ...getFriendlyError(error, options.title),
+        ...options
+    };
+    const detailText = info.detail || error?.message || "";
+    target.classList.add("error-bubble");
+    target.classList.remove("creation-progress-bubble", "creation-progress-bubble-image", "tool-activity-bubble");
+    target.removeAttribute("aria-busy");
+    delete target._faunaToolActivityState;
+    target.innerHTML = "";
+    target.parentElement?.querySelector(".assistant-message-actions")?.remove();
+
+    const card = document.createElement("div");
+    card.className = "error-card";
+    card.setAttribute("role", "alert");
+
+    const icon = document.createElement("div");
+    icon.className = "error-card-icon";
+    icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4m0 4h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path></svg>`;
+
+    const body = document.createElement("div");
+    body.className = "error-card-body";
+
+    const title = document.createElement("div");
+    title.className = "error-card-title";
+    title.textContent = info.title || "Something went wrong";
+
+    const message = document.createElement("div");
+    message.className = "error-card-message";
+    message.textContent = info.message || "Fauna could not complete this request.";
+
+    body.appendChild(title);
+    body.appendChild(message);
+
+    const actions = document.createElement("div");
+    actions.className = "error-card-actions";
+    let detail = null;
+
+    if (typeof info.onRetry === "function") {
+        const retryButton = document.createElement("button");
+        retryButton.className = "error-card-action error-card-retry";
+        retryButton.type = "button";
+        retryButton.textContent = info.retryLabel || "Retry";
+        retryButton.addEventListener("click", async () => {
+            if (isGenerating) return;
+            const idleText = retryButton.textContent;
+            retryButton.disabled = true;
+            retryButton.textContent = "Retrying...";
+            try {
+                await info.onRetry();
+            } catch (err) {
+                showToast(`Retry failed: ${err.message}`, "error");
+                if (retryButton.isConnected) {
+                    retryButton.disabled = false;
+                    retryButton.textContent = idleText;
+                }
+            }
+        });
+        actions.appendChild(retryButton);
+    }
+
+    if (detailText) {
+        const detailButton = document.createElement("button");
+        detailButton.className = "error-card-action";
+        detailButton.type = "button";
+        detailButton.textContent = "Details";
+
+        const copyButton = document.createElement("button");
+        copyButton.className = "error-card-action";
+        copyButton.type = "button";
+        copyButton.textContent = "Copy";
+
+        detail = document.createElement("div");
+        detail.className = "error-card-detail";
+        detail.hidden = true;
+        detail.textContent = detailText;
+
+        detailButton.addEventListener("click", () => {
+            detail.hidden = !detail.hidden;
+            detailButton.textContent = detail.hidden ? "Details" : "Hide details";
+        });
+
+        copyButton.addEventListener("click", async () => {
+            try {
+                await navigator.clipboard.writeText(detailText);
+                copyButton.textContent = "Copied";
+                window.setTimeout(() => {
+                    copyButton.textContent = "Copy";
+                }, 1400);
+            } catch (err) {
+                showToast("Copy failed. Select the details manually.", "error");
+            }
+        });
+
+        actions.appendChild(detailButton);
+        actions.appendChild(copyButton);
+    }
+
+    if (info.canCheckOllama) {
+        const statusButton = document.createElement("button");
+        statusButton.className = "error-card-action";
+        statusButton.type = "button";
+        statusButton.textContent = "Check Ollama";
+        statusButton.addEventListener("click", () => {
+            checkOllamaStatus();
+            showToast("Checking local Ollama status...", "info");
+        });
+        actions.appendChild(statusButton);
+    }
+
+    if (info.canCheckProvider) {
+        const statusButton = document.createElement("button");
+        statusButton.className = "error-card-action";
+        statusButton.type = "button";
+        statusButton.textContent = isOpenAiProvider() ? "Check OpenAI" : "Check provider";
+        statusButton.addEventListener("click", () => {
+            updateActiveProviderStatus();
+            showToast(isOpenAiProvider() ? "Checking OpenAI status..." : "Checking provider status...", "info");
+        });
+        actions.appendChild(statusButton);
+    }
+
+    if (actions.childElementCount > 0) {
+        body.appendChild(actions);
+    }
+    if (detail) {
+        body.appendChild(detail);
+    }
+
+    card.appendChild(icon);
+    card.appendChild(body);
+    target.appendChild(card);
+}
+
+function prepareBubbleForRetry(target) {
+    if (!target) return;
+    const block = target.parentElement;
+    if (block instanceof HTMLElement) {
+        block.querySelectorAll(".tool-activity-bubble, .creation-progress-bubble").forEach(bubble => {
+            if (bubble !== target) bubble.remove();
+        });
+        block.querySelector(".assistant-message-actions")?.remove();
+        block.querySelector(".web-sources")?.remove();
+    }
+    renderThinkingBubble(target);
+}
+
+function getAssistantHistoryIndexForBubble(target) {
+    const messageNode = target?.closest?.(".message-node.output-node");
+    if (!messageNode) return null;
+    return normalizeHistoryIndex(
+        messageNode.dataset.historyIndex
+        || messageNode.querySelector(".assistant-message-actions")?.dataset.messageIndex
+    );
+}
+
+function updateAssistantHistoryForBubble(target, content) {
+    const messageIndex = getAssistantHistoryIndexForBubble(target);
+    if (messageIndex === null || conversationHistory[messageIndex]?.role !== "assistant") return null;
+    conversationHistory[messageIndex] = {
+        ...conversationHistory[messageIndex],
+        content,
+        createdAt: new Date().toISOString()
+    };
+    return messageIndex;
+}
+
+async function retryAssistantGenerationFromBubble(target, {
+    model = OLLAMA_MODEL,
+    webSources = [],
+    speakThisReply = false
+} = {}) {
+    if (isGenerating || !target) return;
+
+    clearClarifyingQuestionComposer();
+    activeRequestController = new AbortController();
+    const generationSignal = activeRequestController.signal;
+    setGeneratingBusy(true);
+    prepareBubbleForRetry(target);
+
+    try {
+        const data = await sendOllamaChatWithLocalTools(
+            conversationHistory,
+            getActiveChatRequestOptions(),
+            model,
+            generationSignal,
+            target,
+            { enabled: true }
+        );
+        const tokenUsage = getProviderTokenUsage(data);
+        const assistantMessage = getAssistantMessageForConversation(data, model);
+        attachTokenUsage(assistantMessage, tokenUsage);
+        conversationHistory.push(assistantMessage);
+        const assistantIndex = conversationHistory.length - 1;
+
+        addSessionTokens(tokenUsage, { message: assistantMessage });
+        await renderAssistantResponse(data, target, webSources, generationSignal, speakThisReply, {
+            messageIndex: assistantIndex,
+            alreadyRendered: data.__faunaAlreadyRendered === true,
+            preserveRenderedContent: data.__faunaPreserveRenderedContent === true
+        });
+        showToast("Generation retried.", "success");
+    } catch (err) {
+        renderErrorCard(target, err, {
+            retryLabel: "Retry generation",
+            onRetry: () => retryAssistantGenerationFromBubble(target, { model, webSources, speakThisReply })
+        });
+    } finally {
+        activeRequestController = null;
+        setGeneratingBusy(false);
+        updateTokenDisplay();
+        saveCurrentSession();
+    }
+}
+
+function setServiceStatus(state, label) {
+    statusPill?.setAttribute("data-status", state);
+    if (serviceStatusLabel) {
+        serviceStatusLabel.textContent = label;
+    }
+}
+
+function throwIfAborted(signal) {
+    if (signal?.aborted) {
+        throw new DOMException("Generation stopped", "AbortError");
+    }
+}
+
+function prefersReducedMotion() {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+}
+
+function shouldUseTypewriterMotion() {
+    return !prefersReducedMotion() && activeTypewriterDurationSeconds > 0;
+}
+
+function normalizeTypewriterDurationSeconds(value) {
+    if (value === null || value === undefined || value === "") return TYPEWRITER_DEFAULT_DURATION_SECONDS;
+    const duration = Number(value);
+    if (!Number.isFinite(duration)) return TYPEWRITER_DEFAULT_DURATION_SECONDS;
+    return Math.min(
+        TYPEWRITER_MAX_DURATION_SECONDS,
+        Math.max(TYPEWRITER_MIN_DURATION_SECONDS, Math.round(duration))
+    );
+}
+
+function formatTypewriterDurationSeconds(duration) {
+    return duration <= 0 ? "Instant" : `${duration}s`;
+}
+
+function updateTypewriterDurationUi() {
+    const value = String(activeTypewriterDurationSeconds);
+    if (typewriterDuration) typewriterDuration.value = value;
+    if (typewriterDurationNumber) typewriterDurationNumber.value = value;
+    if (typewriterDurationValue) {
+        typewriterDurationValue.textContent = formatTypewriterDurationSeconds(activeTypewriterDurationSeconds);
+    }
+}
+
+function setTypewriterDurationSeconds(duration, { persist = true } = {}) {
+    activeTypewriterDurationSeconds = normalizeTypewriterDurationSeconds(duration);
+    if (persist) {
+        safeLocalStorageSet(TYPEWRITER_DURATION_STORAGE_KEY, String(activeTypewriterDurationSeconds));
+    }
+    updateTypewriterDurationUi();
+}
+
+function hasMarkdownCodeFence(text) {
+    return /^```/m.test(text || "");
+}
+
+function getTypewriterTiming(textLength) {
+    const durationMs = activeTypewriterDurationSeconds * 1000;
+    if (!Number.isFinite(durationMs) || durationMs <= 0 || textLength <= 0) return null;
+
+    const desiredFrameCount = Math.max(1, Math.round(durationMs / TYPEWRITER_FRAME_DELAY_MS));
+    const frameCount = Math.max(1, Math.min(textLength, TYPEWRITER_MAX_ANIMATION_FRAMES, desiredFrameCount));
+    return {
+        stepLength: Math.max(TYPEWRITER_MIN_CHARS_PER_FRAME, Math.ceil(textLength / frameCount)),
+        frameDelayMs: Math.max(0, Math.round(durationMs / frameCount))
+    };
+}
+
+function getTypewriterFadeMotion(value) {
+    if (!shouldUseTypewriterMotion()) return null;
+
+    const requestedCharCount = Number(value);
+    const durationRatio = Math.min(1, activeTypewriterDurationSeconds / TYPEWRITER_MAX_DURATION_SECONDS);
+    const settingTailChars = TYPEWRITER_FADE_MIN_TRAILING_CHARS
+        + Math.round((TYPEWRITER_FADE_MAX_TRAILING_CHARS - TYPEWRITER_FADE_MIN_TRAILING_CHARS) * durationRatio);
+    const requestedTailChars = Number.isFinite(requestedCharCount) && requestedCharCount > 0
+        ? Math.round(requestedCharCount)
+        : TYPEWRITER_FADE_MIN_TRAILING_CHARS;
+    const charCount = Math.max(
+        1,
+        Math.min(TYPEWRITER_FADE_MAX_TRAILING_CHARS, Math.max(requestedTailChars, settingTailChars))
+    );
+
+    return {
+        charCount,
+        durationMs: Math.round(460 + durationRatio * 760),
+        blurPx: Math.round(6 + durationRatio * 10),
+        liftPx: Math.round(6 + durationRatio * 11),
+        glowAlpha: `${Math.round((0.5 + durationRatio * 0.3) * 100)}%`,
+        midGlowAlpha: `${Math.round((0.3 + durationRatio * 0.22) * 100)}%`
+    };
+}
+
+function applyTypewriterFadeStyle(node, motion) {
+    if (!node || !motion) return;
+    node.style.setProperty("--typewriter-tail-duration", `${motion.durationMs}ms`);
+    node.style.setProperty("--typewriter-tail-blur", `${motion.blurPx}px`);
+    node.style.setProperty("--typewriter-tail-lift", `${motion.liftPx}px`);
+    node.style.setProperty("--typewriter-tail-glow-alpha", motion.glowAlpha);
+    node.style.setProperty("--typewriter-tail-mid-glow-alpha", motion.midGlowAlpha);
+}
+
+function wrapTrailingTextForTypewriterFade(target, fadeChars = TYPEWRITER_FADE_MIN_TRAILING_CHARS) {
+    if (!target) return;
+    const motion = getTypewriterFadeMotion(fadeChars);
+    if (!motion) return;
+    const charCount = motion.charCount;
+    const textNodes = [];
+    const walker = document.createTreeWalker(
+        target,
+        NodeFilter.SHOW_TEXT,
+        {
+            acceptNode(node) {
+                return node.nodeValue ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+            }
+        }
+    );
+    let totalLength = 0;
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+        textNodes.push(currentNode);
+        totalLength += currentNode.nodeValue.length;
+        currentNode = walker.nextNode();
+    }
+    if (!totalLength || textNodes.length === 0) return;
+
+    const startPosition = Math.max(0, totalLength - charCount);
+    let seenLength = 0;
+    let startNode = textNodes[0];
+    let startOffset = 0;
+    for (const node of textNodes) {
+        const nextSeenLength = seenLength + node.nodeValue.length;
+        if (startPosition <= nextSeenLength) {
+            startNode = node;
+            startOffset = Math.max(0, startPosition - seenLength);
+            break;
+        }
+        seenLength = nextSeenLength;
+    }
+
+    const endNode = textNodes[textNodes.length - 1];
+    try {
+        const range = document.createRange();
+        range.setStart(startNode, startOffset);
+        range.setEnd(endNode, endNode.nodeValue.length);
+        const fragment = range.extractContents();
+        const fade = document.createElement("span");
+        fade.className = "typewriter-fade-tail";
+        applyTypewriterFadeStyle(fade, motion);
+        fade.appendChild(fragment);
+        range.insertNode(fade);
+        range.detach?.();
+    } catch (error) {
+        console.warn("Could not apply typewriter fade segment:", error);
+    }
+}
+
+function renderMarkdownWithTypewriterCaret(rawText, options = {}) {
+    const template = document.createElement("template");
+    template.innerHTML = renderMarkdown(rawText || "");
+
+    const caret = document.createElement("span");
+    caret.className = "typewriter-caret";
+    caret.setAttribute("aria-hidden", "true");
+
+    const textTargets = Array.from(template.content.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6"));
+    const target = textTargets.reverse().find(node => node.textContent.trim() || node.children.length > 0);
+    if (target) {
+        wrapTrailingTextForTypewriterFade(target, options.fadeChars);
+        target.appendChild(caret);
+    } else {
+        template.content.appendChild(caret);
+    }
+
+    return template.innerHTML;
+}
+
+function renderTypewriterMarkdown(target, rawText, signal = null, options = {}) {
+    if (!target) return Promise.resolve();
+    const onReveal = typeof options.onReveal === "function" ? options.onReveal : null;
+    target.classList.remove("creation-progress-bubble", "creation-progress-bubble-image", "error-bubble");
+    if (!target._faunaToolActivityState) {
+        target.classList.remove("tool-activity-bubble");
+        target.removeAttribute("aria-busy");
+    }
+    if (!shouldUseTypewriterMotion() || !rawText || signal?.aborted || hasMarkdownCodeFence(rawText)) {
+        renderAssistantContentHtml(target, renderMarkdown(rawText || ""), { final: true, busy: false });
+        if (!signal?.aborted) onReveal?.(rawText || "", { done: true });
+        return Promise.resolve();
+    }
+
+    if (!target._faunaToolActivityState) {
+        target.classList.add("typewriter-active");
+        target.setAttribute("aria-busy", "true");
+    }
+
+    const timing = getTypewriterTiming(rawText.length);
+    if (!timing) {
+        renderAssistantContentHtml(target, renderMarkdown(rawText || ""), { final: true, busy: false });
+        return Promise.resolve();
+    }
+
+    const { stepLength, frameDelayMs } = timing;
+    let cursor = 0;
+
+    return new Promise(resolve => {
+        const finish = ({ reveal = true } = {}) => {
+            renderAssistantContentHtml(target, renderMarkdown(rawText), { final: true, busy: false });
+            if (reveal) onReveal?.(rawText, { done: true });
+            resolve();
+        };
+
+        const tick = () => {
+            if (signal?.aborted) {
+                finish({ reveal: false });
+                return;
+            }
+
+            cursor = Math.min(rawText.length, cursor + stepLength);
+            renderAssistantContentHtml(
+                target,
+                renderMarkdownWithTypewriterCaret(rawText.slice(0, cursor), { fadeChars: stepLength }),
+                { final: false, busy: true }
+            );
+            onReveal?.(rawText.slice(0, cursor), { cursor, done: cursor >= rawText.length });
+
+            if (cursor >= rawText.length) {
+                finish();
+                return;
+            }
+
+            window.setTimeout(() => window.requestAnimationFrame(tick), frameDelayMs);
+        };
+
+        window.requestAnimationFrame(tick);
+    });
+}
+
+function stripVisibleAssistantControlBlocks(content, { hideIncomplete = true } = {}) {
+    let text = normalizeAssistantControlMarkup(content);
+    ASSISTANT_CONTROL_TAG_NAMES.forEach(tag => {
+        const completeBlock = new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`, "gi");
+        text = text.replace(completeBlock, "");
+    });
+
+    if (hideIncomplete) {
+        const lowerText = text.toLowerCase();
+        let cutAt = -1;
+        ASSISTANT_CONTROL_TAG_NAMES.forEach(tag => {
+            const index = lowerText.indexOf(`<${tag}`);
+            if (index !== -1 && (cutAt === -1 || index < cutAt)) {
+                cutAt = index;
+            }
+        });
+        if (cutAt !== -1) {
+            text = text.slice(0, cutAt);
+        }
+    }
+
+    return text.trim();
+}
+
+function normalizeAssistantControlMarkup(content) {
+    let text = String(content || "");
+    text = text.replace(/\\([<>])/g, "$1");
+    ASSISTANT_CONTROL_TAG_NAMES.forEach(tag => {
+        const escapedOpen = new RegExp(`&lt;\\s*${tag}\\s*&gt;`, "gi");
+        const escapedClose = new RegExp(`&lt;\\s*\\/\\s*${tag}\\s*&gt;`, "gi");
+        text = text
+            .replace(escapedOpen, `<${tag}>`)
+            .replace(escapedClose, `</${tag}>`);
+    });
+    return text;
+}
+
+function createAssistantStreamRenderer(target, signal = null) {
+    let rawText = "";
+    let renderedText = "";
+    let hasRenderedText = false;
+    let renderTimer = null;
+    let animationFrame = null;
+    let lastRenderAt = 0;
+
+    const clearScheduledRender = () => {
+        if (renderTimer !== null) {
+            window.clearTimeout(renderTimer);
+            renderTimer = null;
+        }
+        if (animationFrame !== null) {
+            window.cancelAnimationFrame(animationFrame);
+            animationFrame = null;
+        }
+    };
+
+    const render = (final = false) => {
+        clearScheduledRender();
+        if (!target || signal?.aborted) return;
+        applyAssistantChatTitle(rawText);
+
+        const visibleText = final
+            ? stripAssistantControlBlocks(rawText)
+            : stripVisibleAssistantControlBlocks(rawText);
+
+        if (!visibleText && !hasRenderedText && !final) return;
+
+        const containsCodeFence = hasMarkdownCodeFence(visibleText);
+
+        if (final) {
+            renderAssistantContentHtml(target, renderMarkdown(visibleText), { final: true, busy: false });
+        } else if (!shouldUseTypewriterMotion() || containsCodeFence) {
+            renderAssistantContentHtml(
+                target,
+                renderMarkdown(visibleText),
+                { final: false, busy: true, typewriter: false }
+            );
+        } else {
+            const fadeChars = Math.max(1, visibleText.length - renderedText.length);
+            renderAssistantContentHtml(
+                target,
+                renderMarkdownWithTypewriterCaret(visibleText, { fadeChars }),
+                { final: false, busy: true }
+            );
+        }
+
+        renderedText = visibleText;
+        if (visibleText) hasRenderedText = true;
+        lastRenderAt = performance.now();
+    };
+
+    const scheduleRender = () => {
+        if (signal?.aborted || renderTimer !== null || animationFrame !== null) return;
+        const delay = Math.max(0, STREAM_RENDER_THROTTLE_MS - (performance.now() - lastRenderAt));
+        renderTimer = window.setTimeout(() => {
+            renderTimer = null;
+            animationFrame = window.requestAnimationFrame(() => {
+                animationFrame = null;
+                render(false);
+            });
+        }, delay);
+    };
+
+    return {
+        append(delta) {
+            rawText += String(delta || "");
+            applyAssistantChatTitle(rawText);
+            scheduleRender();
+        },
+        finish(finalText = rawText) {
+            rawText = String(finalText || "");
+            render(true);
+            return renderedText;
+        },
+        cancel() {
+            clearScheduledRender();
+        },
+        get hasRendered() {
+            return hasRenderedText;
+        },
+        get rawText() {
+            return rawText;
+        }
+    };
+}
+
+function showApprovalDialog({
+    title = "Approve action",
+    message = "",
+    details = [],
+    confirmLabel = "Approve",
+    cancelLabel = "Cancel"
+} = {}) {
+    return new Promise(resolve => {
+        const overlay = document.createElement("div");
+        overlay.className = "approval-modal";
+        overlay.setAttribute("role", "presentation");
+
+        const dialog = document.createElement("section");
+        dialog.className = "approval-dialog";
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-labelledby", "approvalDialogTitle");
+
+        const titleNode = document.createElement("h2");
+        titleNode.id = "approvalDialogTitle";
+        titleNode.textContent = title;
+
+        const messageNode = document.createElement("p");
+        messageNode.textContent = message;
+
+        const detailList = document.createElement("ul");
+        detailList.className = "approval-detail-list";
+        details.filter(Boolean).forEach(detail => {
+            const item = document.createElement("li");
+            item.textContent = detail;
+            detailList.appendChild(item);
+        });
+
+        const actions = document.createElement("div");
+        actions.className = "approval-actions";
+
+        const cancelButton = document.createElement("button");
+        cancelButton.className = "provider-btn provider-btn-secondary";
+        cancelButton.type = "button";
+        cancelButton.textContent = cancelLabel;
+
+        const confirmButton = document.createElement("button");
+        confirmButton.className = "provider-btn provider-btn-primary";
+        confirmButton.type = "button";
+        confirmButton.textContent = confirmLabel;
+
+        const close = (approved) => {
+            document.removeEventListener("keydown", onKeyDown);
+            overlay.remove();
+            resolve(approved);
+        };
+
+        const onKeyDown = (event) => {
+            if (event.key === "Escape") close(false);
+        };
+
+        cancelButton.addEventListener("click", () => close(false));
+        confirmButton.addEventListener("click", () => close(true));
+        overlay.addEventListener("click", event => {
+            if (event.target === overlay) close(false);
+        });
+        document.addEventListener("keydown", onKeyDown);
+
+        actions.append(cancelButton, confirmButton);
+        dialog.append(titleNode, messageNode);
+        if (detailList.children.length > 0) dialog.appendChild(detailList);
+        dialog.appendChild(actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        window.setTimeout(() => confirmButton.focus(), 0);
+    });
+}
+
