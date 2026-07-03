@@ -21,8 +21,13 @@ const AI_PROVIDER_STORAGE_KEY = "faunaAiProvider";
 const LOCAL_CHAT_MODEL_STORAGE_KEY = "faunaLocalChatModel";
 const OPENAI_CHAT_MODEL_STORAGE_KEY = "faunaOpenAiChatModel";
 const WORKSPACE_URL_FRAGMENT_CHAT = "chat";
-const OLLAMA_BASE_URL = "http://localhost:11434";
-const OLLAMA_TAGS_URL = `${OLLAMA_BASE_URL}/api/tags`;
+const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+const OLLAMA_BASE_URL_CANDIDATES = Array.from(new Set([
+  OLLAMA_BASE_URL,
+  "http://localhost:11434"
+]));
+const OLLAMA_TAGS_PATH = "/api/tags";
+const OLLAMA_TAGS_URL = `${OLLAMA_BASE_URL}${OLLAMA_TAGS_PATH}`;
 const DEFAULT_LOCAL_CHAT_MODEL = "qwen3:8b";
 const DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4-mini";
 const APP_CACHE_STORAGE_KEYS = [
@@ -336,29 +341,61 @@ function normalizeOllamaTagModel(model) {
   return String(model.name || model.model || model.id || "").trim();
 }
 
-async function fetchInstalledOllamaModels(timeoutMs = 2500) {
+function createTimeoutSignal(timeoutMs = 0) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = Number(timeoutMs);
+  const timeoutId = timeout > 0
+    ? setTimeout(() => controller.abort(), timeout)
+    : null;
+  return {
+    signal: controller.signal,
+    clear: () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+}
+
+async function fetchInstalledOllamaModelsFromBase(baseUrl, timeoutMs = 2500) {
+  const timeout = createTimeoutSignal(timeoutMs);
   try {
-    const response = await fetch(OLLAMA_TAGS_URL, { method: "GET", signal: controller.signal });
+    const response = await fetch(`${baseUrl}${OLLAMA_TAGS_PATH}`, { method: "GET", signal: timeout.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json().catch(() => ({}));
-    return Array.isArray(data.models)
+    const models = Array.isArray(data.models)
       ? data.models.map(normalizeOllamaTagModel).filter(Boolean)
       : [];
+    return { baseUrl, models };
   } finally {
-    clearTimeout(timeoutId);
+    timeout.clear();
   }
+}
+
+async function fetchInstalledOllamaModelState(timeoutMs = 2500) {
+  let lastError = null;
+  for (const baseUrl of OLLAMA_BASE_URL_CANDIDATES) {
+    try {
+      return await fetchInstalledOllamaModelsFromBase(baseUrl, timeoutMs);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Ollama is not reachable.");
+}
+
+async function fetchInstalledOllamaModels(timeoutMs = 2500) {
+  const state = await fetchInstalledOllamaModelState(timeoutMs);
+  return state.models;
 }
 
 async function getQuickModelState() {
   const state = getQuickModelStateBase();
   try {
-    const installedOllamaModels = await fetchInstalledOllamaModels();
+    const ollamaState = await fetchInstalledOllamaModelState();
     return {
       ...state,
       ollamaReachable: true,
-      installedOllamaModels
+      ollamaBaseUrl: ollamaState.baseUrl,
+      installedOllamaModels: ollamaState.models
     };
   } catch {
     return {
@@ -371,10 +408,64 @@ async function getQuickModelState() {
 
 async function isOllamaHttpReachable() {
   try {
-    await fetchInstalledOllamaModels(1200);
+    await fetchInstalledOllamaModelState(1200);
     return true;
   } catch {
     return false;
+  }
+}
+
+function isOllamaProcessRunning() {
+  try {
+    if (process.platform === "win32") {
+      const probe = spawnSync("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-Process | Where-Object { $_.ProcessName -like 'ollama*' -or $_.Path -like '*Ollama*' } | Select-Object -First 1 -ExpandProperty Id"
+      ], {
+        encoding: "utf8",
+        timeout: 2500,
+        windowsHide: true
+      });
+      return probe.status === 0 && Boolean(String(probe.stdout || "").trim());
+    }
+
+    const probe = spawnSync("pgrep", ["-f", "ollama"], {
+      encoding: "utf8",
+      timeout: 2500
+    });
+    return probe.status === 0 && Boolean(String(probe.stdout || "").trim());
+  } catch {
+    return false;
+  }
+}
+
+async function getOllamaStatus() {
+  try {
+    const state = await fetchInstalledOllamaModelState(3500);
+    return {
+      ok: true,
+      status: "online",
+      httpReachable: true,
+      processRunning: true,
+      baseUrl: state.baseUrl,
+      installedOllamaModels: state.models,
+      message: `Ollama HTTP is reachable at ${state.baseUrl}.`
+    };
+  } catch (error) {
+    const processRunning = isOllamaProcessRunning();
+    return {
+      ok: false,
+      status: processRunning ? "process-running" : "offline",
+      httpReachable: false,
+      processRunning,
+      baseUrl: "",
+      installedOllamaModels: [],
+      message: processRunning
+        ? "Ollama is running, but the HTTP API is not reachable at 127.0.0.1:11434 or localhost:11434."
+        : (error?.message || "Ollama is not reachable.")
+    };
   }
 }
 
@@ -401,8 +492,14 @@ function findOllamaExecutable() {
 }
 
 async function startOllamaHttpService() {
-  if (await isOllamaHttpReachable()) {
-    return { ok: true, status: "running", message: "Ollama is already running." };
+  const currentStatus = await getOllamaStatus();
+  if (currentStatus.httpReachable) {
+    return {
+      ...currentStatus,
+      ok: true,
+      status: "running",
+      message: "Ollama is already running."
+    };
   }
 
   const executable = findOllamaExecutable();
@@ -430,18 +527,104 @@ async function startOllamaHttpService() {
     };
   }
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 350));
-    if (await isOllamaHttpReachable()) {
-      return { ok: true, status: "started", message: "Ollama HTTP is running." };
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const status = await getOllamaStatus();
+    if (status.httpReachable) {
+      return {
+        ...status,
+        ok: true,
+        status: "started",
+        message: "Ollama HTTP is running."
+      };
     }
   }
 
+  const nextStatus = await getOllamaStatus();
   return {
-    ok: true,
-    status: "starting",
-    message: "Ollama was started. It may need a few more seconds before HTTP responds."
+    ...nextStatus,
+    ok: false,
+    status: nextStatus.processRunning ? "process-running" : "starting",
+    message: nextStatus.processRunning
+      ? "Ollama is running, but its HTTP API is still not reachable. Restart Ollama or run `ollama serve` from a terminal."
+      : "Ollama was started, but HTTP did not respond yet."
   };
+}
+
+function isAllowedOllamaHost(url) {
+  return url.protocol === "http:"
+    && String(url.port || "80") === "11434"
+    && ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
+}
+
+function normalizeOllamaProxyPath(rawUrl) {
+  const raw = String(rawUrl || "").trim();
+  if (!raw) return OLLAMA_TAGS_PATH;
+  if (raw.startsWith("/")) {
+    if (!raw.startsWith("/api/")) throw new Error("Only Ollama /api requests are allowed.");
+    return raw;
+  }
+
+  const parsed = new URL(raw);
+  if (!isAllowedOllamaHost(parsed)) {
+    throw new Error("Only local Ollama requests on port 11434 are allowed.");
+  }
+  const requestPath = `${parsed.pathname || "/"}${parsed.search || ""}`;
+  if (!requestPath.startsWith("/api/")) throw new Error("Only Ollama /api requests are allowed.");
+  return requestPath;
+}
+
+function normalizeOllamaProxyHeaders(headers = {}) {
+  const blocked = new Set(["host", "connection", "content-length", "origin", "referer"]);
+  const normalized = {};
+  for (const [key, value] of Object.entries(headers || {})) {
+    const name = String(key || "").trim();
+    if (!name || blocked.has(name.toLowerCase())) continue;
+    normalized[name] = String(value ?? "");
+  }
+  return normalized;
+}
+
+async function proxyOllamaRequest(payload = {}) {
+  const requestPath = normalizeOllamaProxyPath(payload.url || payload.path);
+  const method = String(payload.method || "GET").trim().toUpperCase();
+  const headers = normalizeOllamaProxyHeaders(payload.headers);
+  const bodyText = payload.bodyText === undefined || payload.bodyText === null
+    ? undefined
+    : String(payload.bodyText);
+  const timeoutMs = Math.max(0, Math.min(Number(payload.timeoutMs) || 0, 30 * 60 * 1000));
+  let lastError = null;
+
+  for (const baseUrl of OLLAMA_BASE_URL_CANDIDATES) {
+    const timeout = createTimeoutSignal(timeoutMs);
+    try {
+      const response = await fetch(`${baseUrl}${requestPath}`, {
+        method,
+        headers,
+        body: method === "GET" || method === "HEAD" ? undefined : bodyText,
+        signal: timeout.signal
+      });
+      const bodyBuffer = Buffer.from(await response.arrayBuffer());
+      const responseHeaders = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
+      });
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+        bodyBase64: bodyBuffer.toString("base64"),
+        baseUrl
+      };
+    } catch (error) {
+      lastError = error;
+    } finally {
+      timeout.clear();
+    }
+  }
+
+  throw new Error(lastError?.message || "Could not reach local Ollama HTTP.");
 }
 
 function getDesktopInfo() {
@@ -1463,6 +1646,8 @@ function registerIpc() {
   });
   ipcMain.handle("fauna:save-generated-media", (_event, payload) => saveGeneratedMedia(payload));
   ipcMain.handle("fauna:desktop-info", () => getDesktopInfo());
+  ipcMain.handle("fauna:ollama-status", () => getOllamaStatus());
+  ipcMain.handle("fauna:ollama-fetch", (_event, payload) => proxyOllamaRequest(payload));
   ipcMain.handle("fauna:start-ollama", () => startOllamaHttpService());
   ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
   ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));

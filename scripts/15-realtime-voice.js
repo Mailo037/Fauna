@@ -87,6 +87,11 @@ function setVoiceActivityLevel(level = 0, { detected = false } = {}) {
     composerPanel?.classList.toggle("picking-up-sound", detected || normalized > 0.28);
 }
 
+function setVoiceStartPending(pending) {
+    isVoiceStartPending = Boolean(pending);
+    updateVoiceButtonAvailability();
+}
+
 function setVoiceListeningText(text) {
     if (voiceAgentStatus) voiceAgentStatus.textContent = text;
     if (voiceListeningLabel) voiceListeningLabel.textContent = text;
@@ -469,6 +474,7 @@ function handleOpenAiRealtimeServerEvent(event) {
     }
 
     if (event.type === "input_audio_buffer.speech_started") {
+        markOpenAiRealtimeAudioInput();
         clearOpenAiRealtimeUserDraft();
         clearOpenAiRealtimeAssistantDraft({ clearCurrent: true });
         openAiRealtimePendingUserTurn = true;
@@ -510,6 +516,9 @@ function handleOpenAiRealtimeServerEvent(event) {
     if (event.type === "response.done") {
         const finalText = extractOpenAiRealtimeResponseText(event.response) || openAiRealtimeAssistantText;
         finalizeOpenAiRealtimeAssistantMessage(finalText);
+        openAiRealtimePendingUserTurn = false;
+        openAiRealtimeVoiceOutputStarted = false;
+        markOpenAiRealtimeAudioInput();
         setVoiceSessionStatus("Listening", 0.18);
         void playVoiceSessionCue("ready", { dedupeMs: 900 });
         return;
@@ -672,6 +681,7 @@ function markOpenAiRealtimeVoiceConnected() {
 }
 
 function cleanupOpenAiRealtimeSession() {
+    stopOpenAiRealtimeIdleMonitor();
     openAiRealtimeDataChannel?.close?.();
     openAiRealtimeDataChannel = null;
     openAiRealtimePeerConnection?.getSenders?.().forEach(sender => {
@@ -780,6 +790,8 @@ async function startOpenAiRealtimeVoiceSession() {
             voiceMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         }
         refreshVoiceMicChoices();
+        setupVoiceAnalyserForStream(voiceMediaStream);
+        startOpenAiRealtimeIdleMonitor();
         applyVoiceMicMuteState();
         voiceMediaStream.getAudioTracks().forEach(track => pc.addTrack(track, voiceMediaStream));
 
@@ -915,7 +927,14 @@ function updateVoiceButtonAvailability() {
         canUse = Boolean(getBrowserSpeechRecognitionConstructor());
     }
 
+    if (isVoiceStartPending) {
+        canUse = false;
+        tooltip = "Starting voice chat...";
+        label = "Starting voice chat";
+    }
+
     voiceButton.disabled = !canUse;
+    voiceButton.setAttribute("aria-busy", isVoiceStartPending ? "true" : "false");
     if (canUse) {
         voiceButton.dataset.tooltip = tooltip;
         voiceButton.setAttribute("aria-label", label);
@@ -953,6 +972,79 @@ function getAudioRms(analyser) {
     }
 
     return Math.sqrt(sumSquares / samples.length);
+}
+
+function markOpenAiRealtimeAudioInput(now = performance.now()) {
+    openAiRealtimeLastAudioAt = now;
+}
+
+function setupVoiceAnalyserForStream(stream) {
+    if (!stream || voiceAnalyser) return;
+    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextConstructor) return;
+
+    try {
+        voiceAudioContext = new AudioContextConstructor();
+        if (voiceAudioContext.state === "suspended") {
+            voiceAudioContext.resume().catch(() => {});
+        }
+        const source = voiceAudioContext.createMediaStreamSource(stream);
+        voiceAnalyser = voiceAudioContext.createAnalyser();
+        voiceAnalyser.fftSize = 2048;
+        source.connect(voiceAnalyser);
+    } catch (err) {
+        voiceAnalyser = null;
+        console.warn("Could not monitor voice input level:", err);
+    }
+}
+
+function stopOpenAiRealtimeIdleMonitor() {
+    if (openAiRealtimeIdleMonitorTimer) {
+        window.clearTimeout(openAiRealtimeIdleMonitorTimer);
+        openAiRealtimeIdleMonitorTimer = null;
+    }
+    openAiRealtimeLastAudioAt = 0;
+}
+
+function startOpenAiRealtimeIdleMonitor() {
+    stopOpenAiRealtimeIdleMonitor();
+    if (!voiceAnalyser) return;
+    markOpenAiRealtimeAudioInput();
+
+    const monitor = () => {
+        if (!isOpenAiVoiceSessionActive || !voiceAnalyser) {
+            stopOpenAiRealtimeIdleMonitor();
+            return;
+        }
+
+        const now = performance.now();
+        const rms = getAudioRms(voiceAnalyser);
+        const heardInput = rms >= OPENAI_VOICE_SILENCE_THRESHOLD;
+        const visualLevel = Math.min(1, rms / (OPENAI_VOICE_SILENCE_THRESHOLD * 3.2));
+        if (heardInput) {
+            markOpenAiRealtimeAudioInput(now);
+            setVoiceActivityLevel(Math.max(0.18, visualLevel), { detected: true });
+        }
+
+        const waitingForConnection = !openAiRealtimeSessionConnected && openAiRealtimeDataChannel?.readyState !== "open";
+        const voiceIsBusy = waitingForConnection
+            || openAiRealtimePendingUserTurn
+            || openAiRealtimeVoiceOutputStarted
+            || isGenerating
+            || isSpeechPlaybackActive
+            || Boolean(activeSpeechAudio);
+        if (voiceIsBusy || isVoiceMicMuted) {
+            markOpenAiRealtimeAudioInput(now);
+        } else if (now - openAiRealtimeLastAudioAt >= OPENAI_VOICE_IDLE_TIMEOUT_MS) {
+            stopOpenAiVoiceSession({ silent: true });
+            showToast("Voice chat ended after 5 seconds without audio input.", "info");
+            return;
+        }
+
+        openAiRealtimeIdleMonitorTimer = window.setTimeout(monitor, OPENAI_VOICE_MONITOR_INTERVAL_MS);
+    };
+
+    openAiRealtimeIdleMonitorTimer = window.setTimeout(monitor, OPENAI_VOICE_MONITOR_INTERVAL_MS);
 }
 
 function startOpenAiVoiceMonitor() {
@@ -1159,6 +1251,7 @@ async function startOpenAiVoiceRecording({ rearm = false } = {}) {
 
 function cleanupVoiceMediaStream() {
     stopOpenAiVoiceMonitor();
+    stopOpenAiRealtimeIdleMonitor();
     voiceMediaStream?.getTracks?.().forEach(track => track.stop());
     voiceMediaStream = null;
     voiceAnalyser = null;

@@ -490,10 +490,12 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
             ? createAssistantStreamRenderer(progressTarget, signal, { sessionId: requestSessionId })
             : null;
         let data;
+        const providerStreamOptions = {
+            ...streamOptions,
+            ...(streamRenderer ? { onTextDelta: delta => streamRenderer.append(delta) } : {})
+        };
         try {
-            data = await sendProviderChat(workingMessages, requestOptions, preferredModel, signal, streamRenderer
-                ? { onTextDelta: delta => streamRenderer.append(delta) }
-                : {});
+            data = await sendProviderChat(workingMessages, requestOptions, preferredModel, signal, providerStreamOptions);
         } catch (err) {
             streamRenderer?.cancel();
             throw err;
@@ -1504,26 +1506,26 @@ function updateSendButtonState() {
     if (!sendButton) return;
 
     const archived = typeof isActiveChatArchived === "function" && isActiveChatArchived();
-    const isLoadingConnection = isGenerating && !hasGenerationConnectionBeenMade;
+    const isLoadingConnection = (isGenerating || isPromptSubmissionPending) && !hasGenerationConnectionBeenMade;
     const idleState = sendButton.querySelector("[data-send-state='idle']");
     const loadingState = sendButton.querySelector("[data-send-state='loading']");
     const label = archived ? "Archived chats are read-only" : isLoadingConnection ? "Working on message" : "Send message";
 
     sendButton.hidden = isGenerating && hasGenerationConnectionBeenMade;
-    sendButton.disabled = isGenerating || archived;
-    sendButton.setAttribute("aria-busy", isGenerating ? "true" : "false");
+    sendButton.disabled = isGenerating || isPromptSubmissionPending || archived;
+    sendButton.setAttribute("aria-busy", (isGenerating || isPromptSubmissionPending) ? "true" : "false");
     sendButton.setAttribute("aria-label", label);
     sendButton.dataset.tooltip = label;
 
     if (idleState) {
-        idleState.hidden = isGenerating;
+        idleState.hidden = isGenerating || isPromptSubmissionPending;
     }
     if (loadingState) {
         loadingState.hidden = !isLoadingConnection;
     }
 
     if (input) {
-        input.disabled = isGenerating || archived;
+        input.disabled = isGenerating || isPromptSubmissionPending || archived;
         input.placeholder = archived ? "Archived chat is read-only" : "Message Fauna";
     }
 }
@@ -1695,7 +1697,7 @@ function updateSlashCommandSelection() {
 function getSlashCommandUnavailableReason(command) {
     if (!command) return "";
     if (command.name === "screenshot" && !canUseComposerImageAttachments()) {
-        return `${getActiveComposerModelLabel()} does not support image attachments. Choose a vision-capable chat model first.`;
+        return `${getActiveComposerModelLabel()} does not support image attachments. Choose a Vision task model first.`;
     }
     return "";
 }

@@ -1013,7 +1013,10 @@ async function regenerateAssistantFromAction(control) {
             regenerationModel,
             generationSignal,
             context.bubble,
-            { enabled: true }
+            {
+                enabled: true,
+                preserveActiveModel: shouldPreserveActiveLocalModelForRoute(regenerationModel)
+            }
         );
         const tokenUsage = getProviderTokenUsage(data);
         const assistantMessage = getAssistantMessageForConversation(data, regenerationModel);

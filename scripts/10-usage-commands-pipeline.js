@@ -910,9 +910,89 @@ async function getRecentGeneratedImageReferenceFiles(text, files = []) {
     }
 }
 
-async function processWorkspaceEntry(options = {}) {
-    if (isGenerating) return;
+function extractOllamaTaskMessageText(data = {}) {
+    return String(data?.message?.content || data?.response || "").trim();
+}
 
+function buildLocalVisionTaskPrompt(userPrompt = "", imageFiles = []) {
+    const names = imageFiles.map(file => file.name || "image").join(", ");
+    return [
+        "Analyze the attached image or images for another assistant.",
+        "Return concise, factual visual context that can answer the user's request.",
+        "Mention visible text, objects, layout, UI state, colors, and anything likely relevant.",
+        "Do not invent details that are not visible.",
+        names ? `Image files: ${names}` : "",
+        userPrompt ? `User request: ${userPrompt}` : "User request: describe the image."
+    ].filter(Boolean).join("\n");
+}
+
+async function analyzeImagesWithLocalTaskModel(userPrompt, imageFiles, signal, progressTarget = null) {
+    const images = getImageFiles(imageFiles).slice(0, 4);
+    if (images.length === 0) return "";
+    const model = getLocalTaskModel("vision");
+    const activityItem = {
+        kind: "image",
+        label: "Vision task model",
+        tool: "vision_analysis",
+        detail: model,
+        input: images.map(file => file.name || "image").join(", "),
+        meta: `Using ${model}`
+    };
+    if (progressTarget) {
+        renderToolActivity(progressTarget, {
+            title: "Analyzing image context...",
+            items: [activityItem]
+        });
+    }
+
+    try {
+        const base64Images = [];
+        for (const file of images) {
+            throwIfAborted(signal);
+            base64Images.push(await fileToBase64(file));
+        }
+        const data = await sendOllamaTaskChat([
+            {
+                role: "user",
+                content: buildLocalVisionTaskPrompt(userPrompt, images),
+                images: base64Images
+            }
+        ], model, { temperature: 0.15 }, signal);
+        const analysis = extractOllamaTaskMessageText(data);
+        if (!analysis) throw new Error(`${model} did not return image analysis.`);
+        activityItem.meta = "Done";
+        activityItem.detail = `${model} analyzed ${images.length} ${images.length === 1 ? "image" : "images"}`;
+        if (progressTarget) {
+            renderToolActivity(progressTarget, {
+                title: "Analyzing image context...",
+                items: [activityItem]
+            });
+        }
+        return [
+            `--- Image Analysis Context (${model}) ---`,
+            `Files: ${images.map(file => file.name || "image").join(", ")}`,
+            analysis,
+            "--- End Image Analysis Context ---"
+        ].join("\n");
+    } catch (err) {
+        activityItem.meta = "Failed";
+        activityItem.error = err.message;
+        if (progressTarget) {
+            renderToolActivity(progressTarget, {
+                title: "Analyzing image context...",
+                items: [activityItem]
+            });
+        }
+        throw err;
+    }
+}
+
+async function processWorkspaceEntry(options = {}) {
+    if (isGenerating || isPromptSubmissionPending) return;
+    isPromptSubmissionPending = true;
+    updateSendButtonState();
+
+    try {
     const skipWorkspaceContext = options?.skipWorkspaceContext === true;
     const hasRetryPayload = typeof options?.textValue === "string" || Array.isArray(options?.files);
     const textValue = (hasRetryPayload ? options.textValue || "" : input.value).trim();
@@ -956,6 +1036,8 @@ async function processWorkspaceEntry(options = {}) {
     shouldSpeakNextReply = false;
 
     setGeneratingBusy(true, { sessionId: generationSessionId, controller: generationController });
+    isPromptSubmissionPending = false;
+    updateSendButtonState();
     if (isOpenAiProvider() && isOpenAiVoiceSessionActive && speakThisReply) {
         setVoiceSessionStatus("Thinking", 0.34);
     }
@@ -980,7 +1062,13 @@ async function processWorkspaceEntry(options = {}) {
             scheduleComposerSafeAreaUpdate();
         }
 
-        const routedModel = chooseModelForRequest(textValue, currentFiles, imagePrompt, videoPrompt);
+        const useLocalVisionTask = shouldUseLocalVisionTaskForFiles(currentFiles);
+        const filesForModelRouting = useLocalVisionTask
+            ? currentFiles.filter(file => !file.type?.startsWith("image/"))
+            : currentFiles;
+        const routedModel = chooseModelForRequest(textValue, filesForModelRouting, imagePrompt, videoPrompt, {
+            imageTaskHandled: useLocalVisionTask
+        });
         if (isOpenAiProvider()) {
             updateModelSwitcherForProvider();
         }
@@ -1046,8 +1134,34 @@ async function processWorkspaceEntry(options = {}) {
         let webSources = [];
         const openAiUploadItems = [];
 
+        if (useLocalVisionTask) {
+            try {
+                const imageContext = await analyzeImagesWithLocalTaskModel(textValue, currentFiles, generationSignal, aiBubble);
+                if (imageContext) {
+                    messageContent += `\n\n${imageContext}`;
+                }
+            } catch (err) {
+                renderErrorCard(aiBubble, err, {
+                    title: err.name === "AbortError" ? "Image analysis stopped" : "Image analysis failed",
+                    message: err.name === "AbortError"
+                        ? "Your prompt is safe to edit and run again."
+                        : `Fauna could not analyze the image with ${getLocalTaskModel("vision")}. Make sure that model is installed or choose another Vision task model in Settings.`,
+                    retryLabel: "Retry generation",
+                    onRetry: () => processWorkspaceEntry({
+                        textValue,
+                        files: currentFiles,
+                        skipWorkspaceContext,
+                        skipUserBubble: true,
+                        targetBubble: aiBubble
+                    })
+                });
+                return;
+            }
+        }
+
         for (const file of currentFiles) {
             if (file.type.startsWith("image/")) {
+                if (useLocalVisionTask) continue;
                 try {
                     if (isOpenAiProvider()) {
                         const uploadItem = {
@@ -1255,7 +1369,10 @@ async function processWorkspaceEntry(options = {}) {
                 routedModel,
                 generationSignal,
                 aiBubble,
-                { enabled: true }
+                {
+                    enabled: true,
+                    preserveActiveModel: shouldPreserveActiveLocalModelForRoute(routedModel)
+                }
             );
             const tokenUsage = getProviderTokenUsage(data);
             const assistantMessage = getAssistantMessageForConversation(data, routedModel);
@@ -1300,6 +1417,10 @@ async function processWorkspaceEntry(options = {}) {
         if (isChatSessionVisible(generationSessionId) && isOpenAiProvider() && isOpenAiVoiceSessionActive) {
             scheduleOpenAiVoiceRearm();
         }
+    }
+    } finally {
+        isPromptSubmissionPending = false;
+        updateSendButtonState();
     }
 }
 

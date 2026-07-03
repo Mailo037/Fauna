@@ -540,6 +540,9 @@ function setSettingsPane(paneName = "general") {
     if (normalized === "notifications") {
         renderNotificationSettings();
     }
+    if (normalized === "task-models") {
+        refreshLocalTaskModelsPane();
+    }
     scheduleAnimatedSegmentIndicators();
 }
 
@@ -1321,9 +1324,12 @@ function createShortcutPreview(shortcut) {
 function renderKeyboardShortcutSettings() {
     if (!keyboardShortcutList) return;
     const shortcuts = getEffectiveKeyboardShortcuts();
+    const overrides = readKeyboardShortcutOverrides();
     keyboardShortcutList.replaceChildren(...KEYBOARD_SHORTCUT_ACTIONS.map(action => {
+        const hasCustomShortcut = Object.prototype.hasOwnProperty.call(overrides, action.id);
         const row = document.createElement("div");
         row.className = "shortcut-settings-row";
+        row.classList.toggle("shortcut-settings-row-custom", hasCustomShortcut);
 
         const info = document.createElement("div");
         info.className = "shortcut-settings-info";
@@ -1346,10 +1352,14 @@ function renderKeyboardShortcutSettings() {
         changeBtn.addEventListener("click", () => openShortcutRecorder(action.id, changeBtn));
 
         const resetBtn = document.createElement("button");
-        resetBtn.className = "provider-btn provider-btn-ghost shortcut-reset-row-btn";
+        resetBtn.className = `provider-btn ${hasCustomShortcut ? "provider-btn-secondary" : "provider-btn-ghost"} shortcut-reset-row-btn`;
         resetBtn.type = "button";
         resetBtn.textContent = "Reset";
+        resetBtn.disabled = !hasCustomShortcut;
+        resetBtn.setAttribute("aria-disabled", String(!hasCustomShortcut));
+        resetBtn.dataset.tooltip = hasCustomShortcut ? "Reset to default" : "Already using default";
         resetBtn.addEventListener("click", () => {
+            if (!hasCustomShortcut) return;
             resetKeyboardShortcut(action.id);
             showToast(`${action.title} reset to default.`, "info");
         });
@@ -2651,7 +2661,9 @@ renderVoiceQuickChoices();
 renderVoiceQuickSettings();
 renderOpenAiModelSelects();
 renderLocalVoiceModelSelects();
+renderLocalTaskModelSelects();
 updateLocalVoiceSettingsUi();
+updateLocalTaskModelSelects();
 
 document.getElementById("voiceShowMoreBtn")?.addEventListener("click", () => {
     document.getElementById("voiceChoiceWrap")?.classList.add("expanded");
@@ -2692,9 +2704,10 @@ function renderLocalModelChoices() {
 }
 
 async function pullOllamaModel(modelId) {
-    const res = await fetch(OLLAMA_PULL_URL, {
+    const res = await ollamaFetch(OLLAMA_PULL_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        desktopTimeoutMs: 30 * 60 * 1000,
         body: JSON.stringify({ name: modelId, stream: false })
     });
     const data = await res.json().catch(() => ({}));
@@ -2806,7 +2819,7 @@ async function installMissingOllamaModels() {
             if (!isOllamaReachable) return;
         }
 
-        const missing = REQUIRED_OLLAMA_MODELS.filter(model => !isOllamaModelInstalled(model));
+        const missing = getRequiredOllamaModels().filter(model => !isOllamaModelInstalled(model));
         if (missing.length === 0) {
             setLocalModelsStatus("Ready", "configured");
             showToast("All required Ollama models are installed.", "success");
@@ -2955,6 +2968,8 @@ localModelsRefreshBtn?.addEventListener("click", async () => {
     showToast("Refreshing local Ollama models...", "info");
     await checkOllamaStatus();
 });
+
+localTaskModelsResetBtn?.addEventListener("click", resetLocalTaskModels);
 
 localModelsStartBtn?.addEventListener("click", () => {
     void startOllamaHttpService();

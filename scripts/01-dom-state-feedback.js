@@ -145,6 +145,18 @@ const localModelsStatus = document.getElementById("localModelsStatus");
 const localModelsRefreshBtn = document.getElementById("localModelsRefreshBtn");
 const localModelsStartBtn = document.getElementById("localModelsStartBtn");
 const localModelsInstallBtn = document.getElementById("localModelsInstallBtn");
+const localTaskModelsStatus = document.getElementById("localTaskModelsStatus");
+const localTaskModelsResetBtn = document.getElementById("localTaskModelsResetBtn");
+const localTaskReasoningModelInput = document.getElementById("localTaskReasoningModelInput");
+const localTaskVisionModelInput = document.getElementById("localTaskVisionModelInput");
+const localTaskCodeModelInput = document.getElementById("localTaskCodeModelInput");
+const localTaskImageModelInput = document.getElementById("localTaskImageModelInput");
+const localTaskVideoModelInput = document.getElementById("localTaskVideoModelInput");
+const localTaskReasoningModelSelectHost = document.getElementById("localTaskReasoningModelSelectHost");
+const localTaskVisionModelSelectHost = document.getElementById("localTaskVisionModelSelectHost");
+const localTaskCodeModelSelectHost = document.getElementById("localTaskCodeModelSelectHost");
+const localTaskImageModelSelectHost = document.getElementById("localTaskImageModelSelectHost");
+const localTaskVideoModelSelectHost = document.getElementById("localTaskVideoModelSelectHost");
 const workspaceBridgeEndpointInput = document.getElementById("workspaceBridgeEndpointInput");
 const workspaceBridgeTokenInput = document.getElementById("workspaceBridgeTokenInput");
 const workspaceBridgeStatus = document.getElementById("workspaceBridgeStatus");
@@ -319,8 +331,8 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.1";
-const FAUNA_APP_BUILD_ID = "20260703-release-0.1.1";
+const FAUNA_APP_VERSION = "0.1.3";
+const FAUNA_APP_BUILD_ID = "20260703-task-model-routing";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/desktop/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
@@ -365,6 +377,11 @@ const OLLAMA_TOP_K_STORAGE_KEY = "faunaOllamaTopK";
 const OPENAI_VERBOSITY_STORAGE_KEY = "faunaOpenAiVerbosity";
 const AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY = "faunaAgentMaxStepsAtATime";
 const AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY = "faunaAgentMaxStepsPerRun";
+const LOCAL_TASK_REASONING_MODEL_STORAGE_KEY = "faunaLocalTaskReasoningModel";
+const LOCAL_TASK_VISION_MODEL_STORAGE_KEY = "faunaLocalTaskVisionModel";
+const LOCAL_TASK_CODE_MODEL_STORAGE_KEY = "faunaLocalTaskCodeModel";
+const LOCAL_TASK_IMAGE_MODEL_STORAGE_KEY = "faunaLocalTaskImageModel";
+const LOCAL_TASK_VIDEO_MODEL_STORAGE_KEY = "faunaLocalTaskVideoModel";
 const COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY = "faunaCompletionNotificationsEnabled";
 const COMPLETION_SOUND_ENABLED_STORAGE_KEY = "faunaCompletionSoundEnabled";
 const COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY = "faunaCompletionOnlyUnfocused";
@@ -406,6 +423,79 @@ function getFaunaDesktopApi() {
 
 function isFaunaDesktopApp() {
     return Boolean(getFaunaDesktopApi());
+}
+
+function normalizeHeadersForDesktopOllama(headers = {}) {
+    if (headers instanceof Headers) {
+        const normalized = {};
+        headers.forEach((value, key) => {
+            normalized[key] = value;
+        });
+        return normalized;
+    }
+    if (Array.isArray(headers)) {
+        return Object.fromEntries(headers.map(([key, value]) => [String(key), String(value)]));
+    }
+    return Object.fromEntries(
+        Object.entries(headers || {})
+            .filter(([key, value]) => key && value !== undefined && value !== null)
+            .map(([key, value]) => [key, String(value)])
+    );
+}
+
+function decodeDesktopOllamaBody(bodyBase64 = "") {
+    const binary = window.atob(String(bodyBase64 || ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+}
+
+async function desktopOllamaFetch(url, options = {}) {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.ollamaFetch) {
+        throw new Error("Desktop Ollama bridge is unavailable.");
+    }
+    if (options.signal?.aborted) {
+        throw new DOMException("Ollama request cancelled", "AbortError");
+    }
+
+    const result = await desktopApi.ollamaFetch({
+        url,
+        method: options.method || "GET",
+        headers: normalizeHeadersForDesktopOllama(options.headers),
+        bodyText: options.body === undefined || options.body === null ? "" : String(options.body),
+        timeoutMs: options.desktopTimeoutMs || 0
+    });
+
+    if (options.signal?.aborted) {
+        throw new DOMException("Ollama request cancelled", "AbortError");
+    }
+
+    return new Response(decodeDesktopOllamaBody(result?.bodyBase64), {
+        status: Math.max(200, Math.min(599, Number(result?.status) || 502)),
+        statusText: result?.statusText || "",
+        headers: result?.headers || {}
+    });
+}
+
+async function ollamaFetch(url, options = {}) {
+    try {
+        return await fetch(url, options);
+    } catch (err) {
+        if (err?.name === "AbortError") throw err;
+        if (!getFaunaDesktopApi()?.ollamaFetch) throw err;
+        return desktopOllamaFetch(url, options);
+    }
+}
+
+async function getDesktopOllamaStatus() {
+    try {
+        return await getFaunaDesktopApi()?.getOllamaStatus?.();
+    } catch {
+        return null;
+    }
 }
 
 function compareSemanticVersions(a, b) {
@@ -754,7 +844,7 @@ let activeTypewriterDurationSeconds = normalizeTypewriterDurationSeconds(
 const OPENAI_VOICE_SILENCE_THRESHOLD = 0.018;
 const OPENAI_VOICE_SILENCE_HOLD_MS = 950;
 const OPENAI_VOICE_MIN_RECORDING_MS = 650;
-const OPENAI_VOICE_IDLE_TIMEOUT_MS = 10000;
+const OPENAI_VOICE_IDLE_TIMEOUT_MS = 5000;
 const OPENAI_VOICE_MAX_RECORDING_MS = 45000;
 const OPENAI_VOICE_MONITOR_INTERVAL_MS = 70;
 const OPENAI_VOICE_RELISTEN_DELAY_MS = 450;
@@ -831,6 +921,7 @@ let composerTokenCountTimer = null;
 let composerTokenCountRequestId = 0;
 let activeUsageView = "daily";
 let isGenerating = false;
+let isPromptSubmissionPending = false;
 let hasGenerationConnectionBeenMade = false;
 let shouldSpeakNextReply = false;
 let isVoiceInputUpdate = false;
@@ -860,6 +951,9 @@ let openAiRealtimePendingUserTurn = false;
 let openAiRealtimeSessionConnected = false;
 let openAiRealtimeVoiceOutputStarted = false;
 let openAiRealtimeVoiceRestartPromise = null;
+let isVoiceStartPending = false;
+let openAiRealtimeIdleMonitorTimer = null;
+let openAiRealtimeLastAudioAt = 0;
 let voiceMediaRecorder = null;
 let voiceMediaStream = null;
 let voiceRecordingChunks = [];
@@ -901,6 +995,11 @@ let openAiTranscriptionModelSelect = null;
 let openAiRealtimeModelSelect = null;
 let localVoiceTranscriptionSelect = null;
 let localVoiceReplyModelSelect = null;
+let localTaskReasoningModelSelect = null;
+let localTaskVisionModelSelect = null;
+let localTaskCodeModelSelect = null;
+let localTaskImageModelSelect = null;
+let localTaskVideoModelSelect = null;
 let activeWorkspaceView = WORKSPACE_VIEW_PLAYGROUND;
 let activeLibraryFilter = LIBRARY_FILTER_ALL;
 let activeLibraryLayout = safeLocalStorageGet(LIBRARY_LAYOUT_STORAGE_KEY) === LIBRARY_LAYOUT_LIST
@@ -1617,7 +1716,10 @@ async function retryAssistantGenerationFromBubble(target, {
             model,
             generationSignal,
             target,
-            { enabled: true }
+            {
+                enabled: true,
+                preserveActiveModel: shouldPreserveActiveLocalModelForRoute(model)
+            }
         );
         const tokenUsage = getProviderTokenUsage(data);
         const assistantMessage = getAssistantMessageForConversation(data, model);

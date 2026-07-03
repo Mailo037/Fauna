@@ -36,7 +36,12 @@ function closeOpenAiModelSelects(except = null) {
         openAiTranscriptionModelSelect,
         openAiRealtimeModelSelect,
         localVoiceTranscriptionSelect,
-        localVoiceReplyModelSelect
+        localVoiceReplyModelSelect,
+        localTaskReasoningModelSelect,
+        localTaskVisionModelSelect,
+        localTaskCodeModelSelect,
+        localTaskImageModelSelect,
+        localTaskVideoModelSelect
     ].forEach(select => {
         if (select && select !== except) select.close();
     });
@@ -288,6 +293,72 @@ function renderLocalVoiceModelSelects() {
             updateVoiceQuickUi();
         }
     });
+}
+
+function renderLocalTaskModelSelects() {
+    LOCAL_TASK_MODEL_CONFIGS.forEach(config => {
+        const select = createOpenAiModelSelect({
+            host: config.selectHost(),
+            input: config.input(),
+            options: getLocalTaskModelOptions(config.task),
+            value: getLocalTaskModel(config.task),
+            label: `${config.label} task model`,
+            storageKey: config.storageKey,
+            fallback: config.defaultModel,
+            onChange: model => {
+                safeLocalStorageSet(config.storageKey, model);
+                updateLocalTaskModelSelects();
+            }
+        });
+        config.setSelectRef(select);
+    });
+    updateLocalTaskModelSelects();
+}
+
+function updateLocalTaskModelsStatus() {
+    if (!localTaskModelsStatus) return;
+    const rows = getLocalTaskModelStatusRows();
+    const missing = rows.filter(row => !row.installed);
+    const incompatible = rows.filter(row => !row.supportsTask);
+    if (!isOllamaReachable) {
+        localTaskModelsStatus.textContent = hasCheckedOllamaStatus ? "Ollama offline" : "Checking";
+        localTaskModelsStatus.dataset.state = "missing";
+        return;
+    }
+    if (incompatible.length > 0) {
+        localTaskModelsStatus.textContent = `${incompatible.length} incompatible`;
+        localTaskModelsStatus.dataset.state = "missing";
+        return;
+    }
+    if (missing.length > 0) {
+        localTaskModelsStatus.textContent = `${missing.length} missing`;
+        localTaskModelsStatus.dataset.state = "missing";
+        return;
+    }
+    localTaskModelsStatus.textContent = "Ready";
+    localTaskModelsStatus.dataset.state = "configured";
+}
+
+function updateLocalTaskModelSelects() {
+    LOCAL_TASK_MODEL_CONFIGS.forEach(config => {
+        const model = getLocalTaskModel(config.task);
+        const input = config.input();
+        if (input) input.value = model;
+        config.selectRef()?.setOptions(getLocalTaskModelOptions(config.task), model);
+    });
+    updateLocalTaskModelsStatus();
+    updateLocalInstallButton();
+}
+
+function refreshLocalTaskModelsPane() {
+    updateLocalTaskModelSelects();
+    if (!hasCheckedOllamaStatus && typeof checkOllamaStatus === "function") {
+        if (localTaskModelsStatus) {
+            localTaskModelsStatus.textContent = "Checking";
+            localTaskModelsStatus.dataset.state = "missing";
+        }
+        void checkOllamaStatus();
+    }
 }
 
 function updateLocalVoiceSettingsUi() {

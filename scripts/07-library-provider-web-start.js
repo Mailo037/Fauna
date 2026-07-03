@@ -588,7 +588,7 @@ async function checkOllamaStatus() {
     setServiceStatus("checking", "Checking Ollama");
     setLocalModelsStatus("Checking", "missing");
     try {
-        const res = await fetch(OLLAMA_TAGS_URL, { method: "GET" });
+        const res = await ollamaFetch(OLLAMA_TAGS_URL, { method: "GET", desktopTimeoutMs: 8000 });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json().catch(() => ({}));
         isOllamaReachable = true;
@@ -598,20 +598,28 @@ async function checkOllamaStatus() {
         await refreshOllamaModelCapabilities(installedOllamaModels);
         localModelOptions = getLocalModelSwitcherOptions();
         renderLocalModelChoices();
+        updateLocalTaskModelSelects();
         updateModelSwitcherForProvider();
         const modelCount = installedOllamaModels.length;
-        const missingCount = REQUIRED_OLLAMA_MODELS.filter(model => !isOllamaModelInstalled(model)).length;
+        const missingCount = getRequiredOllamaModels().filter(model => !isOllamaModelInstalled(model)).length;
         setServiceStatus("online", `Ollama connected · ${modelCount} models`);
         setLocalModelsStatus(missingCount > 0 ? `${missingCount} missing` : "Ready", missingCount > 0 ? "missing" : "configured");
     } catch (err) {
+        const desktopStatus = await getDesktopOllamaStatus();
         isOllamaReachable = false;
         installedOllamaModels = [];
         await refreshOllamaModelCapabilities([]);
         localModelOptions = getLocalModelSwitcherOptions();
         renderLocalModelChoices();
+        updateLocalTaskModelSelects();
         updateModelSwitcherForProvider();
-        setServiceStatus("offline", "Ollama offline");
-        setLocalModelsStatus("Ollama offline", "missing");
+        if (desktopStatus?.processRunning) {
+            setServiceStatus("checking", "Ollama app running");
+            setLocalModelsStatus("HTTP not ready", "missing");
+        } else {
+            setServiceStatus("offline", "Ollama offline");
+            setLocalModelsStatus("Ollama offline", "missing");
+        }
     }
     updateTokenDisplay();
 }
@@ -734,16 +742,25 @@ function setActiveModel(model, option = {}) {
     updateTokenDisplay();
 }
 
-function chooseModelForRequest(text, currentFiles, imagePrompt, videoPrompt = null) {
+function chooseModelForRequest(text, currentFiles, imagePrompt, videoPrompt = null, options = {}) {
     const hasImages = getImageFiles(currentFiles).length > 0;
 
-    if (videoPrompt !== null) return MODEL_ROUTES.videoGeneration;
-    if (imagePrompt !== null) return MODEL_ROUTES.imageGeneration;
-    if (getNaturalImageGenerationPrompt(text, currentFiles) !== null) return MODEL_ROUTES.imageGeneration;
-    if (hasImages) return MODEL_ROUTES.imageAnalysis;
-    if (isCodeRequest(text, currentFiles)) return MODEL_ROUTES.code;
-    if (isHighThinkingRequest(text)) return MODEL_ROUTES.reasoning;
+    if (videoPrompt !== null) return getLocalTaskModel("videoGeneration");
+    if (imagePrompt !== null) return getLocalTaskModel("imageGeneration");
+    if (getNaturalImageGenerationPrompt(text, currentFiles) !== null) return getLocalTaskModel("imageGeneration");
+    if (hasImages && options.imageTaskHandled !== true && !getOllamaModelCapability(OLLAMA_MODEL).supportsImageInput) {
+        return getLocalTaskModel("vision");
+    }
+    if (hasImages) return OLLAMA_MODEL;
+    if (isCodeRequest(text, currentFiles)) return getLocalTaskModel("code");
+    if (isHighThinkingRequest(text)) return getLocalTaskModel("reasoning");
     return OLLAMA_MODEL;
+}
+
+function shouldPreserveActiveLocalModelForRoute(model) {
+    const routed = normalizeModelId(model);
+    const active = normalizeModelId(OLLAMA_MODEL);
+    return Boolean(routed && active && routed !== active);
 }
 
 async function readTextStreamLines(response, { signal = null, onLine = null } = {}) {
@@ -1008,6 +1025,7 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
     const modelsToTry = Array.from(new Set([preferredModel, FALLBACK_MODEL].filter(Boolean)));
     let lastError = null;
     const shouldStream = typeof streamOptions.onTextDelta === "function";
+    const preserveActiveModel = streamOptions.preserveActiveModel === true;
     const faunaToolContext = options.faunaToolContext || null;
     const ollamaTools = faunaToolContext ? buildOllamaFaunaTools(faunaToolContext) : [];
     const ollamaOptions = { ...options };
@@ -1020,10 +1038,11 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
         let streamedContent = false;
 
         try {
-            const res = await fetch(OLLAMA_URL, {
+            const res = await ollamaFetch(OLLAMA_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 signal,
+                desktopTimeoutMs: 30 * 60 * 1000,
                 body: JSON.stringify({
                     model,
                     messages,
@@ -1052,7 +1071,9 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
                 if (!data?.message?.content && !hasToolCalls) {
                     throw new Error(`${model} returned an empty response`);
                 }
-                setActiveModel(model);
+                if (!preserveActiveModel) {
+                    setActiveModel(model);
+                }
                 return data;
             }
 
@@ -1062,11 +1083,17 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
             if (err.name === "AbortError") throw err;
             if (shouldStream && streamedContent) throw err;
             if (isLikelyOllamaConnectionError(err)) {
+                const desktopStatus = await getDesktopOllamaStatus();
                 hasCheckedOllamaStatus = true;
                 isOllamaReachable = false;
                 installedOllamaModels = [];
-                setServiceStatus("offline", "Ollama offline");
-                setLocalModelsStatus("Ollama offline", "missing");
+                if (desktopStatus?.processRunning) {
+                    setServiceStatus("checking", "Ollama app running");
+                    setLocalModelsStatus("HTTP not ready", "missing");
+                } else {
+                    setServiceStatus("offline", "Ollama offline");
+                    setLocalModelsStatus("Ollama offline", "missing");
+                }
                 updateTokenDisplay();
                 lastError = new Error(getOllamaOfflineErrorMessage());
                 break;
@@ -1076,6 +1103,30 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
     }
 
     throw new Error(`No available model responded. Tried: ${triedModels.join(", ")}${lastError ? `. Last error: ${lastError.message}` : ""}`);
+}
+
+async function sendOllamaTaskChat(messages, preferredModel, options = {}, signal = null) {
+    const model = normalizeModelId(preferredModel) || OLLAMA_MODEL;
+    const res = await ollamaFetch(OLLAMA_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        desktopTimeoutMs: 30 * 60 * 1000,
+        body: JSON.stringify({
+            model,
+            messages,
+            options,
+            stream: false
+        })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+        throw new Error(data.error || `${model} responded with HTTP ${res.status}`);
+    }
+    if (!data?.message?.content) {
+        throw new Error(`${model} returned an empty task response.`);
+    }
+    return data;
 }
 
 function normalizeHeaderMap(headers = {}) {

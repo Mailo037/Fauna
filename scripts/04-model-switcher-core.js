@@ -1,7 +1,7 @@
 // Original script.js lines 3885-5577.
 // ===== MODEL SWITCHER LOGIC =====
-const OLLAMA_URL = "http://localhost:11434/api/chat";
-const OLLAMA_BASE_URL = "http://localhost:11434";
+const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+const OLLAMA_URL = `${OLLAMA_BASE_URL}/api/chat`;
 const OLLAMA_TAGS_URL = `${OLLAMA_BASE_URL}/api/tags`;
 const OLLAMA_SHOW_URL = `${OLLAMA_BASE_URL}/api/show`;
 const OLLAMA_TOKENIZE_URL = `${OLLAMA_BASE_URL}/api/tokenize`;
@@ -368,6 +368,63 @@ const MODEL_ROUTES = {
     code: "qwen3-coder:30b"
 };
 const FALLBACK_MODEL = MODEL_ROUTES.reasoning;
+const LOCAL_TASK_MODEL_CONFIGS = [
+    {
+        task: "reasoning",
+        label: "Reasoning",
+        defaultModel: MODEL_ROUTES.reasoning,
+        storageKey: LOCAL_TASK_REASONING_MODEL_STORAGE_KEY,
+        input: () => localTaskReasoningModelInput,
+        selectHost: () => localTaskReasoningModelSelectHost,
+        selectRef: () => localTaskReasoningModelSelect,
+        setSelectRef: select => { localTaskReasoningModelSelect = select; },
+        filter: capability => capability.supportsThinking === true || capability.supportsToolCalling === true || capability.supportsStreaming !== false
+    },
+    {
+        task: "vision",
+        label: "Vision",
+        defaultModel: MODEL_ROUTES.imageAnalysis,
+        storageKey: LOCAL_TASK_VISION_MODEL_STORAGE_KEY,
+        input: () => localTaskVisionModelInput,
+        selectHost: () => localTaskVisionModelSelectHost,
+        selectRef: () => localTaskVisionModelSelect,
+        setSelectRef: select => { localTaskVisionModelSelect = select; },
+        filter: capability => capability.supportsImageInput === true
+    },
+    {
+        task: "code",
+        label: "Code",
+        defaultModel: MODEL_ROUTES.code,
+        storageKey: LOCAL_TASK_CODE_MODEL_STORAGE_KEY,
+        input: () => localTaskCodeModelInput,
+        selectHost: () => localTaskCodeModelSelectHost,
+        selectRef: () => localTaskCodeModelSelect,
+        setSelectRef: select => { localTaskCodeModelSelect = select; },
+        filter: (_capability, option) => /code|coder|devstral|deepseek-coder|qwen/i.test(`${option.id} ${option.meta || ""}`)
+    },
+    {
+        task: "imageGeneration",
+        label: "Image prompts",
+        defaultModel: MODEL_ROUTES.imageGeneration,
+        storageKey: LOCAL_TASK_IMAGE_MODEL_STORAGE_KEY,
+        input: () => localTaskImageModelInput,
+        selectHost: () => localTaskImageModelSelectHost,
+        selectRef: () => localTaskImageModelSelect,
+        setSelectRef: select => { localTaskImageModelSelect = select; },
+        filter: capability => capability.supportsStreaming !== false
+    },
+    {
+        task: "videoGeneration",
+        label: "Video prompts",
+        defaultModel: MODEL_ROUTES.videoGeneration,
+        storageKey: LOCAL_TASK_VIDEO_MODEL_STORAGE_KEY,
+        input: () => localTaskVideoModelInput,
+        selectHost: () => localTaskVideoModelSelectHost,
+        selectRef: () => localTaskVideoModelSelect,
+        setSelectRef: select => { localTaskVideoModelSelect = select; },
+        filter: capability => capability.supportsStreaming !== false
+    }
+];
 const OLLAMA_SHOW_TIMEOUT_MS = 2500;
 const OLLAMA_CAPABILITY_DETAIL_LIMIT = 80;
 const OLLAMA_TEXT_FILE_INPUT_CAPABILITIES = ["text", "document", "spreadsheet"];
@@ -694,6 +751,13 @@ const OLLAMA_CATALOG_MODEL_OPTIONS = [
     }
 ];
 const REQUIRED_OLLAMA_MODELS = LOCAL_MODEL_OPTIONS.map(model => model.id);
+
+function getRequiredOllamaModels() {
+    return Array.from(new Set([
+        ...REQUIRED_OLLAMA_MODELS,
+        ...LOCAL_TASK_MODEL_CONFIGS.map(config => getLocalTaskModel(config.task))
+    ].map(normalizeModelId).filter(Boolean)));
+}
 let installedOllamaModels = [];
 let localModelOptions = [...LOCAL_MODEL_OPTIONS];
 let ollamaModelCapabilities = new Map();
@@ -807,6 +871,33 @@ function getLocalModelOption(modelId) {
     return localModelOptions.find(option => option.id === modelId)
         || LOCAL_MODEL_OPTIONS.find(option => option.id === modelId)
         || { id: modelId, label: modelId, meta: "Local", provider: AI_PROVIDER_LOCAL };
+}
+
+function getLocalTaskModelConfig(task) {
+    const normalized = task === "imageAnalysis" ? "vision" : String(task || "").trim();
+    return LOCAL_TASK_MODEL_CONFIGS.find(config => config.task === normalized) || LOCAL_TASK_MODEL_CONFIGS[0];
+}
+
+function getLocalTaskModel(task) {
+    const config = getLocalTaskModelConfig(task);
+    const saved = normalizeModelId(safeLocalStorageGet(config.storageKey));
+    return saved || config.defaultModel;
+}
+
+function setLocalTaskModel(task, model) {
+    const config = getLocalTaskModelConfig(task);
+    const normalized = normalizeModelId(model) || config.defaultModel;
+    safeLocalStorageSet(config.storageKey, normalized);
+    config.input()?.setAttribute("value", normalized);
+    if (config.input()) config.input().value = normalized;
+    updateLocalTaskModelSelects();
+    return normalized;
+}
+
+function resetLocalTaskModels() {
+    LOCAL_TASK_MODEL_CONFIGS.forEach(config => safeLocalStorageRemove(config.storageKey));
+    updateLocalTaskModelSelects();
+    showToast("Task models reset.", "success");
 }
 
 function ollamaModelMatches(installedModel, requestedModel) {
@@ -968,11 +1059,12 @@ async function fetchOllamaModelDetails(modelId) {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), OLLAMA_SHOW_TIMEOUT_MS);
     try {
-        const res = await fetch(OLLAMA_SHOW_URL, {
+        const res = await ollamaFetch(OLLAMA_SHOW_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: modelId, verbose: false }),
-            signal: controller.signal
+            signal: controller.signal,
+            desktopTimeoutMs: OLLAMA_SHOW_TIMEOUT_MS + 1000
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json().catch(() => ({}));
@@ -1103,7 +1195,9 @@ function isLikelyOllamaConnectionError(error) {
 }
 
 function canUseComposerImageAttachments() {
-    if (!isOpenAiProvider()) return getOllamaModelCapability().supportsImageInput === true;
+    if (!isOpenAiProvider()) {
+        return getOllamaModelCapability().supportsImageInput === true || localTaskModelSupportsVision();
+    }
     return openAiModelSupportsImages(getOpenAiChatModel());
 }
 
@@ -1135,7 +1229,7 @@ function getUnsupportedAttachmentReason(file) {
     if (file.type?.startsWith("image/")) {
         return canUseComposerImageAttachments()
             ? ""
-            : `${modelLabel} does not support image attachments. Choose a vision-capable chat model first.`;
+            : `${modelLabel} does not support image attachments. Choose a vision task model first.`;
     }
     return canUseComposerFileAttachments()
         ? ""
@@ -1409,6 +1503,61 @@ function getLocalModelSwitcherOptions() {
     return Array.from(known.values());
 }
 
+function getLocalTaskModelOptions(task) {
+    const config = getLocalTaskModelConfig(task);
+    const currentModel = getLocalTaskModel(config.task);
+    const baseOptions = getLocalModelSwitcherOptions();
+    const accepted = baseOptions.filter(option => {
+        const capability = getOllamaModelCapability(option.id);
+        return typeof config.filter === "function" ? config.filter(capability, option) : true;
+    });
+    const options = accepted.length > 0 ? accepted : baseOptions;
+    const withRequiredModels = [...options];
+
+    [currentModel, config.defaultModel].forEach(modelId => {
+        const id = normalizeModelId(modelId);
+        if (!id || withRequiredModels.some(option => ollamaModelMatches(option.id, id))) return;
+        const option = getLocalModelOption(id);
+        const capability = getOllamaModelCapability(id);
+        withRequiredModels.unshift({
+            ...option,
+            id,
+            label: option.label || id,
+            meta: getLocalModelMeta(option, isOllamaModelInstalled(id), capability) || "Saved",
+            provider: AI_PROVIDER_LOCAL
+        });
+    });
+
+    return withRequiredModels;
+}
+
+function localTaskModelSupportsVision() {
+    return getOllamaModelCapability(getLocalTaskModel("vision")).supportsImageInput === true;
+}
+
+function shouldUseLocalVisionTaskForFiles(files = []) {
+    if (isOpenAiProvider()) return false;
+    if (getImageFiles(files).length === 0) return false;
+    if (getOllamaModelCapability(OLLAMA_MODEL).supportsImageInput === true) return false;
+    return localTaskModelSupportsVision();
+}
+
+function getLocalTaskModelStatusRows() {
+    return LOCAL_TASK_MODEL_CONFIGS.map(config => {
+        const model = getLocalTaskModel(config.task);
+        const capability = getOllamaModelCapability(model);
+        const installed = isOllamaModelInstalled(model);
+        const supportsTask = typeof config.filter === "function" ? config.filter(capability, { id: model, meta: "" }) : true;
+        return {
+            task: config.task,
+            label: config.label,
+            model,
+            installed,
+            supportsTask
+        };
+    });
+}
+
 function getOpenAiModelSwitcherOptions() {
     const activeModel = getOpenAiChatModel();
     const options = aiCapabilityRegistry.getChatModelOptions({
@@ -1482,7 +1631,7 @@ function updateLocalInstallButton() {
         localModelsInstallBtn.textContent = "Install Ollama";
         return;
     }
-    const missingCount = REQUIRED_OLLAMA_MODELS.filter(model => !isOllamaModelInstalled(model)).length;
+    const missingCount = getRequiredOllamaModels().filter(model => !isOllamaModelInstalled(model)).length;
     localModelsInstallBtn.textContent = missingCount > 0 ? "Install missing" : "All installed";
 }
 

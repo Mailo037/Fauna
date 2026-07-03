@@ -1480,10 +1480,11 @@ async function requestOllamaTokenCount(text, model) {
     const timeout = window.setTimeout(() => controller.abort(), TOKEN_COUNTER_TIMEOUT_MS);
     let res;
     try {
-        res = await fetch(OLLAMA_TOKENIZE_URL, {
+        res = await ollamaFetch(OLLAMA_TOKENIZE_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             signal: controller.signal,
+            desktopTimeoutMs: TOKEN_COUNTER_TIMEOUT_MS + 1000,
             body: JSON.stringify({ model, prompt: text })
         });
     } catch (err) {

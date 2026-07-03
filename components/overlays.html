@@ -93,6 +93,10 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>
                     <span>AI Provider</span>
                 </button>
+                <button class="settings-nav-item" type="button" data-settings-pane="task-models" aria-selected="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h7"></path><path d="M4 12h10"></path><path d="M4 19h7"></path><path d="M17 7l3 3-3 3"></path><path d="M14 10h6"></path></svg>
+                    <span>Task Models</span>
+                </button>
                 <button class="settings-nav-item" type="button" data-settings-pane="usage" aria-selected="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19V5"></path><path d="M4 19h16"></path><rect x="7" y="11" width="3" height="5" rx="1"></rect><rect x="12" y="7" width="3" height="9" rx="1"></rect><rect x="17" y="9" width="3" height="7" rx="1"></rect></svg>
                     <span>Usage</span>
@@ -541,6 +545,55 @@
                     <button id="openAiClearBtn" class="provider-btn provider-btn-ghost" type="button">Clear</button>
                 </div>
 
+            </div>
+
+            <div class="settings-pane" data-settings-pane-panel="task-models" hidden>
+                <div class="provider-model-section settings-panel-section settings-panel-section-first">
+                    <div class="settings-section-heading">
+                        <div>
+                            <p class="provider-section-label">Local task models</p>
+                            <p class="settings-section-desc">Use specialized Ollama models for subtasks while keeping your main chat model unchanged.</p>
+                        </div>
+                        <div class="settings-section-actions">
+                            <span id="localTaskModelsStatus" class="settings-status-badge">Not checked</span>
+                            <button id="localTaskModelsResetBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Reset</button>
+                        </div>
+                    </div>
+                    <div class="settings-control-card settings-control-card-stacked task-models-card">
+                        <div class="setting-info">
+                            <span class="setting-title">Agent routing</span>
+                            <span class="setting-desc">Images can be analyzed with Vision first, then the result is handed to your chat model.</span>
+                        </div>
+                        <div class="ai-call-settings-grid task-models-grid">
+                            <label class="settings-field-label">
+                                <span>Reasoning</span>
+                                <input id="localTaskReasoningModelInput" type="hidden" value="qwen3:8b">
+                                <div id="localTaskReasoningModelSelectHost" class="settings-model-select-host"></div>
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Vision</span>
+                                <input id="localTaskVisionModelInput" type="hidden" value="moondream">
+                                <div id="localTaskVisionModelSelectHost" class="settings-model-select-host"></div>
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Code</span>
+                                <input id="localTaskCodeModelInput" type="hidden" value="qwen3-coder:30b">
+                                <div id="localTaskCodeModelSelectHost" class="settings-model-select-host"></div>
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Image prompts</span>
+                                <input id="localTaskImageModelInput" type="hidden" value="qwen3:8b">
+                                <div id="localTaskImageModelSelectHost" class="settings-model-select-host"></div>
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Video prompts</span>
+                                <input id="localTaskVideoModelInput" type="hidden" value="qwen3:8b">
+                                <div id="localTaskVideoModelSelectHost" class="settings-model-select-host"></div>
+                            </label>
+                        </div>
+                    </div>
+                    <p class="persona-field-hint">When the active chat model cannot read an image, Fauna asks the Vision task model to describe it and sends that analysis to the chat model as context.</p>
+                </div>
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="personalization" hidden>

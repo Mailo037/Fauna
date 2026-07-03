@@ -70,6 +70,12 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   getInfo() {
     return ipcRenderer.invoke("fauna:desktop-info");
   },
+  getOllamaStatus() {
+    return ipcRenderer.invoke("fauna:ollama-status");
+  },
+  ollamaFetch(payload = {}) {
+    return ipcRenderer.invoke("fauna:ollama-fetch", payload);
+  },
   startOllama() {
     return ipcRenderer.invoke("fauna:start-ollama");
   },

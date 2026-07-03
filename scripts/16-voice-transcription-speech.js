@@ -218,6 +218,7 @@ async function transcribeLocalAudio(blob, signal = null, recording = null) {
 if (voiceButton) {
     updateVoiceButtonAvailability();
     voiceButton.onclick = async () => {
+        if (isVoiceStartPending) return;
         if (isGenerating) return;
         if (isActiveChatArchived()) {
             showToast("Archived chats are read-only. Restore the chat before starting voice.", "warning");
@@ -228,12 +229,14 @@ if (voiceButton) {
             return;
         }
 
+        if (isOpenAiProvider() && isOpenAiVoiceSessionActive) {
+            stopOpenAiVoiceSession();
+            return;
+        }
+
+        setVoiceStartPending(true);
         try {
             if (isOpenAiProvider()) {
-                if (isOpenAiVoiceSessionActive) {
-                    stopOpenAiVoiceSession();
-                    return;
-                }
                 await startOpenAiRealtimeVoiceSession();
             } else {
                 if (shouldUseLocalVoiceTranscription()) {
@@ -249,6 +252,8 @@ if (voiceButton) {
             setSpeechRecognitionState(false);
             cleanupVoiceMediaStream();
             showToast(`Voice input failed: ${err.message}`, "error");
+        } finally {
+            setVoiceStartPending(false);
         }
     };
 }
