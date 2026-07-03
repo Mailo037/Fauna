@@ -553,6 +553,352 @@ function readStoredBoolean(key, fallback) {
     return fallback;
 }
 
+let hasRunOllamaStartupCheck = false;
+let hasShownOllamaStartPrompt = false;
+let activeOnboardingStep = 0;
+let onboardingStepDirection = "next";
+let onboardingReturnFocus = null;
+
+const ONBOARDING_STEP_TITLES = [
+    "Welcome to Fauna",
+    "Connect provider",
+    "Tune the agent",
+    "Ready to start"
+];
+
+function renderOllamaAutoStartSetting() {
+    if (localModelsAutoStartToggle) {
+        localModelsAutoStartToggle.checked = isOllamaAutoStartEnabled;
+    }
+    if (localModelsAutoStartStatus) {
+        localModelsAutoStartStatus.textContent = isOllamaAutoStartEnabled
+            ? "Fauna will try to start Ollama automatically when local AI is offline."
+            : "Fauna will notify you when Ollama is offline and offer a start button.";
+    }
+}
+
+function setOllamaAutoStartEnabled(enabled, { persist = true, notify = false } = {}) {
+    isOllamaAutoStartEnabled = Boolean(enabled);
+    if (persist) {
+        safeLocalStorageSet(OLLAMA_AUTO_START_STORAGE_KEY, isOllamaAutoStartEnabled ? "true" : "false");
+    }
+    renderOllamaAutoStartSetting();
+    if (notify) {
+        showToast(
+            isOllamaAutoStartEnabled ? "Ollama auto-start enabled." : "Ollama auto-start disabled.",
+            isOllamaAutoStartEnabled ? "success" : "info"
+        );
+    }
+}
+
+function showOllamaStartNotification({ force = false } = {}) {
+    if (!force && hasShownOllamaStartPrompt) return;
+    hasShownOllamaStartPrompt = true;
+    showToast("Ollama is offline. Start it from Fauna to use local models.", "warning", {
+        duration: 10000,
+        actionLabel: "Start Ollama",
+        onAction: () => {
+            void startOllamaHttpService({ remember: true });
+        }
+    });
+}
+
+async function runOllamaStartupCheck() {
+    if (hasRunOllamaStartupCheck) return;
+    hasRunOllamaStartupCheck = true;
+    const shouldRestoreOpenAiStatus = isOpenAiProvider();
+    if (shouldRestoreOpenAiStatus && !isOllamaAutoStartEnabled) return;
+    await checkOllamaStatus();
+    if (isOllamaReachable) {
+        if (shouldRestoreOpenAiStatus) updateActiveProviderStatus();
+        return;
+    }
+
+    const desktopStatus = await getDesktopOllamaStatus();
+    if (desktopStatus?.processRunning) {
+        if (shouldRestoreOpenAiStatus) updateProviderSettingsUi();
+        window.setTimeout(async () => {
+            if (!isOllamaReachable) await checkOllamaStatus();
+            if (shouldRestoreOpenAiStatus) updateActiveProviderStatus();
+            if (!isOllamaReachable && !isOpenAiProvider()) showOllamaStartNotification();
+        }, 1800);
+        return;
+    }
+
+    if (isOllamaAutoStartEnabled) {
+        const started = await startOllamaHttpService({ silent: true });
+        if (shouldRestoreOpenAiStatus) updateActiveProviderStatus();
+        if (started) return;
+    }
+
+    if (shouldRestoreOpenAiStatus) updateProviderSettingsUi();
+    if (!isOpenAiProvider()) showOllamaStartNotification();
+}
+
+function scheduleOllamaStartupCheck() {
+    window.setTimeout(() => {
+        void runOllamaStartupCheck();
+    }, 900);
+}
+
+function hasCompletedOnboarding() {
+    const value = safeLocalStorageGet(ONBOARDING_COMPLETED_STORAGE_KEY);
+    return value === ONBOARDING_VERSION || value === "true";
+}
+
+function markOnboardingComplete() {
+    safeLocalStorageSet(ONBOARDING_COMPLETED_STORAGE_KEY, ONBOARDING_VERSION);
+}
+
+function isOnboardingOpen() {
+    return Boolean(onboardingModal && !onboardingModal.hidden);
+}
+
+function updateOnboardingProviderChoices() {
+    onboardingModal?.querySelectorAll("[data-onboarding-action='provider-local'], [data-onboarding-action='provider-openai']")
+        .forEach(button => {
+            const isActive = button.dataset.onboardingAction === (isOpenAiProvider() ? "provider-openai" : "provider-local");
+            button.classList.toggle("active", isActive);
+        });
+}
+
+function updateOnboardingOllamaStatus() {
+    if (!onboardingOllamaStatus) return;
+    if (!hasCheckedOllamaStatus) {
+        onboardingOllamaStatus.textContent = "Not checked";
+        onboardingOllamaStatus.dataset.state = "missing";
+        return;
+    }
+    if (!isOllamaReachable) {
+        onboardingOllamaStatus.textContent = "Offline";
+        onboardingOllamaStatus.dataset.state = "missing";
+        return;
+    }
+    const missingCount = getRequiredOllamaModels().filter(model => !isOllamaModelInstalled(model)).length;
+    onboardingOllamaStatus.textContent = missingCount > 0 ? `${missingCount} missing` : "Ready";
+    onboardingOllamaStatus.dataset.state = missingCount > 0 ? "missing" : "configured";
+}
+
+function updateOnboardingOpenAiStatus() {
+    if (onboardingOpenAiApiKeyInput && document.activeElement !== onboardingOpenAiApiKeyInput) {
+        onboardingOpenAiApiKeyInput.value = getOpenAiApiKey();
+    }
+    if (!onboardingOpenAiStatus) return;
+    const hasKey = Boolean(getOpenAiApiKey());
+    const pendingKey = (onboardingOpenAiApiKeyInput?.value || "").trim();
+    if (!hasKey) {
+        onboardingOpenAiStatus.textContent = pendingKey ? "Ready to save" : "Key needed";
+        onboardingOpenAiStatus.dataset.state = pendingKey ? "configured" : "missing";
+        return;
+    }
+    if (!hasWorkspaceBridgeAccess()) {
+        onboardingOpenAiStatus.textContent = "Bridge needed";
+        onboardingOpenAiStatus.dataset.state = "missing";
+        return;
+    }
+    onboardingOpenAiStatus.textContent = "Ready";
+    onboardingOpenAiStatus.dataset.state = "configured";
+}
+
+function updateOnboardingProviderSetup() {
+    const provider = isOpenAiProvider() ? "openai" : "local";
+    onboardingProviderSetupPanels.forEach(panel => {
+        const isActive = panel.dataset.onboardingProviderSetup === provider;
+        panel.hidden = !isActive;
+        panel.classList.toggle("active", isActive);
+    });
+    onboardingProviderVisuals.forEach(visual => {
+        const isActive = visual.dataset.onboardingProviderVisual === provider;
+        visual.hidden = !isActive;
+        visual.classList.toggle("active", isActive);
+    });
+    updateOnboardingOllamaStatus();
+    updateOnboardingOpenAiStatus();
+}
+
+function saveOpenAiKeyFromOnboarding() {
+    const key = (onboardingOpenAiApiKeyInput?.value || "").trim();
+    if (!key) {
+        showToast("Paste an OpenAI API key first.", "warning");
+        updateOnboardingOpenAiStatus();
+        return false;
+    }
+    safeLocalStorageSet(OPENAI_API_KEY_STORAGE_KEY, key);
+    if (!safeLocalStorageGet(OPENAI_CHAT_MODEL_STORAGE_KEY)) {
+        safeLocalStorageSet(OPENAI_CHAT_MODEL_STORAGE_KEY, DEFAULT_OPENAI_CHAT_MODEL);
+    }
+    if (!safeLocalStorageGet(OPENAI_IMAGE_MODEL_STORAGE_KEY)) {
+        safeLocalStorageSet(OPENAI_IMAGE_MODEL_STORAGE_KEY, DEFAULT_OPENAI_IMAGE_MODEL);
+    }
+    if (!safeLocalStorageGet(OPENAI_TRANSCRIPTION_MODEL_STORAGE_KEY)) {
+        safeLocalStorageSet(OPENAI_TRANSCRIPTION_MODEL_STORAGE_KEY, DEFAULT_OPENAI_TRANSCRIPTION_MODEL);
+    }
+    if (!safeLocalStorageGet(OPENAI_SPEECH_MODEL_STORAGE_KEY)) {
+        safeLocalStorageSet(OPENAI_SPEECH_MODEL_STORAGE_KEY, DEFAULT_OPENAI_SPEECH_MODEL);
+    }
+    if (!safeLocalStorageGet(OPENAI_REALTIME_MODEL_STORAGE_KEY)) {
+        safeLocalStorageSet(OPENAI_REALTIME_MODEL_STORAGE_KEY, DEFAULT_OPENAI_REALTIME_MODEL);
+    }
+    if (!safeLocalStorageGet(OPENAI_VOICE_STORAGE_KEY)) {
+        safeLocalStorageSet(OPENAI_VOICE_STORAGE_KEY, DEFAULT_OPENAI_VOICE);
+    }
+    setActiveAiProvider(AI_PROVIDER_OPENAI, { refreshStatus: false });
+    updateProviderSettingsUi();
+    updateOnboardingOpenAiStatus();
+    showToast(hasWorkspaceBridgeAccess() ? "OpenAI key saved." : "OpenAI key saved. Enable the Local Workspace Bridge before testing.", hasWorkspaceBridgeAccess() ? "success" : "warning");
+    return true;
+}
+
+function renderOnboarding() {
+    const maxStep = Math.max(0, onboardingSlides.length - 1);
+    activeOnboardingStep = Math.max(0, Math.min(maxStep, activeOnboardingStep));
+    onboardingDialog?.classList.toggle("onboarding-direction-back", onboardingStepDirection === "back");
+    onboardingDialog?.classList.toggle("onboarding-direction-next", onboardingStepDirection !== "back");
+    onboardingSlides.forEach(slide => {
+        const step = Number(slide.dataset.onboardingSlide);
+        const isActive = step === activeOnboardingStep;
+        slide.hidden = !isActive;
+        slide.classList.toggle("active", isActive);
+    });
+    onboardingDots.forEach(dot => {
+        const isActive = Number(dot.dataset.onboardingStep) === activeOnboardingStep;
+        dot.classList.toggle("active", isActive);
+        dot.setAttribute("aria-selected", String(isActive));
+    });
+    if (onboardingStepLabel) {
+        onboardingStepLabel.textContent = `Step ${activeOnboardingStep + 1} of ${maxStep + 1}`;
+    }
+    if (onboardingTitle) {
+        onboardingTitle.textContent = activeOnboardingStep === 1
+            ? (isOpenAiProvider() ? "Connect OpenAI" : "Connect Ollama")
+            : ONBOARDING_STEP_TITLES[activeOnboardingStep] || "Fauna setup";
+    }
+    if (onboardingBackBtn) onboardingBackBtn.disabled = activeOnboardingStep === 0;
+    if (onboardingNextBtn) onboardingNextBtn.hidden = activeOnboardingStep >= maxStep;
+    if (onboardingFinishBtn) onboardingFinishBtn.hidden = activeOnboardingStep < maxStep;
+    updateOnboardingProviderChoices();
+    updateOnboardingProviderSetup();
+}
+
+function setOnboardingStep(step) {
+    const requestedStep = Number(step) || 0;
+    const maxStep = Math.max(0, onboardingSlides.length - 1);
+    const nextStep = Math.max(0, Math.min(maxStep, requestedStep));
+    onboardingStepDirection = nextStep < activeOnboardingStep ? "back" : "next";
+    activeOnboardingStep = nextStep;
+    renderOnboarding();
+}
+
+function openOnboardingModal({ force = false } = {}) {
+    if (!onboardingModal || (!force && hasCompletedOnboarding())) return;
+    onboardingReturnFocus = document.activeElement instanceof HTMLElement && !onboardingModal.contains(document.activeElement)
+        ? document.activeElement
+        : null;
+    onboardingModal.hidden = false;
+    onboardingModal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("onboarding-modal-open");
+    setOnboardingStep(0);
+    window.setTimeout(() => onboardingDialog?.focus?.(), 0);
+}
+
+function closeOnboardingModal({ complete = true, returnFocus = true } = {}) {
+    if (!onboardingModal || onboardingModal.hidden) return;
+    if (complete) markOnboardingComplete();
+    onboardingModal.hidden = true;
+    onboardingModal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("onboarding-modal-open");
+    if (returnFocus) {
+        const focusTarget = onboardingReturnFocus && document.contains(onboardingReturnFocus)
+            ? onboardingReturnFocus
+            : input || settingsOpenBtn;
+        focusTarget?.focus?.({ preventScroll: true });
+    }
+    onboardingReturnFocus = null;
+}
+
+function scheduleOnboardingPrompt() {
+    if (hasCompletedOnboarding()) return;
+    window.setTimeout(() => openOnboardingModal(), 1200);
+}
+
+async function handleOnboardingAction(action, button) {
+    if (!action) return;
+    if (button instanceof HTMLButtonElement) button.disabled = true;
+    try {
+        switch (action) {
+            case "provider-local":
+                setActiveAiProvider(AI_PROVIDER_LOCAL, { refreshStatus: false });
+                showToast("Ollama selected.", "success");
+                setOnboardingStep(1);
+                break;
+            case "provider-openai":
+                setActiveAiProvider(AI_PROVIDER_OPENAI, { refreshStatus: false });
+                showToast("OpenAI selected.", "info");
+                setOnboardingStep(1);
+                break;
+            case "check-ollama":
+                await checkOllamaStatus();
+                showToast(isOllamaReachable ? "Ollama is reachable." : "Ollama is offline.", isOllamaReachable ? "success" : "warning");
+                break;
+            case "start-ollama":
+                await startOllamaHttpService({ remember: true });
+                break;
+            case "install-models":
+                await installMissingOllamaModels();
+                break;
+            case "save-openai-key":
+                saveOpenAiKeyFromOnboarding();
+                break;
+            case "test-openai":
+                if (!getOpenAiApiKey() && !saveOpenAiKeyFromOnboarding()) break;
+                try {
+                    await checkOpenAiStatus();
+                    showToast("OpenAI API reachable.", "success");
+                } catch (err) {
+                    showToast(`OpenAI test failed: ${err.message}`, "error");
+                }
+                updateOnboardingOpenAiStatus();
+                break;
+            case "open-provider-settings":
+                closeOnboardingModal({ complete: true, returnFocus: false });
+                openSettingsModal();
+                setSettingsPane("provider");
+                break;
+            case "enable-notifications":
+                completionSoundEnabled = true;
+                completionOnlyUnfocused = true;
+                completionBackgroundOnly = true;
+                completionNotificationsEnabled = true;
+                saveCompletionNotificationSetting(COMPLETION_SOUND_ENABLED_STORAGE_KEY, true);
+                saveCompletionNotificationSetting(COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY, true);
+                saveCompletionNotificationSetting(COMPLETION_BACKGROUND_ONLY_STORAGE_KEY, true);
+                saveCompletionNotificationSetting(COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY, true);
+                await requestCompletionNotificationPermission({ silent: false });
+                renderNotificationSettings();
+                showToast("Completion alerts enabled.", "success");
+                break;
+            case "open-task-models":
+                closeOnboardingModal({ complete: true, returnFocus: false });
+                openSettingsModal();
+                setSettingsPane("task-models");
+                break;
+            case "open-library":
+                closeOnboardingModal({ complete: true, returnFocus: false });
+                setWorkspaceView(WORKSPACE_VIEW_LIBRARY, { closeSidebar: false, updateUrl: true });
+                break;
+            case "create-chat":
+                closeOnboardingModal({ complete: true, returnFocus: false });
+                startNewChatSession({ notify: false, urlMode: "replace" });
+                break;
+            default:
+                break;
+        }
+    } finally {
+        if (button instanceof HTMLButtonElement && isOnboardingOpen()) button.disabled = false;
+        renderOnboarding();
+    }
+}
+
 function normalizeCompletionSoundVolume(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return 0.55;
@@ -1487,6 +1833,7 @@ function hasBlockingShortcutModalOpen() {
     return Boolean(
         (settingsModal && !settingsModal.hidden)
         || (openAiCatalogModal && !openAiCatalogModal.hidden)
+        || (onboardingModal && !onboardingModal.hidden)
         || (libraryPickerModal && !libraryPickerModal.hidden)
         || (document.getElementById("codeWorkbenchOverlay") && !document.getElementById("codeWorkbenchOverlay").hidden)
         || (document.getElementById("imageLightbox") && !document.getElementById("imageLightbox").hidden)
@@ -1615,6 +1962,14 @@ appResetBtn?.addEventListener("click", () => {
     void resetAppFromSettings();
 });
 
+appInfoOnboardingBtn?.addEventListener("click", () => {
+    openOnboardingModal({ force: true });
+});
+
+localModelsAutoStartToggle?.addEventListener("change", event => {
+    setOllamaAutoStartEnabled(Boolean(event.target.checked), { notify: true });
+});
+
 completionNotificationsToggle?.addEventListener("change", event => {
     completionNotificationsEnabled = Boolean(event.target.checked);
     saveCompletionNotificationSetting(COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY, completionNotificationsEnabled);
@@ -1665,16 +2020,46 @@ shortcutRecorderModal?.addEventListener("click", event => {
 shortcutRecorderSaveBtn?.addEventListener("click", saveShortcutRecorderDraft);
 shortcutRecorderClearBtn?.addEventListener("click", clearShortcutRecorderShortcut);
 shortcutRecorderResetBtn?.addEventListener("click", resetShortcutRecorderShortcut);
+
+onboardingModal?.addEventListener("click", event => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (target.closest("[data-onboarding-close]")) {
+        closeOnboardingModal({ complete: true });
+        return;
+    }
+    const stepButton = target.closest("[data-onboarding-step]");
+    if (stepButton) {
+        setOnboardingStep(Number(stepButton.dataset.onboardingStep));
+        return;
+    }
+    const actionButton = target.closest("[data-onboarding-action]");
+    if (actionButton) {
+        void handleOnboardingAction(actionButton.dataset.onboardingAction, actionButton);
+    }
+});
+
+onboardingBackBtn?.addEventListener("click", () => setOnboardingStep(activeOnboardingStep - 1));
+onboardingNextBtn?.addEventListener("click", () => setOnboardingStep(activeOnboardingStep + 1));
+onboardingFinishBtn?.addEventListener("click", () => closeOnboardingModal({ complete: true }));
+onboardingSkipBtn?.addEventListener("click", () => closeOnboardingModal({ complete: true }));
+onboardingOpenAiApiKeyInput?.addEventListener("input", updateOnboardingOpenAiStatus);
+
 document.addEventListener("keydown", handleShortcutRecorderKeydown, true);
 document.addEventListener("keydown", handleGlobalKeyboardShortcut);
 updateShortcutBadges();
 renderKeyboardShortcutSettings();
 initializeNotificationSettings();
+renderOllamaAutoStartSetting();
 
 document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
         if (isShortcutRecorderOpen()) {
             closeShortcutRecorder();
+            return;
+        }
+        if (isOnboardingOpen()) {
+            closeOnboardingModal({ complete: true });
             return;
         }
         if (openAiCatalogModal && !openAiCatalogModal.hidden) {
@@ -2703,18 +3088,66 @@ function renderLocalModelChoices() {
     }));
 }
 
-async function pullOllamaModel(modelId) {
+function createOllamaPullRequestId(modelId) {
+    const suffix = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return `pull:${String(modelId || "model")}:${suffix}`;
+}
+
+async function pullOllamaModelThroughDesktop(modelId, requestId) {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.pullOllamaModel) return null;
+    const unsubscribe = desktopApi.onOllamaPullProgress?.(event => {
+        if (event?.requestId !== requestId) return;
+        applyOllamaPullProgress(modelId, event);
+    });
+    try {
+        const result = await desktopApi.pullOllamaModel({ modelId, requestId });
+        if (result?.error) throw new Error(result.error);
+        return result;
+    } finally {
+        unsubscribe?.();
+    }
+}
+
+async function pullOllamaModelThroughFetch(modelId) {
     const res = await ollamaFetch(OLLAMA_PULL_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         desktopTimeoutMs: 30 * 60 * 1000,
-        body: JSON.stringify({ name: modelId, stream: false })
+        body: JSON.stringify({ name: modelId, stream: true })
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.error) {
-        throw new Error(data.error || `Ollama responded with HTTP ${res.status}`);
+    if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        throw new Error(errorText || `Ollama responded with HTTP ${res.status}`);
     }
-    return data;
+    let finalData = {};
+    await readTextStreamLines(res, {
+        onLine(line) {
+            const data = JSON.parse(line);
+            finalData = { ...finalData, ...data };
+            if (data.error) throw new Error(data.error);
+            applyOllamaPullProgress(modelId, data);
+        }
+    });
+    return finalData;
+}
+
+async function pullOllamaModel(modelId) {
+    const taskId = startModelDownloadTask(modelId, "Waiting for Ollama");
+    const requestId = createOllamaPullRequestId(modelId);
+    try {
+        setLocalModelsStatus(`Pulling ${modelId}`, "missing");
+        const data = await pullOllamaModelThroughDesktop(modelId, requestId)
+            || await pullOllamaModelThroughFetch(modelId);
+        if (data?.error) throw new Error(data.error);
+        finishModelDownloadTask(taskId, { ok: true, detail: "Installed" });
+        return data;
+    } catch (err) {
+        finishModelDownloadTask(taskId, { ok: false, detail: err.message });
+        throw err;
+    }
 }
 
 async function installOllamaWithApproval() {
@@ -2762,7 +3195,8 @@ async function installOllamaWithApproval() {
     }
 }
 
-async function startOllamaHttpService() {
+async function startOllamaHttpService({ remember = false, silent = false } = {}) {
+    if (remember) setOllamaAutoStartEnabled(true, { notify: false });
     if (localModelsStartBtn) localModelsStartBtn.disabled = true;
     if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = true;
     setLocalModelsStatus("Starting Ollama", "missing");
@@ -2775,7 +3209,7 @@ async function startOllamaHttpService() {
                 if (result?.downloadUrl) window.open(result.downloadUrl, "_blank", "noopener,noreferrer");
                 throw new Error(result?.message || "Ollama could not be started.");
             }
-            showToast(result.message || "Ollama HTTP is starting.", result.status === "running" ? "info" : "success");
+            if (!silent) showToast(result.message || "Ollama HTTP is starting.", result.status === "running" ? "info" : "success");
         } else if (hasWorkspaceBridgeAccess()) {
             const command = [
                 "$ErrorActionPreference = 'Stop'",
@@ -2787,7 +3221,7 @@ async function startOllamaHttpService() {
             if (result.exitCode !== 0) {
                 throw new Error((result.stderr || result.stdout || "Ollama start command failed.").trim());
             }
-            showToast("Ollama HTTP start command was sent.", "success");
+            if (!silent) showToast("Ollama HTTP start command was sent.", "success");
         } else {
             window.open(OLLAMA_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
             throw new Error("Enable the Local Workspace Bridge or use the desktop app to start Ollama from Fauna.");
@@ -2798,7 +3232,7 @@ async function startOllamaHttpService() {
         return isOllamaReachable;
     } catch (err) {
         setLocalModelsStatus("Start failed", "missing");
-        showToast(`Ollama start failed: ${err.message}`, "error");
+        if (!silent) showToast(`Ollama start failed: ${err.message}`, "error");
         return false;
     } finally {
         if (localModelsStartBtn) localModelsStartBtn.disabled = false;
@@ -2927,6 +3361,7 @@ function updateProviderSettingsUi() {
     updateVoiceButtonAvailability();
     updateAiCachingUi();
     updateAiCallSettingsUi();
+    renderOllamaAutoStartSetting();
 }
 
 function saveOpenAiSettings() {
@@ -2972,7 +3407,7 @@ localModelsRefreshBtn?.addEventListener("click", async () => {
 localTaskModelsResetBtn?.addEventListener("click", resetLocalTaskModels);
 
 localModelsStartBtn?.addEventListener("click", () => {
-    void startOllamaHttpService();
+    void startOllamaHttpService({ remember: true });
 });
 
 localModelsInstallBtn?.addEventListener("click", () => {
@@ -3175,6 +3610,8 @@ updateWanSettingsUi();
 updateWorkspaceBridgeSettingsUi();
 updateMemorySettingsUi();
 updatePersonaSettingsUi();
+scheduleOllamaStartupCheck();
+scheduleOnboardingPrompt();
 
 setChatHistoryCollapsed(isChatHistoryCollapsed, { persist: false });
 setArchivedChatHistoryCollapsed(isArchivedChatHistoryCollapsed, { persist: false });

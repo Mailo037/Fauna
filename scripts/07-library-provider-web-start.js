@@ -1107,6 +1107,9 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
 
 async function sendOllamaTaskChat(messages, preferredModel, options = {}, signal = null) {
     const model = normalizeModelId(preferredModel) || OLLAMA_MODEL;
+    if (isModelDownloadActive(model)) {
+        throw new Error(`${model} is still downloading. Open the model downloads menu in the top bar to watch progress.`);
+    }
     const res = await ollamaFetch(OLLAMA_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

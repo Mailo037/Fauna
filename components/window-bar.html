@@ -22,6 +22,31 @@
     </div>
 
     <div class="window-bar-right">
+        <div id="modelDownloadMenuWrap" class="model-download-menu-wrap" hidden>
+            <button id="modelDownloadBtn" class="model-download-btn" type="button" aria-expanded="false" aria-controls="modelDownloadPanel" data-tooltip="Model downloads">
+                <span class="model-download-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3v11"></path>
+                        <path d="m7 10 5 5 5-5"></path>
+                        <path d="M5 21h14"></path>
+                    </svg>
+                </span>
+                <span id="modelDownloadLabel" class="model-download-label">Downloads</span>
+                <span id="modelDownloadCount" class="model-download-count">0</span>
+                <span class="model-download-mini-bar" aria-hidden="true">
+                    <span id="modelDownloadMiniBar" class="model-download-mini-fill"></span>
+                </span>
+            </button>
+            <div id="modelDownloadPanel" class="model-download-panel" hidden>
+                <header class="model-download-panel-head">
+                    <div>
+                        <strong>Model downloads</strong>
+                        <small id="modelDownloadSummary">No active downloads</small>
+                    </div>
+                </header>
+                <div id="modelDownloadList" class="model-download-list"></div>
+            </div>
+        </div>
         <button id="statusPill" class="status-pill window-status-pill" type="button" data-tooltip="Local service status">
             <span class="pulse-dot" aria-hidden="true"></span>
             <span id="serviceStatusLabel">Ollama local</span>

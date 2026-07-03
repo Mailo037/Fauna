@@ -782,6 +782,7 @@ let activeAiProvider = normalizeAiProvider(safeLocalStorageGet(AI_PROVIDER_STORA
 isWorkspaceBridgeEnabled = safeLocalStorageGet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) === "true";
 isMemoryEnabled = safeLocalStorageGet(MEMORY_ENABLED_STORAGE_KEY) === "true";
 isAiStreamingEnabled = safeLocalStorageGet(AI_STREAMING_ENABLED_STORAGE_KEY) !== "false";
+isOllamaAutoStartEnabled = safeLocalStorageGet(OLLAMA_AUTO_START_STORAGE_KEY) === "true";
 activeTemperature = normalizeAiTemperature(safeLocalStorageGet(AI_TEMPERATURE_STORAGE_KEY));
 activeMaxOutputTokens = normalizeMaxOutputTokens(safeLocalStorageGet(AI_MAX_OUTPUT_TOKENS_STORAGE_KEY));
 activeTopP = normalizeTopP(safeLocalStorageGet(AI_TOP_P_STORAGE_KEY));
@@ -1217,6 +1218,9 @@ function canUseComposerTools() {
 
 function getLocalChatModelUnavailableReason(modelId = OLLAMA_MODEL) {
     if (isOpenAiProvider()) return "";
+    if (isModelDownloadActive(modelId)) {
+        return `${modelId} is still downloading. Open the model downloads menu in the top bar to watch progress.`;
+    }
     const capability = getOllamaModelCapability(modelId);
     return capability.supportsStreaming === true
         ? ""

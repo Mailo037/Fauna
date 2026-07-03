@@ -487,6 +487,16 @@
                         <button id="localModelsRefreshBtn" class="provider-btn provider-btn-secondary" type="button">Refresh</button>
                         <button id="localModelsInstallBtn" class="provider-btn provider-btn-primary" type="button">Install missing</button>
                     </div>
+                    <div class="settings-control-card local-ollama-autostart-card">
+                        <div class="setting-info">
+                            <span class="setting-title">Start Ollama on launch</span>
+                            <span id="localModelsAutoStartStatus" class="setting-desc">Fauna will offer to start Ollama when local AI is offline.</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="localModelsAutoStartToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- API Key -->
@@ -747,6 +757,9 @@
                             <strong id="appInfoBridgeEndpoint">Not set</strong>
                         </div>
                     </div>
+                    <div class="provider-actions app-info-actions">
+                        <button id="appInfoOnboardingBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Run onboarding</button>
+                    </div>
                 </div>
 
                 <div class="provider-model-section settings-panel-section app-info-collapsible" data-app-info-section>
@@ -810,6 +823,172 @@
                 </div>
             </div>
         </main>
+    </section>
+</div>
+
+<div id="onboardingModal" class="onboarding-modal" hidden aria-hidden="true">
+    <div class="onboarding-backdrop" data-onboarding-close></div>
+    <section class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle" aria-describedby="onboardingBody" tabindex="-1">
+        <header class="onboarding-header">
+            <div>
+                <p id="onboardingStepLabel" class="onboarding-step-label">Step 1 of 4</p>
+                <h2 id="onboardingTitle">Welcome to Fauna</h2>
+            </div>
+            <button id="onboardingCloseBtn" class="settings-close-btn onboarding-close-btn" type="button" aria-label="Close onboarding" data-onboarding-close>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            </button>
+        </header>
+
+        <div id="onboardingBody" class="onboarding-body">
+            <article class="onboarding-slide active" data-onboarding-slide="0">
+                <div class="onboarding-visual onboarding-visual-workspace" aria-hidden="true">
+                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="44" y="34" width="432" height="232" rx="24" fill="#181818" stroke="#3a3a3a"/>
+                        <rect x="70" y="62" width="116" height="176" rx="14" fill="#242424"/>
+                        <rect x="208" y="64" width="238" height="38" rx="14" fill="#262626"/>
+                        <rect class="onboarding-chat-bubble onboarding-chat-bubble-primary" x="226" y="122" width="172" height="30" rx="13" fill="currentColor" opacity=".78"/>
+                        <rect class="onboarding-chat-bubble onboarding-chat-bubble-secondary" x="226" y="166" width="198" height="42" rx="14" fill="#2f2f2f"/>
+                        <rect x="248" y="221" width="160" height="18" rx="9" fill="#3a3a3a"/>
+                        <circle class="onboarding-pulse" cx="94" cy="88" r="10" fill="currentColor"/>
+                        <rect x="112" y="80" width="50" height="14" rx="7" fill="#4a4a4a"/>
+                        <rect x="84" y="125" width="82" height="14" rx="7" fill="#4a4a4a"/>
+                        <rect x="84" y="154" width="68" height="14" rx="7" fill="#343434"/>
+                        <rect x="84" y="183" width="92" height="14" rx="7" fill="#343434"/>
+                    </svg>
+                </div>
+                <div class="onboarding-copy">
+                    <h3>Set up the workspace once.</h3>
+                    <p>Pick a provider, connect local models, and keep chats, generated media, and settings in the right place from the first run.</p>
+                    <div class="onboarding-action-grid" role="group" aria-label="Choose AI provider">
+                        <button class="onboarding-choice" type="button" data-onboarding-action="provider-local">
+                            <span>Ollama local</span>
+                            <small>Private, local models</small>
+                        </button>
+                        <button class="onboarding-choice" type="button" data-onboarding-action="provider-openai">
+                            <span>OpenAI</span>
+                            <small>API key required</small>
+                        </button>
+                    </div>
+                </div>
+            </article>
+
+            <article class="onboarding-slide" data-onboarding-slide="1" hidden>
+                <div class="onboarding-visual onboarding-visual-ollama" data-onboarding-provider-visual="local" aria-hidden="true">
+                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="64" y="48" width="392" height="204" rx="24" fill="#181818" stroke="#3a3a3a"/>
+                        <circle class="onboarding-ollama-mark onboarding-pulse" cx="132" cy="112" r="34" fill="currentColor" opacity=".82"/>
+                        <path d="M116 116c14-30 31-30 45 0" stroke="#101010" stroke-width="12" stroke-linecap="round"/>
+                        <rect x="198" y="86" width="196" height="18" rx="9" fill="#f1f1f1" opacity=".82"/>
+                        <rect x="198" y="119" width="238" height="14" rx="7" fill="#777"/>
+                        <rect x="198" y="154" width="254" height="16" rx="8" fill="#2f2f2f"/>
+                        <rect class="onboarding-progress-fill" x="198" y="154" width="168" height="16" rx="8" fill="currentColor"/>
+                        <rect class="onboarding-action-chip" x="198" y="190" width="102" height="30" rx="15" fill="#2f2f2f"/>
+                        <rect class="onboarding-action-chip onboarding-action-chip-delayed" x="314" y="190" width="102" height="30" rx="15" fill="#2f2f2f"/>
+                    </svg>
+                </div>
+                <div class="onboarding-visual onboarding-visual-openai" data-onboarding-provider-visual="openai" aria-hidden="true" hidden>
+                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="70" y="48" width="380" height="204" rx="24" fill="#181818" stroke="#3a3a3a"/>
+                        <circle class="onboarding-openai-orbit" cx="142" cy="116" r="44" fill="#262626"/>
+                        <path class="onboarding-openai-knot" d="M142 82c18 9 30 25 30 45s-12 36-30 45c-18-9-30-25-30-45s12-36 30-45Z" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/>
+                        <path class="onboarding-openai-knot onboarding-openai-knot-delayed" d="M107 134c16-12 37-16 56-8 19 7 31 24 35 43-16 12-37 16-56 8-19-7-31-24-35-43Z" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/>
+                        <rect x="218" y="82" width="174" height="18" rx="9" fill="#f1f1f1" opacity=".82"/>
+                        <rect x="218" y="118" width="218" height="14" rx="7" fill="#777"/>
+                        <rect x="218" y="154" width="196" height="40" rx="14" fill="#2b2b2b"/>
+                        <rect class="onboarding-key-cursor" x="238" y="168" width="44" height="12" rx="6" fill="currentColor"/>
+                        <rect x="218" y="212" width="108" height="30" rx="15" fill="#2f2f2f"/>
+                    </svg>
+                </div>
+                <div class="onboarding-copy" data-onboarding-provider-setup="local">
+                    <h3>Make local AI reachable.</h3>
+                    <p>Fauna can remember that you want Ollama started, check the HTTP API on launch, and pull models with visible progress.</p>
+                    <div class="onboarding-status-row">
+                        <span id="onboardingOllamaStatus" class="settings-status-badge">Not checked</span>
+                    </div>
+                    <div class="onboarding-action-row">
+                        <button class="provider-btn provider-btn-secondary" type="button" data-onboarding-action="check-ollama">Check</button>
+                        <button class="provider-btn provider-btn-secondary" type="button" data-onboarding-action="start-ollama">Start Ollama</button>
+                        <button class="provider-btn provider-btn-primary" type="button" data-onboarding-action="install-models">Install missing</button>
+                    </div>
+                </div>
+                <div class="onboarding-copy" data-onboarding-provider-setup="openai" hidden>
+                    <h3>Connect OpenAI.</h3>
+                    <p>Add an API key once, then Fauna can use OpenAI for chat, image, speech, and realtime voice features.</p>
+                    <div class="onboarding-status-row">
+                        <span id="onboardingOpenAiStatus" class="settings-status-badge">Key needed</span>
+                    </div>
+                    <label class="settings-field-label onboarding-openai-key-field">
+                        <span>OpenAI API key</span>
+                        <input id="onboardingOpenAiApiKeyInput" class="settings-input provider-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." aria-label="OpenAI API key for onboarding">
+                    </label>
+                    <div class="onboarding-action-row">
+                        <button class="provider-btn provider-btn-primary" type="button" data-onboarding-action="save-openai-key">Save key</button>
+                        <button class="provider-btn provider-btn-secondary" type="button" data-onboarding-action="test-openai">Test</button>
+                        <button class="provider-btn provider-btn-secondary" type="button" data-onboarding-action="open-provider-settings">Provider settings</button>
+                    </div>
+                </div>
+            </article>
+
+            <article class="onboarding-slide" data-onboarding-slide="2" hidden>
+                <div class="onboarding-visual onboarding-visual-tools" aria-hidden="true">
+                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="58" y="42" width="404" height="216" rx="26" fill="#181818" stroke="#3a3a3a"/>
+                        <rect class="onboarding-tool-card onboarding-tool-card-1" x="92" y="78" width="104" height="70" rx="18" fill="#262626"/>
+                        <rect class="onboarding-tool-card onboarding-tool-card-2" x="212" y="78" width="104" height="70" rx="18" fill="#262626"/>
+                        <rect class="onboarding-tool-card onboarding-tool-card-3" x="332" y="78" width="104" height="70" rx="18" fill="#262626"/>
+                        <path class="onboarding-tool-icon" d="M122 113h44M144 91v44" stroke="currentColor" stroke-width="12" stroke-linecap="round"/>
+                        <path class="onboarding-tool-icon" d="M248 98h32l14 16-14 16h-32z" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/>
+                        <path class="onboarding-tool-icon" d="M382 92v42M365 113h34" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
+                        <rect x="96" y="176" width="324" height="14" rx="7" fill="#333"/>
+                        <rect x="96" y="206" width="236" height="14" rx="7" fill="currentColor" opacity=".78"/>
+                    </svg>
+                </div>
+                <div class="onboarding-copy">
+                    <h3>Tune the agent for tasks.</h3>
+                    <p>Use a vision model for images, a reasoning model for planning, and alerts when background chats finish.</p>
+                    <div class="onboarding-action-row">
+                        <button class="provider-btn provider-btn-secondary" type="button" data-onboarding-action="open-task-models">Task models</button>
+                        <button class="provider-btn provider-btn-secondary" type="button" data-onboarding-action="enable-notifications">Enable alerts</button>
+                    </div>
+                </div>
+            </article>
+
+            <article class="onboarding-slide" data-onboarding-slide="3" hidden>
+                <div class="onboarding-visual onboarding-visual-ready" aria-hidden="true">
+                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="70" y="44" width="380" height="212" rx="28" fill="#181818" stroke="#3a3a3a"/>
+                        <rect class="onboarding-ready-row" x="108" y="84" width="184" height="34" rx="17" fill="currentColor" opacity=".84"/>
+                        <rect class="onboarding-ready-row onboarding-ready-row-delayed" x="108" y="136" width="260" height="46" rx="18" fill="#2b2b2b"/>
+                        <rect x="152" y="202" width="220" height="32" rx="16" fill="#343434"/>
+                        <circle class="onboarding-pulse" cx="396" cy="218" r="18" fill="currentColor"/>
+                        <path class="onboarding-ready-plus" d="M386 218h20m-10-10v20" stroke="#111" stroke-width="5" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <div class="onboarding-copy">
+                    <h3>You are ready.</h3>
+                    <p>Start a chat, attach files from the Library, or revisit this guide from Settings > Info whenever you want.</p>
+                    <div class="onboarding-action-row">
+                        <button class="provider-btn provider-btn-secondary" type="button" data-onboarding-action="open-library">Open Library</button>
+                        <button class="provider-btn provider-btn-primary" type="button" data-onboarding-action="create-chat">New chat</button>
+                    </div>
+                </div>
+            </article>
+        </div>
+
+        <div id="onboardingProgress" class="onboarding-progress" role="tablist" aria-label="Onboarding steps">
+            <button class="onboarding-dot active" type="button" data-onboarding-step="0" aria-label="Step 1" aria-selected="true"></button>
+            <button class="onboarding-dot" type="button" data-onboarding-step="1" aria-label="Step 2" aria-selected="false"></button>
+            <button class="onboarding-dot" type="button" data-onboarding-step="2" aria-label="Step 3" aria-selected="false"></button>
+            <button class="onboarding-dot" type="button" data-onboarding-step="3" aria-label="Step 4" aria-selected="false"></button>
+        </div>
+
+        <footer class="onboarding-actions">
+            <button id="onboardingSkipBtn" class="provider-btn provider-btn-ghost" type="button">Skip setup</button>
+            <span class="provider-actions-spacer"></span>
+            <button id="onboardingBackBtn" class="provider-btn provider-btn-secondary" type="button">Back</button>
+            <button id="onboardingNextBtn" class="provider-btn provider-btn-primary" type="button">Next</button>
+            <button id="onboardingFinishBtn" class="provider-btn provider-btn-primary" type="button" hidden>Start using Fauna</button>
+        </footer>
     </section>
 </div>
 

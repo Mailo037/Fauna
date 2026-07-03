@@ -224,13 +224,16 @@ function chatSessionHasContent(session) {
     return Boolean(
         session.chatHtml?.trim() ||
         session.domNodes?.length ||
-        session.conversationHistory?.length ||
-        composerDraftHasContent(session.composerDraft)
+        session.conversationHistory?.length
     );
 }
 
 function activeChatHasContent() {
     return Boolean(chat?.children.length || conversationHistory.length || getCurrentComposerDraftHasContent());
+}
+
+function activeChatHasPersistableContent() {
+    return Boolean(chat?.children.length || conversationHistory.length);
 }
 
 function serializeComposerDraftAttachment(file) {
@@ -305,14 +308,8 @@ function persistActiveComposerDraft({ render = false, updateUrl = true } = {}) {
     const draft = captureComposerDraft();
     let session = getActiveSession();
     let shouldRender = render;
-    if (!session && !composerDraftHasContent(draft)) return null;
     if (!session) {
-        session = createChatSession();
-        chatSessions.unshift(session);
-        activeSessionId = session.id;
-        updateActiveChatTitle();
-        if (updateUrl) updateWorkspaceUrlFragment({ replace: true });
-        shouldRender = true;
+        return null;
     }
 
     const hasStoredChatContent = Boolean(
@@ -631,7 +628,7 @@ function saveCurrentSession({ render = true, updateUrl = true } = {}) {
     let session = getActiveSession();
     let createdActiveSession = false;
     if (!session) {
-        if (!activeChatHasContent()) {
+        if (!activeChatHasPersistableContent()) {
             if (render) renderChatHistory();
             return null;
         }

@@ -27,6 +27,14 @@ const windowUpdateBtn = document.getElementById("windowUpdateBtn");
 const windowUpdateNotice = document.getElementById("windowUpdateNotice");
 const windowUpdateNoticeText = document.getElementById("windowUpdateNoticeText");
 const windowUpdateInstallBtn = document.getElementById("windowUpdateInstallBtn");
+const modelDownloadMenuWrap = document.getElementById("modelDownloadMenuWrap");
+const modelDownloadBtn = document.getElementById("modelDownloadBtn");
+const modelDownloadLabel = document.getElementById("modelDownloadLabel");
+const modelDownloadCount = document.getElementById("modelDownloadCount");
+const modelDownloadMiniBar = document.getElementById("modelDownloadMiniBar");
+const modelDownloadPanel = document.getElementById("modelDownloadPanel");
+const modelDownloadSummary = document.getElementById("modelDownloadSummary");
+const modelDownloadList = document.getElementById("modelDownloadList");
 const windowMinimizeBtn = document.getElementById("windowMinimizeBtn");
 const windowMaximizeBtn = document.getElementById("windowMaximizeBtn");
 const windowCloseBtn = document.getElementById("windowCloseBtn");
@@ -145,6 +153,8 @@ const localModelsStatus = document.getElementById("localModelsStatus");
 const localModelsRefreshBtn = document.getElementById("localModelsRefreshBtn");
 const localModelsStartBtn = document.getElementById("localModelsStartBtn");
 const localModelsInstallBtn = document.getElementById("localModelsInstallBtn");
+const localModelsAutoStartToggle = document.getElementById("localModelsAutoStartToggle");
+const localModelsAutoStartStatus = document.getElementById("localModelsAutoStartStatus");
 const localTaskModelsStatus = document.getElementById("localTaskModelsStatus");
 const localTaskModelsResetBtn = document.getElementById("localTaskModelsResetBtn");
 const localTaskReasoningModelInput = document.getElementById("localTaskReasoningModelInput");
@@ -244,8 +254,25 @@ const appInfoMediaPath = document.getElementById("appInfoMediaPath");
 const appInfoBridgeEndpoint = document.getElementById("appInfoBridgeEndpoint");
 const appInfoChatCount = document.getElementById("appInfoChatCount");
 const appInfoStoredKeys = document.getElementById("appInfoStoredKeys");
+const appInfoOnboardingBtn = document.getElementById("appInfoOnboardingBtn");
 const appCacheClearBtn = document.getElementById("appCacheClearBtn");
 const appResetBtn = document.getElementById("appResetBtn");
+const onboardingModal = document.getElementById("onboardingModal");
+const onboardingDialog = onboardingModal?.querySelector(".onboarding-dialog");
+const onboardingStepLabel = document.getElementById("onboardingStepLabel");
+const onboardingTitle = document.getElementById("onboardingTitle");
+const onboardingSlides = document.querySelectorAll("[data-onboarding-slide]");
+const onboardingProviderSetupPanels = document.querySelectorAll("[data-onboarding-provider-setup]");
+const onboardingProviderVisuals = document.querySelectorAll("[data-onboarding-provider-visual]");
+const onboardingProgress = document.getElementById("onboardingProgress");
+const onboardingDots = document.querySelectorAll("[data-onboarding-step]");
+const onboardingBackBtn = document.getElementById("onboardingBackBtn");
+const onboardingNextBtn = document.getElementById("onboardingNextBtn");
+const onboardingFinishBtn = document.getElementById("onboardingFinishBtn");
+const onboardingSkipBtn = document.getElementById("onboardingSkipBtn");
+const onboardingOllamaStatus = document.getElementById("onboardingOllamaStatus");
+const onboardingOpenAiStatus = document.getElementById("onboardingOpenAiStatus");
+const onboardingOpenAiApiKeyInput = document.getElementById("onboardingOpenAiApiKeyInput");
 
 let isSandboxEnabled = true;
 let isWebSearchEnabled = true;
@@ -260,6 +287,7 @@ let completionSoundEnabled = false;
 let completionOnlyUnfocused = true;
 let completionBackgroundOnly = true;
 let completionSoundVolumeLevel = 0.55;
+let isOllamaAutoStartEnabled = false;
 let activeTemperature = 0.7;
 let activeMaxOutputTokens = 0;
 let activeTopP = 1;
@@ -331,10 +359,10 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.3";
-const FAUNA_APP_BUILD_ID = "20260703-task-model-routing";
+const FAUNA_APP_VERSION = "0.1.6";
+const FAUNA_APP_BUILD_ID = "20260703-onboarding-autostart";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
-const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/desktop/version.json";
+const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
@@ -382,6 +410,9 @@ const LOCAL_TASK_VISION_MODEL_STORAGE_KEY = "faunaLocalTaskVisionModel";
 const LOCAL_TASK_CODE_MODEL_STORAGE_KEY = "faunaLocalTaskCodeModel";
 const LOCAL_TASK_IMAGE_MODEL_STORAGE_KEY = "faunaLocalTaskImageModel";
 const LOCAL_TASK_VIDEO_MODEL_STORAGE_KEY = "faunaLocalTaskVideoModel";
+const OLLAMA_AUTO_START_STORAGE_KEY = "faunaOllamaAutoStart";
+const ONBOARDING_COMPLETED_STORAGE_KEY = "faunaOnboardingCompletedVersion";
+const ONBOARDING_VERSION = "20260703-onboarding-v1";
 const COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY = "faunaCompletionNotificationsEnabled";
 const COMPLETION_SOUND_ENABLED_STORAGE_KEY = "faunaCompletionSoundEnabled";
 const COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY = "faunaCompletionOnlyUnfocused";
@@ -984,6 +1015,8 @@ let activeCodeWorkbench = null;
 let codeWorkbenchLoadTimer = null;
 let codeWorkbenchEditTimer = null;
 let codeWorkbenchLoadToken = 0;
+const modelDownloadTasks = new Map();
+let modelDownloadCloseTimer = null;
 const voiceCueLastPlayedAt = new Map();
 const disabledButtonStates = new Map();
 const sidebarController = createSidebarController();
@@ -1232,10 +1265,17 @@ function updateTimeGreeting({ forceRandom = false } = {}) {
     timeGreeting.textContent = pickRandomGreeting(group);
 }
 
-function showToast(message, type = "info") {
+function showToast(message, type = "info", options = {}) {
     if (!toastRegion) return;
+    if (type && typeof type === "object") {
+        options = type;
+        type = options.type || "info";
+    }
     const normalizedType = ["success", "error", "warning", "info"].includes(type) ? type : "info";
-    const toastDuration = normalizedType === "error" ? 5200 : 3600;
+    const requestedDuration = Number(options.duration);
+    const toastDuration = Number.isFinite(requestedDuration) && requestedDuration > 0
+        ? Math.max(1800, Math.min(30000, requestedDuration))
+        : normalizedType === "error" ? 5200 : 3600;
     const titles = {
         success: "Done",
         error: "Needs attention",
@@ -1261,9 +1301,17 @@ function showToast(message, type = "info") {
     const title = toast.querySelector(".toast-title");
     const messageNode = toast.querySelector(".toast-message");
     const close = toast.querySelector(".toast-close");
+    let actionButton = null;
     iconPath?.setAttribute("d", iconPaths[normalizedType]);
     if (title) title.textContent = titles[normalizedType];
     if (messageNode) messageNode.textContent = message;
+    if (options.actionLabel && typeof options.onAction === "function" && messageNode) {
+        actionButton = document.createElement("button");
+        actionButton.type = "button";
+        actionButton.className = "toast-action";
+        actionButton.textContent = String(options.actionLabel);
+        messageNode.after(actionButton);
+    }
 
     while ([...toastRegion.children].filter(child => !child.classList.contains("leaving")).length >= 4) {
         const oldestToast = [...toastRegion.children].find(child => !child.classList.contains("leaving"));
@@ -1320,6 +1368,16 @@ function showToast(message, type = "info") {
     toast._faunaRemoveToast = removeToast;
     toast._faunaDismissToast = dismiss;
 
+    actionButton?.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+            options.onAction(event);
+        } finally {
+            dismiss();
+        }
+    });
+
     const scheduleDismiss = () => {
         if (isDismissed || remainingDismissMs <= 0) return dismiss();
         clearDismissTimer();
@@ -1375,7 +1433,7 @@ function showToast(message, type = "info") {
     });
 
     toast.addEventListener("pointerdown", (event) => {
-        if (event.button !== 0 || close?.contains(event.target)) return;
+        if (event.button !== 0 || close?.contains(event.target) || event.target?.closest?.(".toast-action")) return;
 
         isDragging = true;
         dragState.pointerId = event.pointerId;
@@ -1431,6 +1489,192 @@ function showToast(message, type = "info") {
     close?.addEventListener("click", () => dismiss());
     scheduleDismiss();
 }
+
+function getModelDownloadTaskId(modelId) {
+    return `ollama:${String(modelId || "").trim() || "model"}`;
+}
+
+function getModelDownloadPercent(task) {
+    if (!task) return 0;
+    const explicit = Number(task.progress);
+    if (Number.isFinite(explicit) && explicit >= 0) return Math.max(0, Math.min(100, explicit));
+    const completed = Number(task.completed);
+    const total = Number(task.total);
+    if (Number.isFinite(completed) && Number.isFinite(total) && total > 0) {
+        return Math.max(0, Math.min(100, (completed / total) * 100));
+    }
+    return task.state === "done" ? 100 : 0;
+}
+
+function hasActiveModelDownloads() {
+    return Array.from(modelDownloadTasks.values()).some(task => task.state === "active");
+}
+
+function isModelDownloadActive(modelId) {
+    return modelDownloadTasks.get(getModelDownloadTaskId(modelId))?.state === "active";
+}
+
+function closeModelDownloadMenu() {
+    if (!modelDownloadPanel || !modelDownloadBtn) return;
+    modelDownloadPanel.hidden = true;
+    modelDownloadBtn.setAttribute("aria-expanded", "false");
+}
+
+function openModelDownloadMenu() {
+    if (!modelDownloadPanel || !modelDownloadBtn || !modelDownloadTasks.size) return;
+    modelDownloadPanel.hidden = false;
+    modelDownloadBtn.setAttribute("aria-expanded", "true");
+}
+
+function scheduleModelDownloadAutoHide() {
+    if (modelDownloadCloseTimer) {
+        window.clearTimeout(modelDownloadCloseTimer);
+        modelDownloadCloseTimer = null;
+    }
+    if (hasActiveModelDownloads()) return;
+    modelDownloadCloseTimer = window.setTimeout(() => {
+        if (modelDownloadPanel && !modelDownloadPanel.hidden) return;
+        modelDownloadMenuWrap?.setAttribute("hidden", "");
+    }, 18000);
+}
+
+function renderModelDownloadMenu() {
+    if (!modelDownloadMenuWrap || !modelDownloadBtn || !modelDownloadList) return;
+    const tasks = Array.from(modelDownloadTasks.values())
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    const activeTasks = tasks.filter(task => task.state === "active");
+    const errorTasks = tasks.filter(task => task.state === "error");
+    const visible = tasks.length > 0;
+    modelDownloadMenuWrap.hidden = !visible;
+    if (!visible) {
+        closeModelDownloadMenu();
+        return;
+    }
+
+    const averageProgress = activeTasks.length
+        ? activeTasks.reduce((sum, task) => sum + getModelDownloadPercent(task), 0) / activeTasks.length
+        : tasks[0]?.state === "done" ? 100 : getModelDownloadPercent(tasks[0]);
+    const roundedProgress = Math.round(averageProgress);
+    modelDownloadBtn.classList.toggle("active", activeTasks.length > 0);
+    modelDownloadBtn.classList.toggle("error", errorTasks.length > 0 && activeTasks.length === 0);
+    modelDownloadBtn.style.setProperty("--download-progress", `${roundedProgress}%`);
+    if (modelDownloadMiniBar) modelDownloadMiniBar.style.width = `${roundedProgress}%`;
+    if (modelDownloadLabel) {
+        modelDownloadLabel.textContent = activeTasks.length > 0
+            ? `Downloading ${roundedProgress}%`
+            : errorTasks.length > 0 ? "Download failed" : "Downloaded";
+    }
+    if (modelDownloadCount) modelDownloadCount.textContent = String(activeTasks.length || tasks.length);
+    if (modelDownloadSummary) {
+        modelDownloadSummary.textContent = activeTasks.length > 0
+            ? `${activeTasks.length} active model ${activeTasks.length === 1 ? "download" : "downloads"}`
+            : errorTasks.length > 0 ? `${errorTasks.length} model ${errorTasks.length === 1 ? "needs" : "need"} attention` : "All model downloads finished";
+    }
+
+    modelDownloadList.replaceChildren(...tasks.map(task => {
+        const item = document.createElement("div");
+        item.className = `model-download-item model-download-item-${task.state || "active"}`;
+        const percent = Math.round(getModelDownloadPercent(task));
+        item.style.setProperty("--download-progress", `${percent}%`);
+
+        const top = document.createElement("div");
+        top.className = "model-download-item-top";
+        const name = document.createElement("strong");
+        name.textContent = task.modelId || "Ollama model";
+        const state = document.createElement("span");
+        state.textContent = task.state === "done" ? "Done" : task.state === "error" ? "Failed" : percent > 0 ? `${percent}%` : "Starting";
+        top.append(name, state);
+
+        const detail = document.createElement("small");
+        detail.className = "model-download-detail";
+        detail.textContent = task.detail || task.status || "Waiting for Ollama...";
+
+        const bar = document.createElement("div");
+        bar.className = "model-download-progress";
+        const fill = document.createElement("span");
+        bar.appendChild(fill);
+
+        item.append(top, detail, bar);
+        return item;
+    }));
+
+    scheduleModelDownloadAutoHide();
+}
+
+function startModelDownloadTask(modelId, detail = "Starting download") {
+    const id = getModelDownloadTaskId(modelId);
+    modelDownloadTasks.set(id, {
+        id,
+        modelId,
+        state: "active",
+        status: detail,
+        detail,
+        completed: 0,
+        total: 0,
+        progress: 0,
+        startedAt: Date.now(),
+        updatedAt: Date.now()
+    });
+    if (modelDownloadCloseTimer) {
+        window.clearTimeout(modelDownloadCloseTimer);
+        modelDownloadCloseTimer = null;
+    }
+    renderModelDownloadMenu();
+    return id;
+}
+
+function updateModelDownloadTask(id, patch = {}) {
+    const existing = modelDownloadTasks.get(id);
+    if (!existing) return;
+    const next = {
+        ...existing,
+        ...patch,
+        state: patch.state || existing.state || "active",
+        updatedAt: Date.now()
+    };
+    modelDownloadTasks.set(id, next);
+    renderModelDownloadMenu();
+}
+
+function finishModelDownloadTask(id, { ok = true, detail = "" } = {}) {
+    updateModelDownloadTask(id, {
+        state: ok ? "done" : "error",
+        progress: ok ? 100 : undefined,
+        detail: detail || (ok ? "Installed" : "Download failed")
+    });
+}
+
+function applyOllamaPullProgress(modelId, data = {}) {
+    const id = getModelDownloadTaskId(modelId);
+    const status = String(data.status || "").trim();
+    const digest = String(data.digest || "").replace(/^sha256:/i, "").slice(0, 12);
+    const completed = Number(data.completed);
+    const total = Number(data.total);
+    const hasProgress = Number.isFinite(completed) && Number.isFinite(total) && total > 0;
+    const detail = digest && hasProgress
+        ? `${status || "Pulling layer"} ${digest}`
+        : status || "Downloading model";
+    updateModelDownloadTask(id, {
+        status,
+        detail,
+        completed: hasProgress ? completed : undefined,
+        total: hasProgress ? total : undefined,
+        progress: hasProgress ? (completed / total) * 100 : undefined
+    });
+}
+
+modelDownloadBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    if (!modelDownloadPanel) return;
+    if (modelDownloadPanel.hidden) openModelDownloadMenu();
+    else closeModelDownloadMenu();
+});
+
+document.addEventListener("click", event => {
+    if (!modelDownloadMenuWrap || modelDownloadMenuWrap.hidden) return;
+    if (event.target instanceof Node && modelDownloadMenuWrap.contains(event.target)) return;
+    closeModelDownloadMenu();
+});
 
 function getFriendlyError(error, fallbackTitle = "Something went wrong") {
     const rawMessage = error?.message || String(error || fallbackTitle);

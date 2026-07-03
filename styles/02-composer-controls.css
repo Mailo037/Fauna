@@ -1565,6 +1565,27 @@ textarea#prompt::placeholder {
     overflow-wrap: anywhere;
 }
 
+.toast-action {
+    justify-self: start;
+    min-height: 26px;
+    margin-top: 4px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--accent) 44%, var(--border));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+    color: color-mix(in srgb, var(--accent) 78%, #ffffff);
+    font-size: 11px;
+    font-weight: 780;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.toast-action:hover,
+.toast-action:focus-visible {
+    background: color-mix(in srgb, var(--accent) 28%, var(--surface-2));
+    color: #ffffff;
+}
+
 .toast-close {
     display: inline-flex;
     align-items: center;

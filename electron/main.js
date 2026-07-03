@@ -6,6 +6,7 @@ const fsp = require("node:fs/promises");
 const net = require("node:net");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { TextDecoder } = require("node:util");
 const { spawn, spawnSync } = require("node:child_process");
 
 const APP_PROTOCOL = "fauna-app";
@@ -625,6 +626,101 @@ async function proxyOllamaRequest(payload = {}) {
   }
 
   throw new Error(lastError?.message || "Could not reach local Ollama HTTP.");
+}
+
+async function readOllamaPullStream(response, onLine) {
+  if (!response.body) return {};
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalData = {};
+
+  const handleLine = line => {
+    const trimmed = String(line || "").trim();
+    if (!trimmed) return;
+    const data = JSON.parse(trimmed);
+    finalData = { ...finalData, ...data };
+    onLine(data);
+  };
+
+  if (typeof response.body.getReader === "function") {
+    const reader = response.body.getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let lineEnd = buffer.indexOf("\n");
+        while (lineEnd !== -1) {
+          handleLine(buffer.slice(0, lineEnd).replace(/\r$/, ""));
+          buffer = buffer.slice(lineEnd + 1);
+          lineEnd = buffer.indexOf("\n");
+        }
+      }
+    } finally {
+      reader.releaseLock?.();
+    }
+  } else {
+    for await (const chunk of response.body) {
+      buffer += decoder.decode(chunk, { stream: true });
+      let lineEnd = buffer.indexOf("\n");
+      while (lineEnd !== -1) {
+        handleLine(buffer.slice(0, lineEnd).replace(/\r$/, ""));
+        buffer = buffer.slice(lineEnd + 1);
+        lineEnd = buffer.indexOf("\n");
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) handleLine(buffer.trim());
+  return finalData;
+}
+
+async function pullOllamaModelWithProgress(event, payload = {}) {
+  const modelId = String(payload.modelId || payload.name || "").trim();
+  if (!modelId) throw new Error("Missing Ollama model id.");
+  const requestId = String(payload.requestId || crypto.randomUUID());
+  let lastError = null;
+
+  const emitProgress = data => {
+    event.sender.send("fauna:ollama-pull-progress", {
+      requestId,
+      modelId,
+      ...data
+    });
+  };
+
+  for (const baseUrl of OLLAMA_BASE_URL_CANDIDATES) {
+    const timeout = createTimeoutSignal(30 * 60 * 1000);
+    try {
+      const response = await fetch(`${baseUrl}/api/pull`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: modelId, stream: true }),
+        signal: timeout.signal
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(text || `Ollama responded with HTTP ${response.status}`);
+      }
+      const finalData = await readOllamaPullStream(response, emitProgress);
+      if (finalData?.error) throw new Error(finalData.error);
+      emitProgress({ status: "success", done: true, completed: 1, total: 1 });
+      return {
+        ok: true,
+        requestId,
+        modelId,
+        baseUrl,
+        ...finalData
+      };
+    } catch (error) {
+      lastError = error;
+    } finally {
+      timeout.clear();
+    }
+  }
+
+  throw new Error(lastError?.message || `Could not pull ${modelId}.`);
 }
 
 function getDesktopInfo() {
@@ -1648,6 +1744,7 @@ function registerIpc() {
   ipcMain.handle("fauna:desktop-info", () => getDesktopInfo());
   ipcMain.handle("fauna:ollama-status", () => getOllamaStatus());
   ipcMain.handle("fauna:ollama-fetch", (_event, payload) => proxyOllamaRequest(payload));
+  ipcMain.handle("fauna:ollama-pull", (event, payload) => pullOllamaModelWithProgress(event, payload));
   ipcMain.handle("fauna:start-ollama", () => startOllamaHttpService());
   ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
   ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));
