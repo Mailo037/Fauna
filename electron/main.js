@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, protocol, screen, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, protocol, screen, session, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -16,6 +16,10 @@ const MAX_BRIDGE_PORT = 8795;
 const WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY = "faunaWorkspaceBridgeEndpoint";
 const WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY = "faunaWorkspaceBridgeToken";
 const WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY = "faunaWorkspaceBridgeEnabled";
+const WORKSPACE_PROJECTS_STORAGE_KEY = "faunaWorkspaceProjects";
+const WORKSPACE_ACCESS_POLICY_STORAGE_KEY = "faunaWorkspaceAccessPolicy";
+const WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT = "chat-output";
+const WORKSPACE_ACCESS_POLICY_FULL_MACHINE = "full-machine";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
 const AI_PROVIDER_STORAGE_KEY = "faunaAiProvider";
@@ -121,6 +125,281 @@ function sanitizeId(value, fallback = "item") {
     .replace(/^-|-$/g, "")
     .slice(0, 96);
   return clean || fallback;
+}
+
+function hashProjectPath(value) {
+  return crypto.createHash("sha256").update(String(value || "").toLowerCase()).digest("hex").slice(0, 16);
+}
+
+function projectNameFromPath(projectPath) {
+  const base = path.basename(String(projectPath || "").replace(/[\\/]+$/, ""));
+  return base || "Project";
+}
+
+function createWorkspaceProjectId(projectPath, fallback = "project") {
+  return `project-${sanitizeId(projectNameFromPath(projectPath), fallback)}-${hashProjectPath(projectPath)}`;
+}
+
+function createWorkspaceWorktreeId(worktreePath, fallback = "worktree") {
+  return `worktree-${sanitizeId(projectNameFromPath(worktreePath), fallback)}-${hashProjectPath(worktreePath)}`;
+}
+
+function normalizeWorkspaceWorktree(raw, projectId = "") {
+  if (!raw || typeof raw !== "object") return null;
+  const rawPath = String(raw.path || "").trim();
+  if (!rawPath) return null;
+  const resolvedPath = path.resolve(rawPath);
+  return {
+    id: sanitizeId(raw.id || createWorkspaceWorktreeId(resolvedPath), "worktree"),
+    projectId: sanitizeId(raw.projectId || projectId, "project"),
+    name: String(raw.name || raw.branch || projectNameFromPath(resolvedPath)).trim().slice(0, 80) || "Worktree",
+    path: resolvedPath,
+    branch: String(raw.branch || "").trim(),
+    createdAt: String(raw.createdAt || ""),
+    updatedAt: String(raw.updatedAt || raw.createdAt || "")
+  };
+}
+
+function normalizeWorkspaceProject(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const rawPath = String(raw.path || "").trim();
+  if (!rawPath) return null;
+  const resolvedPath = path.resolve(rawPath);
+  const id = sanitizeId(raw.id || createWorkspaceProjectId(resolvedPath), "project");
+  const worktrees = Array.isArray(raw.worktrees)
+    ? raw.worktrees.map(worktree => normalizeWorkspaceWorktree(worktree, id)).filter(Boolean)
+    : [];
+  return {
+    id,
+    name: String(raw.name || projectNameFromPath(resolvedPath)).trim().slice(0, 80) || "Project",
+    path: resolvedPath,
+    createdAt: String(raw.createdAt || ""),
+    updatedAt: String(raw.updatedAt || raw.createdAt || ""),
+    worktrees
+  };
+}
+
+function readWorkspaceProjectsSync() {
+  try {
+    const parsed = JSON.parse(storageGetSync(WORKSPACE_PROJECTS_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeWorkspaceProject).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function writeWorkspaceProjectsSync(projects) {
+  const normalized = (Array.isArray(projects) ? projects : [])
+    .map(normalizeWorkspaceProject)
+    .filter(Boolean);
+  storageSetSync(WORKSPACE_PROJECTS_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+function getWorkspaceProjectBridgeMap(projects = readWorkspaceProjectsSync()) {
+  const map = {};
+  for (const project of projects) {
+    if (project.id && project.path) map[project.id] = project.path;
+    for (const worktree of project.worktrees || []) {
+      if (worktree.id && worktree.path) map[worktree.id] = worktree.path;
+    }
+  }
+  return map;
+}
+
+function findWorkspaceProjectRoot(projects, rootId) {
+  const id = sanitizeId(rootId, "");
+  for (const project of projects) {
+    if (project.id === id) return { project, root: project, type: "project" };
+    const worktree = (project.worktrees || []).find(item => item.id === id);
+    if (worktree) return { project, root: worktree, type: "worktree" };
+  }
+  return null;
+}
+
+async function restartBridgeAfterProjectChange() {
+  if (!app.isReady?.()) return null;
+  return startWorkspaceBridge();
+}
+
+async function chooseWorkspaceProjectFolders() {
+  const selection = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: "Add project folder",
+    properties: ["openDirectory", "multiSelections", "createDirectory"]
+  });
+  if (selection.canceled || selection.filePaths.length === 0) {
+    return { cancelled: true, projects: readWorkspaceProjectsSync(), added: 0 };
+  }
+
+  const now = new Date().toISOString();
+  const projects = readWorkspaceProjectsSync();
+  const knownPaths = new Set(projects.map(project => path.resolve(project.path).toLowerCase()));
+  let added = 0;
+  for (const folder of selection.filePaths) {
+    const resolvedPath = path.resolve(folder);
+    if (knownPaths.has(resolvedPath.toLowerCase())) continue;
+    projects.push({
+      id: createWorkspaceProjectId(resolvedPath),
+      name: projectNameFromPath(resolvedPath),
+      path: resolvedPath,
+      createdAt: now,
+      updatedAt: now,
+      worktrees: []
+    });
+    knownPaths.add(resolvedPath.toLowerCase());
+    added += 1;
+  }
+  const normalized = writeWorkspaceProjectsSync(projects);
+  await restartBridgeAfterProjectChange();
+  return { cancelled: false, projects: normalized, added };
+}
+
+async function saveWorkspaceProjects(projects) {
+  const normalized = writeWorkspaceProjectsSync(projects);
+  await restartBridgeAfterProjectChange();
+  return { ok: true, projects: normalized };
+}
+
+async function openWorkspaceProjectPath(projectPath) {
+  const resolvedPath = path.resolve(String(projectPath || ""));
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    return { ok: false, message: "Project folder does not exist." };
+  }
+  const errorMessage = await shell.openPath(resolvedPath);
+  return { ok: !errorMessage, message: errorMessage || "" };
+}
+
+function canLaunchExecutable(command) {
+  const probe = spawnSync(process.platform === "win32" ? "where.exe" : "which", [command], {
+    encoding: "utf8",
+    windowsHide: true
+  });
+  return probe.status === 0;
+}
+
+async function openWorkspaceProjectTerminal(projectPath) {
+  const resolvedPath = path.resolve(String(projectPath || ""));
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+    return { ok: false, message: "Project folder does not exist." };
+  }
+  if (process.platform === "win32") {
+    const launches = [
+      { command: "wt.exe", args: ["-d", resolvedPath] },
+      { command: "pwsh.exe", args: ["-NoExit", "-Command", `Set-Location -LiteralPath ${JSON.stringify(resolvedPath)}`] },
+      { command: "powershell.exe", args: ["-NoExit", "-Command", `Set-Location -LiteralPath ${JSON.stringify(resolvedPath)}`] },
+      { command: "cmd.exe", args: ["/k", "cd", "/d", resolvedPath] }
+    ];
+    for (const launcher of launches) {
+      if (!canLaunchExecutable(launcher.command)) continue;
+      try {
+        const child = spawn(launcher.command, launcher.args, {
+          cwd: resolvedPath,
+          detached: true,
+          stdio: "ignore",
+          windowsHide: false
+        });
+        child.unref();
+        return { ok: true, command: launcher.command };
+      } catch {
+        // Try the next terminal candidate.
+      }
+    }
+    return { ok: false, message: "No terminal launcher was available." };
+  }
+  if (process.platform === "darwin") {
+    if (!canLaunchExecutable("open")) return { ok: false, message: "No terminal launcher was available." };
+    const child = spawn("open", ["-a", "Terminal", resolvedPath], { detached: true, stdio: "ignore" });
+    child.unref();
+    return { ok: true, command: "open" };
+  }
+  const candidates = ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal"];
+  for (const command of candidates) {
+    if (!canLaunchExecutable(command)) continue;
+    try {
+      const args = command === "gnome-terminal" ? ["--working-directory", resolvedPath] : [];
+      const child = spawn(command, args, {
+        cwd: resolvedPath,
+        detached: true,
+        stdio: "ignore"
+      });
+      child.unref();
+      return { ok: true, command };
+    } catch {
+      // Try the next terminal candidate.
+    }
+  }
+  return { ok: false, message: "No terminal launcher was available." };
+}
+
+function runGitCommand(args, cwd, timeoutMs = 30000) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    windowsHide: true
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || "").trim();
+    throw new Error(detail || `git ${args.join(" ")} failed with exit code ${result.status}`);
+  }
+  return String(result.stdout || "").trim();
+}
+
+function sanitizeGitBranchName(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9_./-]/g, "-")
+    .replace(/\/+/g, "/")
+    .replace(/^-+|-+$/g, "")
+    .replace(/\/$/g, "")
+    || `codex/work-${Date.now().toString(36)}`;
+}
+
+async function findAvailableWorktreePath(repoRoot, branchName) {
+  const parent = path.dirname(repoRoot);
+  const baseName = `${path.basename(repoRoot)}-${sanitizeId(branchName.split("/").pop() || "worktree", "worktree")}`;
+  for (let index = 0; index < 100; index += 1) {
+    const suffix = index === 0 ? "" : `-${index + 1}`;
+    const candidate = path.join(parent, `${baseName}${suffix}`);
+    try {
+      await fsp.access(candidate);
+    } catch {
+      return candidate;
+    }
+  }
+  throw new Error("Could not find an available worktree folder name.");
+}
+
+async function createWorkspaceProjectWorktree(payload = {}) {
+  const projects = readWorkspaceProjectsSync();
+  const match = findWorkspaceProjectRoot(projects, payload.projectId);
+  if (!match) throw new Error("Project was not found.");
+  const branch = sanitizeGitBranchName(payload.branch);
+  const repoRoot = runGitCommand(["rev-parse", "--show-toplevel"], match.root.path, 10000);
+  const worktreePath = await findAvailableWorktreePath(repoRoot, branch);
+  runGitCommand(["worktree", "add", "-b", branch, worktreePath, "HEAD"], repoRoot, 120000);
+
+  const now = new Date().toISOString();
+  const worktree = normalizeWorkspaceWorktree({
+    id: createWorkspaceWorktreeId(worktreePath),
+    projectId: match.project.id,
+    name: branch.split("/").pop() || "Worktree",
+    path: worktreePath,
+    branch,
+    createdAt: now,
+    updatedAt: now
+  }, match.project.id);
+  match.project.worktrees = [
+    ...(match.project.worktrees || []).filter(item => item.id !== worktree.id),
+    worktree
+  ];
+  match.project.updatedAt = now;
+  const normalized = writeWorkspaceProjectsSync(projects);
+  await restartBridgeAfterProjectChange();
+  return { ok: true, projects: normalized, worktree };
 }
 
 function readJsonFileSync(filePath, fallback) {
@@ -315,6 +594,22 @@ function storageRemoveSync(key) {
   delete settings[key];
   writeSettingsSync(settings);
   return true;
+}
+
+function normalizeWorkspaceAccessPolicy(value) {
+  return String(value || "").trim() === WORKSPACE_ACCESS_POLICY_FULL_MACHINE
+    ? WORKSPACE_ACCESS_POLICY_FULL_MACHINE
+    : WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT;
+}
+
+function getWorkspaceAccessPolicySync() {
+  return normalizeWorkspaceAccessPolicy(storageGetSync(WORKSPACE_ACCESS_POLICY_STORAGE_KEY));
+}
+
+function getBridgeRootForPolicy(policy = getWorkspaceAccessPolicySync()) {
+  return policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE
+    ? path.parse(getUserDataRoot()).root || getUserDataRoot()
+    : getUserDataRoot();
 }
 
 function getActiveChatIdSync() {
@@ -756,19 +1051,23 @@ function cancelOllamaPull(payload = {}) {
 function getDesktopInfo() {
   const settings = readSettingsSync();
   const sessions = readChatSessionsSync();
+  const workspaceAccessPolicy = getWorkspaceAccessPolicySync();
   return {
     appDataPath: getUserDataRoot(),
     settingsPath: getSettingsPath(),
     chatsPath: getChatsRoot(),
     mediaPath: path.join(getChatsRoot(), "<chatId>", "media"),
+    outputPath: path.join(getChatsRoot(), "<chatId>", "output"),
     fileRefsPath: getFileRefsPath(),
     bridgeEndpoint: storageGetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY),
-    bridgeRoot: getUserDataRoot(),
+    bridgeRoot: getBridgeRootForPolicy(workspaceAccessPolicy),
+    workspaceAccessPolicy,
     version: app.getVersion(),
     isPackaged: app.isPackaged,
     storageBackend: "AppData",
     settingsKeys: Object.keys(settings).sort(),
     chatCount: sessions.length,
+    projects: readWorkspaceProjectsSync(),
     activeChatId: getActiveChatIdSync(),
     updateState
   };
@@ -1165,7 +1464,26 @@ async function ensureBridgeScriptCopy() {
   return target;
 }
 
+function stopWorkspaceBridge() {
+  const child = bridgeProcess;
+  bridgeProcess = null;
+  if (!child || child.killed) return Promise.resolve();
+
+  return new Promise(resolve => {
+    const timeout = setTimeout(resolve, 2500);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    child.kill();
+  });
+}
+
 async function startWorkspaceBridge() {
+  if (bridgeProcess && !bridgeProcess.killed) {
+    await stopWorkspaceBridge();
+  }
+
   const launcher = findPythonLauncher();
   if (!launcher) {
     console.warn("Fauna desktop could not find Python, so the workspace bridge was not started.");
@@ -1180,8 +1498,10 @@ async function startWorkspaceBridge() {
   storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
 
   const scriptPath = await ensureBridgeScriptCopy();
-  const bridgeRoot = getUserDataRoot();
-  const child = spawn(launcher.command, [
+  const accessPolicy = getWorkspaceAccessPolicySync();
+  const bridgeRoot = getBridgeRootForPolicy(accessPolicy);
+  const projectBridgeMap = getWorkspaceProjectBridgeMap();
+  const bridgeArgs = [
     ...launcher.args,
     scriptPath,
     "--root",
@@ -1191,8 +1511,17 @@ async function startWorkspaceBridge() {
     "--port",
     String(port),
     "--token",
-    token
-  ], {
+    token,
+    "--access-policy",
+    accessPolicy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE ? "machine" : "workspace",
+    "--projects-json",
+    JSON.stringify(projectBridgeMap)
+  ];
+  if (accessPolicy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE) {
+    bridgeArgs.push("--allow-dangerous");
+  }
+
+  const child = spawn(launcher.command, bridgeArgs, {
     cwd: bridgeRoot,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
@@ -1201,10 +1530,10 @@ async function startWorkspaceBridge() {
   child.stdout?.on("data", chunk => console.log(`[fauna-bridge] ${String(chunk).trim()}`));
   child.stderr?.on("data", chunk => console.warn(`[fauna-bridge] ${String(chunk).trim()}`));
   child.on("exit", code => {
-    if (!app.isQuitting) console.warn(`Fauna bridge exited with code ${code}`);
+    if (!app.isQuitting && bridgeProcess === child) console.warn(`Fauna bridge exited with code ${code}`);
   });
   bridgeProcess = child;
-  return { endpoint, token, root: bridgeRoot };
+  return { endpoint, token, root: bridgeRoot, accessPolicy };
 }
 
 function isMainWindowWebContents(webContents) {
@@ -1772,11 +2101,21 @@ function registerIpc() {
   });
   ipcMain.handle("fauna:save-generated-media", (_event, payload) => saveGeneratedMedia(payload));
   ipcMain.handle("fauna:desktop-info", () => getDesktopInfo());
+  ipcMain.handle("fauna:projects-choose-folders", () => chooseWorkspaceProjectFolders());
+  ipcMain.handle("fauna:projects-save", (_event, projects) => saveWorkspaceProjects(projects));
+  ipcMain.handle("fauna:projects-open-path", (_event, projectPath) => openWorkspaceProjectPath(projectPath));
+  ipcMain.handle("fauna:projects-open-terminal", (_event, projectPath) => openWorkspaceProjectTerminal(projectPath));
+  ipcMain.handle("fauna:projects-create-worktree", (_event, payload) => createWorkspaceProjectWorktree(payload));
   ipcMain.handle("fauna:ollama-status", () => getOllamaStatus());
   ipcMain.handle("fauna:ollama-fetch", (_event, payload) => proxyOllamaRequest(payload));
   ipcMain.handle("fauna:ollama-pull", (event, payload) => pullOllamaModelWithProgress(event, payload));
   ipcMain.handle("fauna:ollama-pull-cancel", (_event, payload) => cancelOllamaPull(payload));
   ipcMain.handle("fauna:start-ollama", () => startOllamaHttpService());
+  ipcMain.handle("fauna:set-workspace-access-policy", async (_event, policy) => {
+    storageSetSync(WORKSPACE_ACCESS_POLICY_STORAGE_KEY, normalizeWorkspaceAccessPolicy(policy));
+    await startWorkspaceBridge();
+    return getDesktopInfo();
+  });
   ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
   ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));
   ipcMain.handle("fauna:window-minimize", () => {

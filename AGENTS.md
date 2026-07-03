@@ -84,3 +84,4 @@ After meaningful UI or behavior changes, verify:
 ## Desktop Versioning
 
 - Increment the app version in `major.minor.bugfix` format only when you build and intend to distribute the desktop app.
+- Whenever you increment the app version for a distribution build, also update the in-app changelog so the release notes match the new version.

@@ -43,6 +43,10 @@
     --sidebar-width: var(--sidebar-closed-width);
 }
 
+:root[data-sidebar-size="maximized"]:not([data-sidebar="collapsed"]) {
+    --sidebar-width: min(420px, max(336px, 36vw));
+}
+
 :root[data-theme="light"] {
     color-scheme: light;
     --bg: #f7f8fb;

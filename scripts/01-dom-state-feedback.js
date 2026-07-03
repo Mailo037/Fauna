@@ -10,12 +10,59 @@ const sendButton = document.getElementById("sendButton");
 const sendShortcutBadge = sendButton?.querySelector(".shortcut-badge");
 const slashCommandPalette = document.getElementById("slashCommandPalette");
 const newChatBtn = document.getElementById("newChat");
+const newChatProjectMenu = document.getElementById("newChatProjectMenu");
 const chatHistoryList = document.getElementById("chatHistoryList");
 const chatHistorySection = document.querySelector(".history.sidebar-section");
 const chatHistoryToggle = document.getElementById("chatHistoryToggle");
 const archivedHistorySection = document.getElementById("archivedHistorySection");
 const archivedChatToggle = document.getElementById("archivedChatToggle");
 const archivedChatList = document.getElementById("archivedChatList");
+const projectListToggle = document.getElementById("projectListToggle");
+const addProjectFolderBtn = document.getElementById("addProjectFolderBtn");
+const projectSortBtn = document.getElementById("projectSortBtn");
+const projectSortMenu = document.getElementById("projectSortMenu");
+const projectList = document.getElementById("projectList");
+const projectAgentPanel = document.getElementById("projectAgentPanel");
+const projectAgentTitle = document.getElementById("projectAgentTitle");
+const projectAgentCollapseBtn = document.getElementById("projectAgentCollapseBtn");
+const projectAgentExpandBtn = document.getElementById("projectAgentExpandBtn");
+const projectAgentResizeHandle = document.getElementById("projectAgentResizeHandle");
+const projectPanelMenuTab = document.getElementById("projectPanelMenuTab");
+const projectPanelAddTabBtn = document.getElementById("projectPanelAddTabBtn");
+const projectFilesTab = document.getElementById("projectFilesTab");
+const projectActivityTab = document.getElementById("projectActivityTab");
+const projectPageChatTab = document.getElementById("projectPageChatTab");
+const projectMenuPane = document.getElementById("projectMenuPane");
+const projectFilesPane = document.getElementById("projectFilesPane");
+const projectActivityPane = document.getElementById("projectActivityPane");
+const projectPageChatPane = document.getElementById("projectPageChatPane");
+const projectPageChatLog = document.getElementById("projectPageChatLog");
+const projectPageChatInput = document.getElementById("projectPageChatInput");
+const projectPageChatSendBtn = document.getElementById("projectPageChatSendBtn");
+const workspaceMenuButtons = document.querySelectorAll("[data-workspace-panel-action]");
+const projectExplorerRefreshBtn = document.getElementById("projectExplorerRefreshBtn");
+const projectInstructionsBtn = document.getElementById("projectInstructionsBtn");
+const projectDiffReviewBtn = document.getElementById("projectDiffReviewBtn");
+const projectWorktreeActionBtn = document.getElementById("projectWorktreeActionBtn");
+const projectBranchSummary = document.getElementById("projectBranchSummary");
+const projectExplorerUpBtn = document.getElementById("projectExplorerUpBtn");
+const projectExplorerPath = document.getElementById("projectExplorerPath");
+const projectExplorerFilterInput = document.getElementById("projectExplorerFilterInput");
+const projectExplorerList = document.getElementById("projectExplorerList");
+const projectCommandInput = document.getElementById("projectCommandInput");
+const projectCommandRunBtn = document.getElementById("projectCommandRunBtn");
+const projectCommandOutput = document.getElementById("projectCommandOutput");
+const agentActivityList = document.getElementById("agentActivityList");
+const composerProjectBtn = document.getElementById("composerProjectBtn");
+const composerProjectLabel = document.getElementById("composerProjectLabel");
+const composerProjectMenu = document.getElementById("composerProjectMenu");
+const composerLocalWorkBtn = document.getElementById("composerLocalWorkBtn");
+const composerBranchBtn = document.getElementById("composerBranchBtn");
+const composerBranchLabel = document.getElementById("composerBranchLabel");
+const agentTaskModeBtn = document.getElementById("agentTaskModeBtn");
+const agentTaskModeLabel = document.getElementById("agentTaskModeLabel");
+const agentTaskModeMenu = document.getElementById("agentTaskModeMenu");
+const newNormalChatBtn = document.getElementById("newNormalChatBtn");
 const chatTitle = document.getElementById("chatTitle");
 const chatTitleInput = document.getElementById("chatTitleInput");
 const chatTitleEditBtn = document.getElementById("chatTitleEditBtn");
@@ -43,6 +90,8 @@ const modelDownloadList = document.getElementById("modelDownloadList");
 const windowMinimizeBtn = document.getElementById("windowMinimizeBtn");
 const windowMaximizeBtn = document.getElementById("windowMaximizeBtn");
 const windowCloseBtn = document.getElementById("windowCloseBtn");
+const windowWorkspacePanelToggleBtn = document.getElementById("windowSidebarToggleBtn");
+const windowWorkspacePanelMaximizeBtn = document.getElementById("windowSidebarMaximizeBtn");
 const playgroundNavButton = document.getElementById("playgroundNavButton");
 const libraryNavButton = document.getElementById("libraryNavButton");
 const workspaceNavButtons = document.querySelectorAll("[data-workspace-view]");
@@ -162,6 +211,10 @@ const localModelsAutoStartToggle = document.getElementById("localModelsAutoStart
 const localModelsAutoStartStatus = document.getElementById("localModelsAutoStartStatus");
 const localTaskModelsStatus = document.getElementById("localTaskModelsStatus");
 const localTaskModelsResetBtn = document.getElementById("localTaskModelsResetBtn");
+const localTaskModelsMissingCard = document.getElementById("localTaskModelsMissingCard");
+const localTaskModelsMissingSummary = document.getElementById("localTaskModelsMissingSummary");
+const localTaskModelsMissingList = document.getElementById("localTaskModelsMissingList");
+const localTaskModelsInstallBtn = document.getElementById("localTaskModelsInstallBtn");
 const localTaskReasoningModelInput = document.getElementById("localTaskReasoningModelInput");
 const localTaskVisionModelInput = document.getElementById("localTaskVisionModelInput");
 const localTaskCodeModelInput = document.getElementById("localTaskCodeModelInput");
@@ -178,6 +231,9 @@ const workspaceBridgeStatus = document.getElementById("workspaceBridgeStatus");
 const workspaceBridgeSaveBtn = document.getElementById("workspaceBridgeSaveBtn");
 const workspaceBridgeTestBtn = document.getElementById("workspaceBridgeTestBtn");
 const workspaceBridgeClearBtn = document.getElementById("workspaceBridgeClearBtn");
+const workspaceAccessPolicySection = document.getElementById("workspaceAccessPolicySection");
+const workspaceAccessPolicyStatus = document.getElementById("workspaceAccessPolicyStatus");
+const workspaceAccessPolicyButtons = document.querySelectorAll("[data-workspace-access-policy]");
 const stopButton = document.getElementById("stopButton");
 const settingsOpenBtn = document.getElementById("settingsOpenBtn");
 const mobileSettingsOpenBtn = document.getElementById("mobileSettingsOpenBtn");
@@ -256,7 +312,9 @@ const appInfoAppDataPath = document.getElementById("appInfoAppDataPath");
 const appInfoSettingsPath = document.getElementById("appInfoSettingsPath");
 const appInfoChatsPath = document.getElementById("appInfoChatsPath");
 const appInfoMediaPath = document.getElementById("appInfoMediaPath");
+const appInfoOutputPath = document.getElementById("appInfoOutputPath");
 const appInfoBridgeEndpoint = document.getElementById("appInfoBridgeEndpoint");
+const appInfoWorkspaceAccessPolicy = document.getElementById("appInfoWorkspaceAccessPolicy");
 const appInfoChatCount = document.getElementById("appInfoChatCount");
 const appInfoStoredKeys = document.getElementById("appInfoStoredKeys");
 const appInfoOnboardingBtn = document.getElementById("appInfoOnboardingBtn");
@@ -364,12 +422,24 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.7";
-const FAUNA_APP_BUILD_ID = "20260703-changelog-download-controls";
+const FAUNA_APP_VERSION = "0.1.8";
+const FAUNA_APP_BUILD_ID = "20260703-agent-workspace-release";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.1.8",
+        date: "2026-07-03",
+        commit: "v0.1.8",
+        title: "Project workspaces and agent tools",
+        changes: [
+            "Added project folders, project-bound chats, worktree metadata, and a composer project picker.",
+            "Added the right workspace panel with files, terminal launch, activity, and page-chat tabs.",
+            "Expanded the local workspace bridge with safer desktop agent access controls and command/file tooling.",
+            "Improved sidebar, composer, topbar, changelog, shortcut, and Task Models install polish."
+        ]
+    },
     {
         version: "0.1.7",
         date: "2026-07-03",
@@ -687,6 +757,7 @@ function setWindowUpdateUi(state = {}, { manual = false } = {}) {
     if (windowUpdateBtn) {
         windowUpdateBtn.disabled = isBusy;
         windowUpdateBtn.setAttribute("aria-busy", String(isBusy));
+        windowUpdateBtn.dataset.updateStatus = status;
         windowUpdateBtn.dataset.tooltip = message || "Check updates";
     }
 
@@ -792,12 +863,18 @@ function renderChangelogMenu() {
     if (changelogSummary) {
         changelogSummary.textContent = `${FAUNA_CHANGELOG_ENTRIES.length} recent desktop releases`;
     }
-    changelogList.replaceChildren(...FAUNA_CHANGELOG_ENTRIES.map(entry => {
+    changelogList.replaceChildren(...FAUNA_CHANGELOG_ENTRIES.map((entry, index) => {
         const article = document.createElement("article");
         article.className = "changelog-entry";
 
         const header = document.createElement("header");
         header.className = "changelog-entry-head";
+        const toggle = document.createElement("button");
+        toggle.className = "changelog-entry-toggle";
+        toggle.type = "button";
+        const detailsId = `changelogDetails-${String(entry.version || index).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.setAttribute("aria-controls", detailsId);
         const titleWrap = document.createElement("div");
         const title = document.createElement("strong");
         title.textContent = `Fauna ${entry.version}`;
@@ -806,14 +883,34 @@ function renderChangelogMenu() {
         titleWrap.append(title, subtitle);
         const badge = document.createElement("span");
         badge.textContent = entry.title;
-        header.append(titleWrap, badge);
+        const chevron = document.createElement("svg");
+        chevron.className = "changelog-entry-chevron";
+        chevron.setAttribute("viewBox", "0 0 24 24");
+        chevron.setAttribute("fill", "none");
+        chevron.setAttribute("stroke", "currentColor");
+        chevron.setAttribute("stroke-width", "2.2");
+        chevron.setAttribute("stroke-linecap", "round");
+        chevron.setAttribute("stroke-linejoin", "round");
+        chevron.setAttribute("aria-hidden", "true");
+        chevron.innerHTML = '<path d="m9 18 6-6-6-6"></path>';
+        toggle.append(titleWrap, badge, chevron);
+        header.append(toggle);
 
         const list = document.createElement("ul");
         list.className = "changelog-change-list";
+        list.id = detailsId;
+        list.hidden = true;
         entry.changes.forEach(change => {
             const item = document.createElement("li");
             item.textContent = change;
             list.appendChild(item);
+        });
+
+        toggle.addEventListener("click", () => {
+            const expanded = toggle.getAttribute("aria-expanded") === "true";
+            toggle.setAttribute("aria-expanded", String(!expanded));
+            article.classList.toggle("expanded", !expanded);
+            list.hidden = expanded;
         });
 
         article.append(header, list);
@@ -843,6 +940,10 @@ function initializeWindowBar() {
         if (webNavigationIndex < webNavigationStack.length - 1) window.history.forward();
     });
     windowUpdateBtn?.addEventListener("click", () => {
+        windowUpdateBtn.classList.remove("window-update-pulse");
+        void windowUpdateBtn.offsetWidth;
+        windowUpdateBtn.classList.add("window-update-pulse");
+        window.setTimeout(() => windowUpdateBtn?.classList.remove("window-update-pulse"), 620);
         void checkFaunaAppUpdate({ manual: true });
     });
     windowUpdateInstallBtn?.addEventListener("click", () => {
@@ -1618,7 +1719,7 @@ function getModelDownloadTaskId(modelId) {
 }
 
 function normalizeModelDownloadState(state = "active") {
-    return ["active", "paused", "stopped", "done", "error", "interrupted"].includes(state)
+    return ["active", "queued", "paused", "stopped", "done", "error", "interrupted"].includes(state)
         ? state
         : "active";
 }
@@ -1686,13 +1787,18 @@ function normalizeModelDownloadTask(rawTask = {}, { markInterrupted = false } = 
         ? rawTask.logs.map(normalizeModelDownloadLog).filter(Boolean).slice(-MODEL_DOWNLOAD_MAX_LOG_LINES)
         : [];
 
-    if (markInterrupted && state === "active") {
+    if (markInterrupted && ["active", "queued"].includes(state)) {
+        const wasQueued = state === "queued";
         state = "interrupted";
-        detail = "Fauna restarted before this download finished. Resume to continue.";
+        detail = wasQueued
+            ? "Fauna restarted before this queued download started. Resume to continue."
+            : "Fauna restarted before this download finished. Resume to continue.";
         logs.push({
             time: Date.now(),
             level: "warning",
-            message: "Download was interrupted by an app restart."
+            message: wasQueued
+                ? "Queued download was interrupted by an app restart."
+                : "Download was interrupted by an app restart."
         });
     }
 
@@ -1706,6 +1812,7 @@ function normalizeModelDownloadTask(rawTask = {}, { markInterrupted = false } = 
         completed: Number(rawTask.completed) || 0,
         total: Number(rawTask.total) || 0,
         progress: Number.isFinite(Number(rawTask.progress)) ? Number(rawTask.progress) : 0,
+        queueIndex: Number.isFinite(Number(rawTask.queueIndex)) ? Number(rawTask.queueIndex) : 0,
         startedAt: Number(rawTask.startedAt) || Date.now(),
         updatedAt: Number(rawTask.updatedAt) || Date.now(),
         lastLogMessage: String(rawTask.lastLogMessage || ""),
@@ -1751,7 +1858,7 @@ function hasActiveModelDownloads() {
 }
 
 function hasAttentionModelDownloads() {
-    return Array.from(modelDownloadTasks.values()).some(task => ["active", "paused", "error", "interrupted"].includes(task.state));
+    return Array.from(modelDownloadTasks.values()).some(task => ["active", "queued", "paused", "error", "interrupted"].includes(task.state));
 }
 
 function isModelDownloadActive(modelId) {
@@ -1809,12 +1916,28 @@ function scheduleModelDownloadAutoHide() {
     }, 18000);
 }
 
+function getModelDownloadSortRank(task) {
+    const state = task?.state || "active";
+    if (state === "active") return 0;
+    if (state === "queued") return 1;
+    if (["paused", "interrupted", "error"].includes(state)) return 2;
+    return 3;
+}
+
 function renderModelDownloadMenu() {
     if (!modelDownloadMenuWrap || !modelDownloadBtn || !modelDownloadList) return;
     const wasPanelOpen = Boolean(modelDownloadPanel && !modelDownloadPanel.hidden);
     const tasks = Array.from(modelDownloadTasks.values())
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        .sort((a, b) => {
+            const rankDelta = getModelDownloadSortRank(a) - getModelDownloadSortRank(b);
+            if (rankDelta !== 0) return rankDelta;
+            if (a.state === "queued" && b.state === "queued") {
+                return (a.queueIndex || 0) - (b.queueIndex || 0);
+            }
+            return (b.updatedAt || 0) - (a.updatedAt || 0);
+        });
     const activeTasks = tasks.filter(task => task.state === "active");
+    const queuedTasks = tasks.filter(task => task.state === "queued");
     const errorTasks = tasks.filter(task => task.state === "error");
     const pausedTasks = tasks.filter(task => ["paused", "interrupted"].includes(task.state));
     const visible = tasks.length > 0;
@@ -1833,18 +1956,25 @@ function renderModelDownloadMenu() {
         : tasks[0]?.state === "done" ? 100 : getModelDownloadPercent(tasks[0]);
     const roundedProgress = Math.round(averageProgress);
     modelDownloadBtn.classList.toggle("active", activeTasks.length > 0);
+    modelDownloadBtn.classList.toggle("queued", activeTasks.length === 0 && queuedTasks.length > 0);
     modelDownloadBtn.classList.toggle("error", errorTasks.length > 0 && activeTasks.length === 0);
     modelDownloadBtn.style.setProperty("--download-progress", `${roundedProgress}%`);
     if (modelDownloadMiniBar) modelDownloadMiniBar.style.width = `${roundedProgress}%`;
     if (modelDownloadLabel) {
         modelDownloadLabel.textContent = activeTasks.length > 0
             ? `Downloading ${roundedProgress}%`
-            : errorTasks.length > 0 ? "Download failed" : tasks[0]?.state === "paused" ? "Download paused" : tasks[0]?.state === "interrupted" ? "Resume download" : "Downloaded";
+            : queuedTasks.length > 0
+                ? `${queuedTasks.length} queued`
+                : errorTasks.length > 0 ? "Download failed" : tasks[0]?.state === "paused" ? "Download paused" : tasks[0]?.state === "interrupted" ? "Resume download" : "Downloaded";
     }
     if (modelDownloadCount) modelDownloadCount.textContent = String(activeTasks.length || tasks.length);
     if (modelDownloadSummary) {
         modelDownloadSummary.textContent = activeTasks.length > 0
-            ? `${activeTasks.length} active model ${activeTasks.length === 1 ? "download" : "downloads"}`
+            ? queuedTasks.length > 0
+                ? `${activeTasks.length} active, ${queuedTasks.length} queued`
+                : `${activeTasks.length} active model ${activeTasks.length === 1 ? "download" : "downloads"}`
+            : queuedTasks.length > 0
+                ? `${queuedTasks.length} model ${queuedTasks.length === 1 ? "is" : "are"} queued`
             : errorTasks.length > 0
                 ? `${errorTasks.length} model ${errorTasks.length === 1 ? "needs" : "need"} attention`
                 : pausedTasks.length > 0
@@ -1875,13 +2005,15 @@ function renderModelDownloadMenu() {
             ? "Done"
             : task.state === "error"
                 ? "Failed"
-                : task.state === "paused"
-                    ? "Paused"
-                    : task.state === "stopped"
-                        ? "Stopped"
-                        : task.state === "interrupted"
-                            ? "Interrupted"
-                            : percent > 0 ? `${percent}%` : "Starting";
+                : task.state === "queued"
+                    ? "Queued"
+                    : task.state === "paused"
+                        ? "Paused"
+                        : task.state === "stopped"
+                            ? "Stopped"
+                            : task.state === "interrupted"
+                                ? "Interrupted"
+                                : percent > 0 ? `${percent}%` : "Starting";
         top.append(name, state);
 
         const detail = document.createElement("small");
@@ -1944,6 +2076,11 @@ function renderModelDownloadDetails(task) {
             createModelDownloadAction(task.id, "pause", "Pause"),
             createModelDownloadAction(task.id, "stop", "Stop", "danger")
         );
+    } else if (state === "queued") {
+        actions.append(
+            createModelDownloadAction(task.id, "resume", "Start"),
+            createModelDownloadAction(task.id, "clear", "Clear")
+        );
     } else if (["paused", "interrupted", "error"].includes(state)) {
         actions.append(
             createModelDownloadAction(task.id, "resume", "Resume"),
@@ -2004,6 +2141,7 @@ function startModelDownloadTask(modelId, detail = "Starting download", options =
         state: "active",
         status: detail,
         detail,
+        queueIndex: Number(existing?.queueIndex) || 0,
         completed: options.resume ? Number(existing?.completed) || 0 : 0,
         total: options.resume ? Number(existing?.total) || 0 : 0,
         progress: options.resume ? Number(existing?.progress) || 0 : 0,
@@ -2017,6 +2155,37 @@ function startModelDownloadTask(modelId, detail = "Starting download", options =
     }
     updateModelDownloadTask(id, {}, { log: detail });
     peekModelDownloadButton(MODEL_DOWNLOAD_START_PEEK_MS);
+    return id;
+}
+
+function queueModelDownloadTask(modelId, detail = "Waiting in queue", queueIndex = 0) {
+    const id = getModelDownloadTaskId(modelId);
+    const existing = modelDownloadTasks.get(id);
+    if (existing?.state === "active") return id;
+    modelDownloadTasks.set(id, {
+        ...existing,
+        id,
+        modelId,
+        requestId: String(existing?.requestId || ""),
+        state: "queued",
+        status: detail,
+        detail,
+        completed: Number(existing?.completed) || 0,
+        total: Number(existing?.total) || 0,
+        progress: Number(existing?.progress) || 0,
+        queueIndex,
+        startedAt: existing?.startedAt || Date.now(),
+        updatedAt: Date.now(),
+        logs: Array.isArray(existing?.logs) && existing.logs.length > 0
+            ? existing.logs.slice(-MODEL_DOWNLOAD_MAX_LOG_LINES)
+            : [{
+                time: Date.now(),
+                level: "info",
+                message: detail
+            }]
+    });
+    persistModelDownloadTasks();
+    renderModelDownloadMenu();
     return id;
 }
 

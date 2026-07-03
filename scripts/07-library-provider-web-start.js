@@ -542,9 +542,12 @@ function initializeChatSessions() {
     deletedLibraryItemKeys = readDeletedLibraryItemKeys();
     persistedLibraryItems = readStoredLibraryItems();
     openAiFileCache = readStoredOpenAiFileCache();
+    workspaceProjects = readStoredWorkspaceProjects();
     chatSessions = readStoredChatSessions();
     initializeUsageEvents();
     const storedActiveId = safeLocalStorageGet(ACTIVE_CHAT_SESSION_STORAGE_KEY);
+    renderProjectList();
+    renderComposerProjectPicker();
 
     if (chatSessions.length === 0) {
         restoreEmptyChatDraft({ updateUrl: false });

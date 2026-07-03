@@ -315,23 +315,123 @@ function renderLocalTaskModelSelects() {
     updateLocalTaskModelSelects();
 }
 
+let isTaskModelInstallInProgress = false;
+
+function groupLocalTaskModelRows(rows, predicate) {
+    const grouped = new Map();
+    rows.filter(predicate).forEach(row => {
+        const model = normalizeModelId(row.model);
+        if (!model) return;
+        const key = model.toLowerCase().replace(/:latest$/, "");
+        const item = grouped.get(key) || {
+            model,
+            labels: [],
+            tasks: []
+        };
+        if (!item.labels.includes(row.label)) item.labels.push(row.label);
+        if (!item.tasks.includes(row.task)) item.tasks.push(row.task);
+        grouped.set(key, item);
+    });
+    return Array.from(grouped.values());
+}
+
+function getMissingLocalTaskModelGroups(rows = getLocalTaskModelStatusRows()) {
+    return groupLocalTaskModelRows(rows, row => !row.installed);
+}
+
+function getIncompatibleLocalTaskModelGroups(rows = getLocalTaskModelStatusRows()) {
+    return groupLocalTaskModelRows(rows, row => row.installed && !row.supportsTask);
+}
+
+function createLocalTaskModelIssueRow(item, stateText) {
+    const row = document.createElement("div");
+    row.className = "local-task-missing-row";
+
+    const model = document.createElement("span");
+    model.className = "local-task-missing-model";
+    model.textContent = item.model;
+
+    const roles = document.createElement("span");
+    roles.className = "local-task-missing-roles";
+    item.labels.forEach(label => {
+        const chip = document.createElement("span");
+        chip.className = "local-task-missing-chip";
+        chip.textContent = label;
+        roles.append(chip);
+    });
+
+    const state = document.createElement("span");
+    state.className = "local-task-missing-state";
+    state.textContent = stateText;
+
+    row.append(model, roles, state);
+    return row;
+}
+
+function renderLocalTaskModelsMissingCard(rows = getLocalTaskModelStatusRows()) {
+    if (!localTaskModelsMissingCard) return;
+    const missing = getMissingLocalTaskModelGroups(rows);
+    const incompatible = getIncompatibleLocalTaskModelGroups(rows);
+    const shouldShow = isOllamaReachable && (missing.length > 0 || incompatible.length > 0);
+    localTaskModelsMissingCard.hidden = !shouldShow;
+    if (!shouldShow) {
+        localTaskModelsMissingList?.replaceChildren();
+        if (localTaskModelsInstallBtn) {
+            localTaskModelsInstallBtn.hidden = true;
+            localTaskModelsInstallBtn.disabled = true;
+        }
+        return;
+    }
+
+    localTaskModelsMissingCard.dataset.state = missing.length > 0 ? "missing" : "incompatible";
+    const title = localTaskModelsMissingCard.querySelector(".local-task-missing-title");
+    if (title) {
+        title.textContent = missing.length > 0 ? "Missing task models" : "Task model mismatch";
+    }
+    if (localTaskModelsMissingSummary) {
+        const missingRouteCount = missing.reduce((total, item) => total + item.labels.length, 0);
+        const incompatibleRouteCount = incompatible.reduce((total, item) => total + item.labels.length, 0);
+        if (missing.length > 0 && incompatible.length > 0) {
+            localTaskModelsMissingSummary.textContent = `Install ${missing.length} model${missing.length === 1 ? "" : "s"} and change ${incompatibleRouteCount} task route${incompatibleRouteCount === 1 ? "" : "s"}.`;
+        } else if (missing.length > 0) {
+            localTaskModelsMissingSummary.textContent = `Install ${missing.length} Ollama model${missing.length === 1 ? "" : "s"} to enable ${missingRouteCount} task route${missingRouteCount === 1 ? "" : "s"}.`;
+        } else {
+            localTaskModelsMissingSummary.textContent = `Choose a compatible Ollama model for ${incompatibleRouteCount} task route${incompatibleRouteCount === 1 ? "" : "s"}.`;
+        }
+    }
+
+    if (localTaskModelsMissingList) {
+        localTaskModelsMissingList.replaceChildren(
+            ...missing.map(item => createLocalTaskModelIssueRow(item, "Missing")),
+            ...incompatible.map(item => createLocalTaskModelIssueRow(item, "Wrong type"))
+        );
+    }
+
+    if (localTaskModelsInstallBtn) {
+        localTaskModelsInstallBtn.hidden = missing.length === 0;
+        localTaskModelsInstallBtn.disabled = missing.length === 0 || isTaskModelInstallInProgress;
+        localTaskModelsInstallBtn.textContent = isTaskModelInstallInProgress ? "Installing..." : "Install missing";
+    }
+}
+
 function updateLocalTaskModelsStatus() {
-    if (!localTaskModelsStatus) return;
     const rows = getLocalTaskModelStatusRows();
-    const missing = rows.filter(row => !row.installed);
-    const incompatible = rows.filter(row => !row.supportsTask);
+    const missing = getMissingLocalTaskModelGroups(rows);
+    const incompatible = getIncompatibleLocalTaskModelGroups(rows);
+    renderLocalTaskModelsMissingCard(rows);
+    if (!localTaskModelsStatus) return;
     if (!isOllamaReachable) {
         localTaskModelsStatus.textContent = hasCheckedOllamaStatus ? "Ollama offline" : "Checking";
         localTaskModelsStatus.dataset.state = "missing";
         return;
     }
-    if (incompatible.length > 0) {
-        localTaskModelsStatus.textContent = `${incompatible.length} incompatible`;
+    if (missing.length > 0) {
+        localTaskModelsStatus.textContent = `${missing.length} missing`;
         localTaskModelsStatus.dataset.state = "missing";
         return;
     }
-    if (missing.length > 0) {
-        localTaskModelsStatus.textContent = `${missing.length} missing`;
+    if (incompatible.length > 0) {
+        localTaskModelsStatus.textContent = `${incompatible.length} incompatible`;
         localTaskModelsStatus.dataset.state = "missing";
         return;
     }

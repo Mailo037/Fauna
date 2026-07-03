@@ -472,7 +472,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     const requestSessionId = options.sessionId || activeSessionId || "";
     const requireChatTitle = shouldRequestAssistantChatTitle(messages, requestSessionId);
     const workingMessages = [
-        { role: "system", content: buildAssistantSystemPrompt(allowLocalTools, requireChatTitle, allowWebTools, allowToolCalls, allowLocationTools) },
+        { role: "system", content: buildAssistantSystemPrompt(allowLocalTools, requireChatTitle, allowWebTools, allowToolCalls, allowLocationTools, getEffectiveWorkspaceAccessPolicy(), requestSessionId) },
         ...cloneConversationHistory(messages)
     ];
     let lastData = null;
@@ -611,6 +611,15 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 meta: "Running"
             };
             toolActivityItems.push(activityItem);
+            activityItem.agentActivityId = typeof recordAgentActivity === "function"
+                ? recordAgentActivity({
+                    kind: activityItem.kind,
+                    label: activityItem.label,
+                    detail: activityItem.detail || activityItem.input,
+                    input: activityItem.input,
+                    status: "running"
+                })
+                : "";
             if (progressTarget) {
                 renderToolActivity(progressTarget, {
                     title: getFaunaToolProgressLabel(toolCall),
@@ -652,9 +661,21 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                     resultText = String(toolResult || "");
                 }
                 activityItem.meta = isThinkingTool ? "Reset" : "Done";
+                if (activityItem.agentActivityId && typeof updateAgentActivityEvent === "function") {
+                    updateAgentActivityEvent(activityItem.agentActivityId, {
+                        status: isThinkingTool ? "reset" : "done",
+                        detail: activityItem.detail || activityItem.input
+                    });
+                }
             } catch (err) {
                 resultText = `Tool failed: ${err.message}`;
                 activityItem.meta = "Failed";
+                if (activityItem.agentActivityId && typeof updateAgentActivityEvent === "function") {
+                    updateAgentActivityEvent(activityItem.agentActivityId, {
+                        status: "failed",
+                        detail: err.message
+                    });
+                }
             }
             if (toolSignature) {
                 toolResultsBySignature.set(toolSignature, { toolCall, resultText });

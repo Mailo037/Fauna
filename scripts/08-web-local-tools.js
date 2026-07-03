@@ -384,7 +384,7 @@ async function executeWaitForCommandToolCall(toolCall, signal = null) {
     while (Date.now() - startedAt <= maxMs) {
         throwIfAborted(signal);
         attempts += 1;
-        lastResult = await runWorkspaceCommand(command, toolCall.cwd || ".", commandTimeout, signal);
+        lastResult = await runWorkspaceCommand(command, toolCall.cwd || ".", commandTimeout, signal, getWorkspaceToolBridgeOptions(signal));
         if (commandResultMatchesWaitCondition(lastResult, {
             expectedExitCode,
             contains,
@@ -471,7 +471,7 @@ async function executeStopwatchCommandToolCall(toolCall, signal = null) {
     const startedAtEpochMs = Date.now();
     const startedAt = performance.now();
     const timeout = Math.max(1, Math.min(60, Number(toolCall.timeout || toolCall.commandTimeout || toolCall.commandTimeoutSeconds || 20) || 20));
-    const result = await runWorkspaceCommand(command, toolCall.cwd || ".", timeout, signal);
+    const result = await runWorkspaceCommand(command, toolCall.cwd || ".", timeout, signal, getWorkspaceToolBridgeOptions(signal));
     const elapsedMs = performance.now() - startedAt;
     const bridgeDuration = Number.isFinite(Number(result.durationMs))
         ? `Bridge command duration: ${formatPreciseDuration(Number(result.durationMs))} (${Math.round(Number(result.durationMs))}ms).`
@@ -736,6 +736,43 @@ function hasWorkspaceBridgeAccess() {
     return Boolean(isWorkspaceBridgeEnabled && getWorkspaceBridgeBaseUrl() && getWorkspaceBridgeToken());
 }
 
+function sanitizeWorkspacePolicySegment(value, fallback = "item") {
+    const clean = String(value || "")
+        .trim()
+        .replace(/[^a-zA-Z0-9_.-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 96);
+    return clean || fallback;
+}
+
+function getEffectiveWorkspaceAccessPolicy() {
+    if (!isFaunaDesktopApp()) return WORKSPACE_ACCESS_POLICY_BRIDGE_ROOT;
+    const stored = normalizeWorkspaceAccessPolicy(safeLocalStorageGet(WORKSPACE_ACCESS_POLICY_STORAGE_KEY));
+    return stored === WORKSPACE_ACCESS_POLICY_BRIDGE_ROOT ? WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT : stored;
+}
+
+function getWorkspaceToolSessionId(signal = null) {
+    const fromSignal = typeof getGenerationSessionIdForSignal === "function"
+        ? getGenerationSessionIdForSignal(signal)
+        : "";
+    return fromSignal || activeSessionId || getActiveSession?.()?.id || "unassigned-chat";
+}
+
+function getWorkspaceToolScope(signal = null) {
+    const projectScope = typeof getActiveWorkspaceProjectBridgeScope === "function"
+        ? getActiveWorkspaceProjectBridgeScope(signal)
+        : "";
+    if (projectScope) return projectScope;
+    if (getEffectiveWorkspaceAccessPolicy() !== WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT) return "";
+    return `chats/${sanitizeWorkspacePolicySegment(getWorkspaceToolSessionId(signal), "unassigned-chat")}/output`;
+}
+
+function getWorkspaceToolBridgeOptions(signal = null) {
+    const scope = getWorkspaceToolScope(signal);
+    return scope ? { scope } : {};
+}
+
 function getWorkspaceBridgeHeaders(includeJson = false) {
     const headers = {};
     const token = getWorkspaceBridgeToken();
@@ -825,7 +862,27 @@ function formatWorkspaceCommandResult(result) {
     const stderr = result.stderr ? `\nStderr:\n${trimLocalToolText(result.stderr)}` : "";
     const timedOut = result.timedOut ? "\n[Command timed out]" : "";
     const truncated = result.truncated ? "\n[Output truncated by bridge limit]" : "";
-    return `Command: ${result.command}\nCwd: ${result.cwd || "."}\nExit code: ${result.exitCode ?? "timeout"}\nDuration: ${result.durationMs ?? 0}ms\nStdout:\n${stdout}${stderr}${timedOut}${truncated}`;
+    const status = result.timedOut ? "Timed out" : Number(result.exitCode || 0) === 0 ? "Passed" : "Failed";
+    const signalLine = String(result.stderr || result.stdout || "")
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .find(Boolean) || "No command output.";
+    return `Command: ${result.command}\nCwd: ${result.cwd || "."}\nSummary: ${status}. ${signalLine}\nExit code: ${result.exitCode ?? "timeout"}\nDuration: ${result.durationMs ?? 0}ms\nStdout:\n${stdout}${stderr}${timedOut}${truncated}`;
+}
+
+function formatWorkspaceWriteResult(result = {}) {
+    return [
+        result.appended ? "File appended." : "File written.",
+        `Path: ${result.path || "."}`,
+        `Size: ${Number(result.size || 0).toLocaleString()} bytes`
+    ].join("\n");
+}
+
+function formatWorkspaceDirectoryResult(result = {}) {
+    return [
+        "Directory ready.",
+        `Path: ${result.path || "."}`
+    ].join("\n");
 }
 
 function shouldUseWorkspaceBridge(text) {
@@ -895,30 +952,57 @@ function extractDirectReadPaths(text) {
     return [...paths].slice(0, 5);
 }
 
-async function listWorkspaceTree(path = ".", depth = 2, signal = null, limit = 220) {
+async function listWorkspaceTree(path = ".", depth = 2, signal = null, limit = 220, bridgeOptions = {}) {
     const params = new URLSearchParams({
         path: path || ".",
         depth: String(Math.max(0, Math.min(5, Number(depth) || 2))),
         limit: String(Math.max(1, Math.min(800, Number(limit) || 220)))
     });
+    if (bridgeOptions.scope) params.set("scope", bridgeOptions.scope);
     return requestWorkspaceBridge(`/tree?${params.toString()}`, { signal });
 }
 
-async function readWorkspaceFile(path, signal = null) {
+async function readWorkspaceFile(path, signal = null, bridgeOptions = {}) {
     const params = new URLSearchParams({
         path,
         maxBytes: "80000"
     });
+    if (bridgeOptions.scope) params.set("scope", bridgeOptions.scope);
     return requestWorkspaceBridge(`/read?${params.toString()}`, { signal });
 }
 
-async function runWorkspaceCommand(command, cwd = ".", timeout = 20, signal = null) {
+async function runWorkspaceCommand(command, cwd = ".", timeout = 20, signal = null, bridgeOptions = {}) {
     return requestWorkspaceBridge("/exec", {
         method: "POST",
         body: {
             command,
             cwd: cwd || ".",
-            timeout: Math.max(1, Math.min(60, Number(timeout) || 20))
+            timeout: Math.max(1, Math.min(60, Number(timeout) || 20)),
+            ...bridgeOptions
+        },
+        signal
+    });
+}
+
+async function writeWorkspaceFile(path, content = "", signal = null, bridgeOptions = {}, append = false) {
+    return requestWorkspaceBridge("/write", {
+        method: "POST",
+        body: {
+            path,
+            content: String(content ?? ""),
+            append: Boolean(append),
+            ...bridgeOptions
+        },
+        signal
+    });
+}
+
+async function makeWorkspaceDirectory(path, signal = null, bridgeOptions = {}) {
+    return requestWorkspaceBridge("/mkdir", {
+        method: "POST",
+        body: {
+            path,
+            ...bridgeOptions
         },
         signal
     });
@@ -996,13 +1080,13 @@ function workspaceSearchPathMatches(filePath, query, includeGlobs = []) {
     return normalized.toLowerCase().includes(String(query).toLowerCase());
 }
 
-async function searchWorkspaceFiles(toolCall = {}, signal = null) {
+async function searchWorkspaceFiles(toolCall = {}, signal = null, bridgeOptions = {}) {
     const path = cleanWorkspaceToolPath(toolCall.path || ".");
     const query = normalizeWorkspaceSearchQuery(toolCall);
     const depth = normalizeWorkspaceToolLimit(toolCall.depth, 5, 0, 5);
     const limit = normalizeWorkspaceToolLimit(toolCall.limit || toolCall.maxResults, 80, 1, 200);
     const includeGlobs = getWorkspaceSearchInclude(toolCall);
-    const tree = await listWorkspaceTree(path, depth, signal, 800);
+    const tree = await listWorkspaceTree(path, depth, signal, 800, bridgeOptions);
     const files = getWorkspaceTreeFiles(tree)
         .filter(file => workspaceSearchPathMatches(file.path, query, includeGlobs))
         .slice(0, limit);
@@ -1037,14 +1121,14 @@ function buildTextSearchMatcher(toolCall = {}) {
     };
 }
 
-async function searchWorkspaceText(toolCall = {}, signal = null) {
+async function searchWorkspaceText(toolCall = {}, signal = null, bridgeOptions = {}) {
     const path = cleanWorkspaceToolPath(toolCall.path || ".");
     const depth = normalizeWorkspaceToolLimit(toolCall.depth, 5, 0, 5);
     const maxFiles = normalizeWorkspaceToolLimit(toolCall.maxFiles || toolCall.fileLimit, 80, 1, 160);
     const maxMatches = normalizeWorkspaceToolLimit(toolCall.maxMatches || toolCall.limit, 120, 1, 240);
     const includeGlobs = getWorkspaceSearchInclude(toolCall);
     const matcher = buildTextSearchMatcher(toolCall);
-    const tree = await listWorkspaceTree(path, depth, signal, 800);
+    const tree = await listWorkspaceTree(path, depth, signal, 800, bridgeOptions);
     const candidateFiles = getWorkspaceTreeFiles(tree)
         .filter(file => includeGlobs.length ? includeGlobs.some(glob => matchesWorkspaceGlob(file.path, glob)) : isLikelyTextWorkspaceFile(file.path))
         .slice(0, maxFiles);
@@ -1052,7 +1136,7 @@ async function searchWorkspaceText(toolCall = {}, signal = null) {
 
     for (const file of candidateFiles) {
         if (matches.length >= maxMatches) break;
-        const result = await readWorkspaceFile(file.path, signal);
+        const result = await readWorkspaceFile(file.path, signal, bridgeOptions);
         const lines = String(result.content || "").replace(/\r\n/g, "\n").split("\n");
         for (let index = 0; index < lines.length; index += 1) {
             if (matches.length >= maxMatches) break;
@@ -1074,7 +1158,7 @@ async function searchWorkspaceText(toolCall = {}, signal = null) {
     };
 }
 
-async function readWorkspaceFiles(paths = [], signal = null) {
+async function readWorkspaceFiles(paths = [], signal = null, bridgeOptions = {}) {
     const cleanPaths = (Array.isArray(paths) ? paths : String(paths || "").split(","))
         .map(path => cleanWorkspaceToolPath(path))
         .filter(path => path && path !== ".")
@@ -1082,7 +1166,7 @@ async function readWorkspaceFiles(paths = [], signal = null) {
     if (!cleanPaths.length) throw new Error("read_files requires one or more paths.");
     const results = [];
     for (const path of cleanPaths) {
-        results.push(await readWorkspaceFile(path, signal));
+        results.push(await readWorkspaceFile(path, signal, bridgeOptions));
     }
     return results
         .map(formatWorkspaceFileResult)
@@ -1096,23 +1180,24 @@ async function getWorkspaceContextForPrompt(text, signal = null) {
         return "\n\n--- Local Workspace Bridge Context ---\nThe user requested local workspace access, but the bridge is not configured or enabled. Tell them to start `py -3 local-bridge.py --root . --port 8765`, then save the printed URL/token in Settings > Local Workspace Bridge.\n--- End Local Workspace Bridge Context ---";
     }
 
+    const bridgeOptions = getWorkspaceToolBridgeOptions(signal);
     const chunks = [];
     const command = extractDirectWorkspaceCommand(text);
     const readPaths = extractDirectReadPaths(text);
     const treePath = extractDirectWorkspaceTreePath(text);
 
     if (shouldListWorkspace(text) || (!command && readPaths.length === 0)) {
-        const tree = await listWorkspaceTree(treePath || ".", 2, signal);
+        const tree = await listWorkspaceTree(treePath || ".", 2, signal, 220, bridgeOptions);
         chunks.push(formatWorkspaceTreeResult(tree));
     }
 
     for (const path of readPaths) {
-        const file = await readWorkspaceFile(path, signal);
+        const file = await readWorkspaceFile(path, signal, bridgeOptions);
         chunks.push(formatWorkspaceFileResult(file));
     }
 
     if (command) {
-        const result = await runWorkspaceCommand(command, ".", 30, signal);
+        const result = await runWorkspaceCommand(command, ".", 30, signal, bridgeOptions);
         chunks.push(formatWorkspaceCommandResult(result));
     }
 
@@ -1250,6 +1335,29 @@ function getFaunaNativeToolDefinitions({
                         description: "Workspace-relative file paths."
                     }
                 }, ["paths"])
+            },
+            {
+                name: "write_file",
+                description: "Create or replace a text file inside the active workspace policy scope.",
+                parameters: createFaunaToolParameterSchema({
+                    path: { type: "string", description: "Policy-scoped relative file path, or an absolute path in Full Machine mode." },
+                    content: { type: "string", description: "Full text content to write." }
+                }, ["path", "content"])
+            },
+            {
+                name: "append_file",
+                description: "Append text to a file inside the active workspace policy scope.",
+                parameters: createFaunaToolParameterSchema({
+                    path: { type: "string", description: "Policy-scoped relative file path, or an absolute path in Full Machine mode." },
+                    content: { type: "string", description: "Text content to append." }
+                }, ["path", "content"])
+            },
+            {
+                name: "make_directory",
+                description: "Create a directory inside the active workspace policy scope.",
+                parameters: createFaunaToolParameterSchema({
+                    path: { type: "string", description: "Policy-scoped relative directory path, or an absolute path in Full Machine mode." }
+                }, ["path"])
             },
             {
                 name: "run_command",
@@ -1556,6 +1664,19 @@ function getFaunaToolCallSignature(toolCall = {}) {
             paths: paths.map(path => normalizeFaunaToolPathForSignature(path)).filter(Boolean).slice(0, 8)
         });
     }
+    if (tool === "write_file" || tool === "append_file") {
+        return JSON.stringify({
+            tool,
+            path: normalizeFaunaToolPathForSignature(toolCall.path || "."),
+            content: String(toolCall.content ?? toolCall.text ?? toolCall.body ?? "")
+        });
+    }
+    if (tool === "make_directory") {
+        return JSON.stringify({
+            tool,
+            path: normalizeFaunaToolPathForSignature(toolCall.path || ".")
+        });
+    }
     if (tool === "search_files") {
         return JSON.stringify({
             tool,
@@ -1715,6 +1836,9 @@ function getFaunaToolProgressLabel(toolCall) {
     if (toolCall?.tool === "run_command") return "Running local terminal command...";
     if (toolCall?.tool === "read_file") return "Reading local file...";
     if (toolCall?.tool === "read_files") return "Reading local files...";
+    if (toolCall?.tool === "write_file") return "Writing local file...";
+    if (toolCall?.tool === "append_file") return "Appending local file...";
+    if (toolCall?.tool === "make_directory") return "Creating local directory...";
     if (toolCall?.tool === "search_files") return "Searching local files...";
     if (toolCall?.tool === "search_text") return "Searching local text...";
     return "Inspecting local workspace...";
@@ -1729,6 +1853,7 @@ function getFaunaToolActivityKind(toolCall) {
     if (isMemoryToolName(toolCall?.tool)) return "memory";
     if (toolCall?.tool === "run_command") return "terminal";
     if (toolCall?.tool === "read_file" || toolCall?.tool === "read_files") return "file";
+    if (toolCall?.tool === "write_file" || toolCall?.tool === "append_file" || toolCall?.tool === "make_directory") return "file";
     if (toolCall?.tool === "search_files" || toolCall?.tool === "search_text") return "search";
     return "workspace";
 }
@@ -1765,11 +1890,16 @@ function getFaunaToolActivityDetail(toolCall) {
     if (toolCall?.tool === "save_memory") return getToolDetailSnippet(toolCall.text || toolCall.memory || toolCall.content || toolCall.value || "New memory");
     if (toolCall?.tool === "delete_memory") return getToolDetailSnippet(toolCall.target || toolCall.id || toolCall.index || toolCall.text || "Memory");
     if (toolCall?.tool === "run_command") return toolCall.command || "Local command";
+    if (toolCall?.tool === "workspace_tree") {
+        const path = String(toolCall.path || ".").trim();
+        return !path || path === "." || path === "./" ? "List workspace" : `List ${getToolDetailSnippet(path)}`;
+    }
     if (toolCall?.tool === "read_file") return toolCall.path || "Local file";
     if (toolCall?.tool === "read_files") {
         const paths = Array.isArray(toolCall.paths) ? toolCall.paths : String(toolCall.paths || "").split(",");
         return getToolDetailSnippet(paths.filter(Boolean).join(", ") || "Local files");
     }
+    if (toolCall?.tool === "write_file" || toolCall?.tool === "append_file" || toolCall?.tool === "make_directory") return toolCall.path || "Local path";
     if (toolCall?.tool === "search_files") return getToolDetailSnippet(normalizeWorkspaceSearchQuery(toolCall) || toolCall.path || "Files");
     if (toolCall?.tool === "search_text") return getToolDetailSnippet(normalizeWorkspaceSearchQuery(toolCall) || "Text");
     return toolCall?.path || ".";
@@ -1800,6 +1930,7 @@ function getFaunaToolActivityInput(toolCall) {
     if (toolCall?.tool === "run_command") return String(toolCall.command || "").trim();
     if (toolCall?.tool === "read_file") return String(toolCall.path || "").trim();
     if (toolCall?.tool === "read_files") return (Array.isArray(toolCall.paths) ? toolCall.paths : String(toolCall.paths || "").split(",")).filter(Boolean).join(", ");
+    if (toolCall?.tool === "write_file" || toolCall?.tool === "append_file" || toolCall?.tool === "make_directory") return String(toolCall.path || "").trim();
     if (toolCall?.tool === "search_files" || toolCall?.tool === "search_text") return normalizeWorkspaceSearchQuery(toolCall);
     return String(toolCall?.path || ".").trim();
 }
@@ -1868,25 +1999,38 @@ async function executeFaunaToolCall(toolCall, signal = null) {
     if (!hasWorkspaceBridgeAccess()) {
         throw new Error("Local workspace bridge is not configured or enabled.");
     }
+    const bridgeOptions = getWorkspaceToolBridgeOptions(signal);
     if (toolCall.tool === "workspace_tree") {
-        return formatWorkspaceTreeResult(await listWorkspaceTree(toolCall.path || ".", toolCall.depth || 2, signal));
+        return formatWorkspaceTreeResult(await listWorkspaceTree(toolCall.path || ".", toolCall.depth || 2, signal, 220, bridgeOptions));
     }
     if (toolCall.tool === "search_files") {
-        return formatWorkspaceFileSearchResult(await searchWorkspaceFiles(toolCall, signal));
+        return formatWorkspaceFileSearchResult(await searchWorkspaceFiles(toolCall, signal, bridgeOptions));
     }
     if (toolCall.tool === "search_text") {
-        return formatWorkspaceTextSearchResult(await searchWorkspaceText(toolCall, signal));
+        return formatWorkspaceTextSearchResult(await searchWorkspaceText(toolCall, signal, bridgeOptions));
     }
     if (toolCall.tool === "read_file") {
         if (!toolCall.path) throw new Error("read_file requires a path.");
-        return formatWorkspaceFileResult(await readWorkspaceFile(toolCall.path, signal));
+        return formatWorkspaceFileResult(await readWorkspaceFile(toolCall.path, signal, bridgeOptions));
     }
     if (toolCall.tool === "read_files") {
-        return readWorkspaceFiles(toolCall.paths || toolCall.path || [], signal);
+        return readWorkspaceFiles(toolCall.paths || toolCall.path || [], signal, bridgeOptions);
+    }
+    if (toolCall.tool === "write_file" || toolCall.tool === "append_file") {
+        if (!toolCall.path) throw new Error(`${toolCall.tool} requires a path.`);
+        const content = toolCall.content ?? toolCall.text ?? toolCall.body ?? "";
+        if (typeof confirmWorkspaceWriteWithDiff === "function") {
+            await confirmWorkspaceWriteWithDiff(toolCall, signal, bridgeOptions);
+        }
+        return formatWorkspaceWriteResult(await writeWorkspaceFile(toolCall.path, content, signal, bridgeOptions, toolCall.tool === "append_file"));
+    }
+    if (toolCall.tool === "make_directory") {
+        if (!toolCall.path) throw new Error("make_directory requires a path.");
+        return formatWorkspaceDirectoryResult(await makeWorkspaceDirectory(toolCall.path, signal, bridgeOptions));
     }
     if (toolCall.tool === "run_command") {
         if (!toolCall.command) throw new Error("run_command requires a command.");
-        return formatWorkspaceCommandResult(await runWorkspaceCommand(toolCall.command, toolCall.cwd || ".", toolCall.timeout || 20, signal));
+        return formatWorkspaceCommandResult(await runWorkspaceCommand(toolCall.command, toolCall.cwd || ".", toolCall.timeout || 20, signal, bridgeOptions));
     }
     throw new Error("Unknown local tool.");
 }
@@ -2087,11 +2231,12 @@ function buildFaunaToolLimitMessage(toolResultsBySignature) {
     ].join("\n");
 }
 
-function buildAssistantSystemPrompt(allowLocalTools = false, requireChatTitle = false, allowWebTools = false, allowToolCalls = true, allowLocationTools = false) {
+function buildAssistantSystemPrompt(allowLocalTools = false, requireChatTitle = false, allowWebTools = false, allowToolCalls = true, allowLocationTools = false, workspaceAccessPolicy = getEffectiveWorkspaceAccessPolicy(), sessionId = activeSessionId) {
     return [
         CODE_BLOCK_SYSTEM_PROMPT,
         requireChatTitle ? CHAT_TITLE_SYSTEM_PROMPT : "",
         CLARIFYING_QUESTION_SYSTEM_PROMPT,
+        typeof buildAgentTaskModeSystemPrompt === "function" ? buildAgentTaskModeSystemPrompt(sessionId) : "",
         allowToolCalls ? AGENT_LOOP_SYSTEM_PROMPT : "",
         allowToolCalls ? IMAGE_TOOL_SYSTEM_PROMPT : "",
         allowToolCalls && allowWebTools ? WEB_TOOL_SYSTEM_PROMPT : "",
@@ -2099,7 +2244,7 @@ function buildAssistantSystemPrompt(allowLocalTools = false, requireChatTitle = 
         buildUserLocaleSystemPrompt(),
         buildPersonalizationSystemPrompt(),
         allowToolCalls ? buildMemorySystemPrompt() : "",
-        allowToolCalls && allowLocalTools ? LOCAL_TOOL_SYSTEM_PROMPT : ""
+        allowToolCalls && allowLocalTools ? buildLocalToolSystemPrompt(workspaceAccessPolicy, sessionId) : ""
     ].filter(Boolean).join("\n\n");
 }
 

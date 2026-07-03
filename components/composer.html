@@ -103,7 +103,7 @@
                             <div class="setting-item">
                                 <div class="setting-info">
                                     <span class="setting-title">Local Workspace</span>
-                                    <span class="setting-desc">Allow file reads and terminal commands through the local bridge</span>
+                                    <span class="setting-desc">Tell the AI it can read this PC's workspace and run terminal commands through the local bridge</span>
                                 </div>
                                 <label class="switch">
                                     <input type="checkbox" id="toggleWorkspaceBridge">
@@ -167,6 +167,37 @@
                 <div id="voiceOutputChoices" class="voice-device-list" role="radiogroup" aria-label="Output device"></div>
             </div>
         </section>
+    </div>
+    <div class="composer-context-bar" aria-label="Chat workspace">
+        <div class="composer-project-wrap">
+            <button id="composerProjectBtn" class="composer-project-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="composerProjectMenu" data-tooltip="Change project">
+                <svg class="composer-project-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>
+                </svg>
+                <span id="composerProjectLabel" class="composer-project-label">No project</span>
+            </button>
+            <div id="composerProjectMenu" class="composer-project-menu" role="dialog" aria-label="Choose project" hidden></div>
+        </div>
+        <button id="composerBranchBtn" class="composer-context-btn composer-branch-btn" type="button" data-tooltip="Change project or worktree">
+            <svg class="composer-context-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 3v6a6 6 0 0 0 6 6h2"></path>
+                <path d="M18 21v-6a6 6 0 0 0-6-6h-2"></path>
+                <circle cx="6" cy="3" r="2"></circle>
+                <circle cx="18" cy="21" r="2"></circle>
+            </svg>
+            <span id="composerBranchLabel">No branch</span>
+            <svg class="composer-context-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        <div class="agent-task-mode-wrap">
+            <button id="agentTaskModeBtn" class="agent-task-mode-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="agentTaskModeMenu" data-tooltip="Task mode">
+                <svg class="agent-task-mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M9 11 12 14 22 4"></path>
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                </svg>
+                <span id="agentTaskModeLabel" class="agent-task-mode-label">Build</span>
+            </button>
+            <div id="agentTaskModeMenu" class="agent-task-mode-menu" role="menu" aria-label="Task mode" hidden></div>
+        </div>
     </div>
     <section id="clarifyingQuestionComposer" class="clarifying-question-composer" hidden aria-live="polite"></section>
 </footer>

@@ -135,6 +135,14 @@ const WAN_VIDEO_WORKFLOW_STORAGE_KEY = "faunaWanWorkflow";
 const WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY = "faunaWorkspaceBridgeEndpoint";
 const WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY = "faunaWorkspaceBridgeToken";
 const WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY = "faunaWorkspaceBridgeEnabled";
+const WORKSPACE_PROJECTS_STORAGE_KEY = "faunaWorkspaceProjects";
+const WORKSPACE_PROJECT_SORT_STORAGE_KEY = "faunaWorkspaceProjectSort";
+const AGENT_TASK_MODE_STORAGE_KEY = "faunaAgentTaskMode";
+const PROJECT_AGENT_TAB_STORAGE_KEY = "faunaProjectAgentTab";
+const PROJECT_EXPLORER_PATH_STORAGE_KEY = "faunaProjectExplorerPath";
+const PROJECT_AGENT_WIDTH_STORAGE_KEY = "faunaProjectAgentWidth";
+const PROJECT_AGENT_COLLAPSED_STORAGE_KEY = "faunaProjectAgentCollapsed";
+const PROJECT_AGENT_MAXIMIZED_STORAGE_KEY = "faunaProjectAgentMaximized";
 const MEMORY_ENABLED_STORAGE_KEY = "faunaMemoryEnabled";
 const MEMORY_STORAGE_KEY = "faunaMemories";
 const KEYBOARD_SHORTCUTS_STORAGE_KEY = "faunaKeyboardShortcuts";
@@ -166,6 +174,10 @@ const WAIT_FOR_COMMAND_DEFAULT_MAX_MS = 30 * 1000;
 const WAIT_FOR_COMMAND_MAX_MS = 5 * 60 * 1000;
 const WAIT_FOR_COMMAND_DEFAULT_INTERVAL_MS = 2000;
 const WAIT_FOR_COMMAND_MIN_INTERVAL_MS = 500;
+const WORKSPACE_ACCESS_POLICY_STORAGE_KEY = "faunaWorkspaceAccessPolicy";
+const WORKSPACE_ACCESS_POLICY_BRIDGE_ROOT = "bridge-root";
+const WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT = "chat-output";
+const WORKSPACE_ACCESS_POLICY_FULL_MACHINE = "full-machine";
 const WORKSPACE_TOOL_NAME_ALIASES = {
     workspace_tree: "workspace_tree",
     read_directory: "workspace_tree",
@@ -192,6 +204,14 @@ const WORKSPACE_TOOL_NAME_ALIASES = {
     search_workspace: "search_text",
     search_code: "search_text",
     find_text: "search_text",
+    write_file: "write_file",
+    create_file: "write_file",
+    save_file: "write_file",
+    append_file: "append_file",
+    make_directory: "make_directory",
+    mkdir: "make_directory",
+    create_directory: "make_directory",
+    create_folder: "make_directory",
     run_command: "run_command",
     run_terminal_command: "run_command",
     terminal_command: "run_command",
@@ -339,7 +359,25 @@ const TIME_TOOL_NAME_ALIASES = {
     wait_for_user_input: "stopwatch"
 };
 const TIME_TOOL_NAMES = new Set(Object.values(TIME_TOOL_NAME_ALIASES));
-const LOCAL_TOOL_SYSTEM_PROMPT = `You can use Fauna local workspace tools when the user asks about local files, this project, code search, directory listings, or terminal commands. To request a tool, respond with only the required hidden chat title block when present, then exactly one tool XML block, and no normal prose. Directory read/list examples: <fauna_tool_call>{"tool":"read_directory","path":".","depth":2}</fauna_tool_call> or <fauna_tool_call>{"tool":"list_directory","path":"components","depth":1}</fauna_tool_call>. File search example: <fauna_tool_call>{"tool":"search_files","query":"settings","path":".","depth":5}</fauna_tool_call>. Text search example: <fauna_tool_call>{"tool":"search_text","query":"function saveCurrentSession","path":"scripts","include":"*.js","caseSensitive":false}</fauna_tool_call>. Single-file read example: <fauna_tool_call>{"tool":"read_file","path":"script.js"}</fauna_tool_call>. Multi-file read example: <fauna_tool_call>{"tool":"read_files","paths":["scripts/08-web-local-tools.js","scripts/10-usage-commands-pipeline.js"]}</fauna_tool_call>. Terminal example: <fauna_tool_call>{"tool":"run_terminal_command","command":"git status --short","cwd":".","timeout":20}</fauna_tool_call>. Commands run only inside the configured workspace and may be blocked by bridge safety rules. Tool file results include line numbers; when you cite local files, reference them inline as path (line N) or path (lines A-B). After Fauna returns a tool result, answer the user normally. Do not call the same tool with the same path, query, or command again; use the returned result unless you need different files, a different query, or a command.`;
+function normalizeWorkspaceAccessPolicy(value) {
+    const policy = String(value || "").trim();
+    if (policy === WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT) return WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT;
+    if (policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE) return WORKSPACE_ACCESS_POLICY_FULL_MACHINE;
+    return WORKSPACE_ACCESS_POLICY_BRIDGE_ROOT;
+}
+const LOCAL_TOOL_SYSTEM_PROMPT = `The token-protected Local Workspace Bridge is active for this chat. You can access local files and execute terminal commands through Fauna local workspace tools. Do not claim you have no local file or terminal access when this prompt is present; request the matching tool instead. Use these tools when the user asks about local files, this project, code search, directory listings, file creation, command output, tests, installs, scripts, or terminal commands. To request a tool, respond with only the required hidden chat title block when present, then exactly one tool XML block, and no normal prose. Directory read/list examples: <fauna_tool_call>{"tool":"read_directory","path":".","depth":2}</fauna_tool_call> or <fauna_tool_call>{"tool":"list_directory","path":"assets","depth":1}</fauna_tool_call>. File write example: <fauna_tool_call>{"tool":"write_file","path":"index.html","content":"<!doctype html>\\n<html>...</html>"}</fauna_tool_call>. Append example: <fauna_tool_call>{"tool":"append_file","path":"styles.css","content":"\\n.footer { display: grid; }"}</fauna_tool_call>. Directory example: <fauna_tool_call>{"tool":"make_directory","path":"assets"}</fauna_tool_call>. File search example: <fauna_tool_call>{"tool":"search_files","query":"settings","path":".","depth":5}</fauna_tool_call>. Text search example: <fauna_tool_call>{"tool":"search_text","query":"function saveCurrentSession","path":"scripts","include":"*.js","caseSensitive":false}</fauna_tool_call>. Single-file read example: <fauna_tool_call>{"tool":"read_file","path":"index.html"}</fauna_tool_call>. Multi-file read example: <fauna_tool_call>{"tool":"read_files","paths":["index.html","styles.css","script.js"]}</fauna_tool_call>. Terminal example: <fauna_tool_call>{"tool":"run_terminal_command","command":"git status --short","cwd":".","timeout":20}</fauna_tool_call>. Tool file results include line numbers; when you cite local files, reference them inline as path (line N) or path (lines A-B). After Fauna returns a tool result, answer the user normally. Do not call the same tool with the same path, query, or command again; use the returned result unless you need different files, a different query, or a command.`;
+function buildLocalToolSystemPrompt(accessPolicy = WORKSPACE_ACCESS_POLICY_BRIDGE_ROOT, sessionId = activeSessionId) {
+    const projectPrompt = typeof getActiveWorkspaceProjectSystemPrompt === "function"
+        ? getActiveWorkspaceProjectSystemPrompt(sessionId)
+        : "";
+    const policy = normalizeWorkspaceAccessPolicy(accessPolicy);
+    const policyPrompt = projectPrompt || (policy === WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT
+        ? "Desktop access policy: Chat Output only. Every local file tool and terminal command is scoped to this chat's output folder, stored beside the chat as chats/<chatId>/output. Use simple relative paths such as index.html, styles.css, script.js, or assets/logo.svg. Do not try to access files outside that output folder; ask the user to switch the access policy if broader access is needed."
+        : policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE
+            ? "Desktop access policy: Full Machine. Absolute paths are allowed and terminal commands run without Fauna's command blocklist. This is powerful; prefer non-destructive commands unless the user explicitly asks for destructive system changes."
+            : "Access policy: Bridge Root. Local tools are limited by the currently configured bridge root and bridge command policy.");
+    return `${policyPrompt}\n\n${LOCAL_TOOL_SYSTEM_PROMPT}`;
+}
 function buildRuntimeToolSystemPrompt(allowLocationTools = false, allowWaitForCommand = false) {
     const locationPrompt = allowLocationTools
         ? `Approx location/weather tools: Use <fauna_tool_call>{"tool":"get_ip_location"}</fauna_tool_call> only when the user asks about their rough location. Use <fauna_tool_call>{"tool":"current_weather"}</fauna_tool_call> when the user asks for weather or temperature near them, such as "how warm is it at my place?" or "wie viel Grad ist es gerade bei mir?". This uses coarse public-IP geolocation and may be city/region-level inaccurate. Never claim a precise address and do not reveal the public IP address unless the user explicitly asks for it.`
@@ -797,6 +835,7 @@ selectedVoiceMicDeviceId = safeLocalStorageGet(VOICE_MIC_DEVICE_STORAGE_KEY) || 
 selectedVoiceOutputDeviceId = safeLocalStorageGet(VOICE_OUTPUT_DEVICE_STORAGE_KEY) || "default";
 let conversationHistory = [];
 let chatSessions = [];
+let workspaceProjects = [];
 let memoryEntries = readStoredMemoryEntries();
 let activeSessionId = null;
 let chatStorageProfile = CHAT_STORAGE_PROFILE_FULL;

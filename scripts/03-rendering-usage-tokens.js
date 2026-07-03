@@ -418,6 +418,35 @@ function getToolActivityTag(item) {
     return item.label || "Tool";
 }
 
+function isWorkspaceRootActivityLabel(value) {
+    const text = String(value || "").trim().replace(/\\/g, "/");
+    return !text || text === "." || text === "./";
+}
+
+function isUsageImageFileLabel(value) {
+    return /\.(?:png|jpe?g|webp|gif|avif|bmp|svg)(?:\.[a-z0-9]+)?$/i.test(String(value || "").trim());
+}
+
+function normalizeUsageToolLabel(raw = {}) {
+    const kind = String(raw.kind || "").trim().toLowerCase();
+    const tool = String(raw.tool || raw.toolName || "").trim().toLowerCase();
+    const label = String(raw.label || raw.name || raw.tool || "").trim();
+
+    if (kind === "image") {
+        if (tool === "generate_image" || tool === "edit_image") return "Image generation";
+        if (tool === "upload_image" || tool === "vision_analysis") return "";
+        if (isUsageImageFileLabel(label) || /\bupload(?:ed|ing)?\b/i.test(label)) return "";
+        if (/\b(?:generat|edit|image generation)\w*\b/i.test(label)) return "Image generation";
+        return "";
+    }
+
+    if (tool === "workspace_tree" || ((kind === "workspace" || kind === "tool" || !kind) && isWorkspaceRootActivityLabel(label))) {
+        return "List workspace";
+    }
+
+    return label;
+}
+
 function getImageActivitySettings(options = {}) {
     const parts = [];
     const style = String(options.style || "").trim();
@@ -439,6 +468,9 @@ function getImageActivitySettings(options = {}) {
 }
 
 function getToolActivityRowTitle(item) {
+    if (item.tool === "upload_image") return "Upload image";
+    if (item.tool === "vision_analysis") return "Analyze image";
+    if (item.tool === "workspace_tree" && isWorkspaceRootActivityLabel(item.detail || item.input)) return "List workspace";
     if (item.kind === "web") return item.label || "Searched the web";
     return item.detail || item.label || "Tool";
 }
@@ -556,7 +588,7 @@ function renderToolActivityRow(item, index, extraClass = "", {
 
     return `
         <div class="tool-activity-row-wrap ${expanded ? "expanded" : ""} ${preview ? "tool-activity-row-wrap-preview" : ""}" data-tool-activity-item-id="${escapeAttribute(itemId)}">
-            <button class="tool-activity-row ${extraClass}" type="button" data-tool-activity-row-toggle data-tool-activity-item-id="${escapeAttribute(itemId)}" data-tool-kind="${escapeAttribute(item.kind)}" aria-expanded="${expanded ? "true" : "false"}" ${controls ? `aria-controls="${escapeAttribute(controls)}"` : ""} aria-label="${escapeAttribute(ariaLabel)}">
+            <button class="tool-activity-row ${extraClass}" type="button" data-tool-activity-row-toggle data-tool-activity-item-id="${escapeAttribute(itemId)}" data-tool-kind="${escapeAttribute(item.kind)}" data-tool-name="${escapeAttribute(item.tool)}" aria-expanded="${expanded ? "true" : "false"}" ${controls ? `aria-controls="${escapeAttribute(controls)}"` : ""} aria-label="${escapeAttribute(ariaLabel)}">
                 <span class="tool-activity-icon-wrap" aria-hidden="true">
                     <svg class="tool-activity-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">${getToolActivityIcon(item.kind)}</svg>
                 </span>
@@ -1252,7 +1284,7 @@ function upsertUsageEvent(rawEvent, { persist = true } = {}) {
 
 function normalizeUsageToolEvent(raw) {
     if (!raw || typeof raw !== "object") return null;
-    const label = String(raw.label || raw.name || raw.tool || "").trim();
+    const label = normalizeUsageToolLabel(raw);
     if (!label) return null;
     const date = parseStoredDate(raw.date, raw.createdAt) || new Date();
     const id = String(raw.id || raw.eventId || `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`).trim();
@@ -1261,6 +1293,7 @@ function normalizeUsageToolEvent(raw) {
         date: date.toISOString(),
         label,
         kind: String(raw.kind || "tool").trim() || "tool",
+        tool: String(raw.tool || raw.toolName || "").trim(),
         sessionId: String(raw.sessionId || "").trim()
     };
 }
@@ -1297,6 +1330,7 @@ function upsertUsageToolEvent(rawEvent, { persist = true } = {}) {
         usageToolEvents[existingIndex] = {
             ...usageToolEvents[existingIndex],
             ...event,
+            tool: event.tool || usageToolEvents[existingIndex].tool,
             sessionId: event.sessionId || usageToolEvents[existingIndex].sessionId
         };
     } else {

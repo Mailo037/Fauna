@@ -162,8 +162,11 @@ function parseLocalDateKey(key) {
 
 function getUsageToolLabelFromRow(row) {
     const kind = row.dataset.toolKind || "tool";
+    const tool = row.dataset.toolName || "";
     const label = row.querySelector(".tool-activity-label")?.textContent?.trim();
-    if (label && label !== "Done") return label;
+    const normalizedLabel = normalizeUsageToolLabel({ kind, tool, label });
+    if (normalizedLabel && normalizedLabel !== "Done") return normalizedLabel;
+    if (label && !normalizedLabel) return "";
     if (kind === "web") return "Web search";
     if (kind === "workspace") return "Workspace tool";
     if (kind === "terminal") return "Terminal command";
@@ -189,15 +192,19 @@ function getUsageToolEventsFromHtml(html, { sessionId = "", date = new Date().to
     return Array.from(template.content.querySelectorAll(".tool-activity-row:not(.tool-activity-row-preview):not(.tool-activity-row-done)"))
         .map((row, index) => {
             const kind = row.dataset.toolKind || "tool";
+            const tool = row.dataset.toolName || "";
             const label = getUsageToolLabelFromRow(row);
+            if (!label) return null;
             return {
                 id: getUsageToolEventId({ sessionId, index, kind, label }),
                 date,
                 kind,
+                tool,
                 label,
                 sessionId
             };
-        });
+        })
+        .filter(Boolean);
 }
 
 function syncUsageToolEventsFromSession(session, { html = session?.chatHtml, persist = true } = {}) {

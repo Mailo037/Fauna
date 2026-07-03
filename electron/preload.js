@@ -88,6 +88,26 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   startOllama() {
     return ipcRenderer.invoke("fauna:start-ollama");
   },
+  setWorkspaceAccessPolicy(policy) {
+    return ipcRenderer.invoke("fauna:set-workspace-access-policy", policy);
+  },
+  projects: {
+    chooseFolders() {
+      return ipcRenderer.invoke("fauna:projects-choose-folders");
+    },
+    save(projects = []) {
+      return ipcRenderer.invoke("fauna:projects-save", projects);
+    },
+    openPath(projectPath) {
+      return ipcRenderer.invoke("fauna:projects-open-path", projectPath);
+    },
+    openTerminal(projectPath) {
+      return ipcRenderer.invoke("fauna:projects-open-terminal", projectPath);
+    },
+    createWorktree(payload = {}) {
+      return ipcRenderer.invoke("fauna:projects-create-worktree", payload);
+    }
+  },
   clearAppCache() {
     return ipcRenderer.invoke("fauna:clear-app-cache");
   },

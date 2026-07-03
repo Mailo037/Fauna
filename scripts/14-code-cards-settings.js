@@ -1138,7 +1138,7 @@ async function getAppInfoUpdateState(info = {}) {
     }
     return info.updateState || {
         status: "web",
-        message: "Web update checks use version.json"
+        message: "version.json"
     };
 }
 
@@ -1163,10 +1163,12 @@ async function updateAppInfoPane() {
     setAppInfoText(appInfoStorageBackend, storageBackend);
     setAppInfoText(appInfoChatCount, Number.isFinite(Number(info?.chatCount)) ? `${Number(info.chatCount).toLocaleString()} chats` : `${chatSessions.length.toLocaleString()} chats`, "0 chats");
     setAppInfoText(appInfoBridgeEndpoint, info?.bridgeEndpoint || getWorkspaceBridgeBaseUrl(), "Not set");
+    setAppInfoText(appInfoWorkspaceAccessPolicy, getWorkspaceAccessPolicyLabel(info?.workspaceAccessPolicy || getEffectiveWorkspaceAccessPolicy()), "Output only");
     setAppInfoText(appInfoAppDataPath, info?.appDataPath, isDesktop ? "AppData path unavailable" : "Browser localStorage");
     setAppInfoText(appInfoSettingsPath, info?.settingsPath, isDesktop ? "settings.json" : "localStorage");
     setAppInfoText(appInfoChatsPath, info?.chatsPath, isDesktop ? "chats/<chatId>/chat.json" : "localStorage");
     setAppInfoText(appInfoMediaPath, info?.mediaPath, isDesktop ? "chats/<chatId>/media" : "Browser blob/data URLs");
+    setAppInfoText(appInfoOutputPath, info?.outputPath, isDesktop ? "chats/<chatId>/output" : "Browser localStorage");
 
     if (appInfoUpdateStatus) {
         const status = String(updateStateInfo?.status || "").trim();
@@ -1904,6 +1906,11 @@ function handleShortcutRecorderKeydown(event) {
     if (event.key === "Escape") {
         event.preventDefault();
         closeShortcutRecorder();
+        return;
+    }
+    if (event.repeat) {
+        event.preventDefault();
+        event.stopPropagation();
         return;
     }
 
@@ -3279,6 +3286,11 @@ async function installMissingOllamaModels() {
         });
         if (!approved) return;
 
+        missing.forEach((modelId, index) => {
+            queueModelDownloadTask(modelId, index === 0 ? "Next download" : `Queued after ${missing[index - 1]}`, index);
+        });
+        showToast(`${missing.length} model ${missing.length === 1 ? "is" : "are"} queued for download.`, "info");
+
         for (const modelId of missing) {
             setLocalModelsStatus(`Pulling ${modelId}`, "missing");
             showToast(`Pulling ${modelId} from Ollama...`, "info");
@@ -3295,6 +3307,71 @@ async function installMissingOllamaModels() {
         if (localModelsInstallBtn) localModelsInstallBtn.disabled = false;
         if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = false;
         if (localModelsStartBtn) localModelsStartBtn.disabled = false;
+    }
+}
+
+async function installMissingTaskOllamaModels() {
+    if (isTaskModelInstallInProgress) return;
+    isTaskModelInstallInProgress = true;
+    if (localTaskModelsInstallBtn) {
+        localTaskModelsInstallBtn.disabled = true;
+        localTaskModelsInstallBtn.textContent = "Installing...";
+    }
+    if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = true;
+    if (localModelsStartBtn) localModelsStartBtn.disabled = true;
+    try {
+        await checkOllamaStatus();
+        if (!isOllamaReachable) {
+            const installed = await installOllamaWithApproval();
+            if (!installed) return;
+            await checkOllamaStatus();
+            if (!isOllamaReachable) return;
+        }
+
+        const groups = getMissingLocalTaskModelGroups()
+            .map(group => ({
+                ...group,
+                model: normalizeModelId(group.model)
+            }))
+            .filter(group => group.model && !isOllamaModelInstalled(group.model));
+        if (groups.length === 0) {
+            updateLocalTaskModelsStatus();
+            showToast("All selected task models are installed.", "success");
+            return;
+        }
+
+        const approved = await showApprovalDialog({
+            title: "Install missing task models?",
+            message: "Fauna will pull the Ollama models needed for agent routing. Large models can take a long time and use significant disk space.",
+            details: groups.map(group => `Pull ${group.model} for ${group.labels.join(", ")}`),
+            confirmLabel: "Pull models"
+        });
+        if (!approved) return;
+
+        const missing = groups.map(group => group.model);
+        missing.forEach((modelId, index) => {
+            queueModelDownloadTask(modelId, index === 0 ? "Next task model" : `Queued after ${missing[index - 1]}`, index);
+        });
+        showToast(`${missing.length} task model ${missing.length === 1 ? "is" : "are"} queued for download.`, "info");
+
+        for (const modelId of missing) {
+            setLocalModelsStatus(`Pulling ${modelId}`, "missing");
+            showToast(`Pulling ${modelId} from Ollama...`, "info");
+            const result = await pullOllamaModel(modelId);
+            if (result?.cancelled) return;
+        }
+
+        await checkOllamaStatus();
+        showToast("Missing task models installed.", "success");
+    } catch (err) {
+        setLocalModelsStatus("Install failed", "missing");
+        showToast(`Task model install failed: ${err.message}`, "error");
+    } finally {
+        isTaskModelInstallInProgress = false;
+        if (localTaskModelsInstallBtn) localTaskModelsInstallBtn.disabled = false;
+        if (localModelsRefreshBtn) localModelsRefreshBtn.disabled = false;
+        if (localModelsStartBtn) localModelsStartBtn.disabled = false;
+        updateLocalTaskModelsStatus();
     }
 }
 
@@ -3418,6 +3495,10 @@ localModelsRefreshBtn?.addEventListener("click", async () => {
 
 localTaskModelsResetBtn?.addEventListener("click", resetLocalTaskModels);
 
+localTaskModelsInstallBtn?.addEventListener("click", () => {
+    void installMissingTaskOllamaModels();
+});
+
 localModelsStartBtn?.addEventListener("click", () => {
     void startOllamaHttpService({ remember: true });
 });
@@ -3489,22 +3570,72 @@ function setWorkspaceBridgeStatus(text, state = "missing") {
     workspaceBridgeStatus.dataset.state = state;
 }
 
+function getWorkspaceAccessPolicyLabel(policy = getEffectiveWorkspaceAccessPolicy()) {
+    return policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE ? "Full machine" : "Output only";
+}
+
+function getWorkspaceAccessPolicyStatusState(policy = getEffectiveWorkspaceAccessPolicy()) {
+    return policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE ? "missing" : "configured";
+}
+
+function updateWorkspaceAccessPolicyUi(policy = getEffectiveWorkspaceAccessPolicy()) {
+    const isDesktop = isFaunaDesktopApp();
+    if (workspaceAccessPolicySection) workspaceAccessPolicySection.hidden = !isDesktop;
+    if (workspaceAccessPolicyStatus) {
+        workspaceAccessPolicyStatus.textContent = isDesktop ? getWorkspaceAccessPolicyLabel(policy) : "Desktop only";
+        workspaceAccessPolicyStatus.dataset.state = isDesktop ? getWorkspaceAccessPolicyStatusState(policy) : "missing";
+    }
+    workspaceAccessPolicyButtons.forEach(button => {
+        const active = button.dataset.workspaceAccessPolicy === policy;
+        button.setAttribute("aria-pressed", String(active));
+        button.disabled = !isDesktop;
+    });
+}
+
 function updateWorkspaceBridgeSettingsUi() {
     const endpoint = getWorkspaceBridgeBaseUrl();
     const token = getWorkspaceBridgeToken();
+    const policy = getEffectiveWorkspaceAccessPolicy();
     if (workspaceBridgeEndpointInput) workspaceBridgeEndpointInput.value = endpoint;
     if (workspaceBridgeTokenInput) workspaceBridgeTokenInput.value = token;
     if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
+    updateWorkspaceAccessPolicyUi(policy);
 
     if (!token) {
         setWorkspaceBridgeStatus("Token needed", "missing");
     } else if (isWorkspaceBridgeEnabled) {
-        setWorkspaceBridgeStatus(isFaunaDesktopApp() ? "Auto-started" : "Ready", "configured");
+        setWorkspaceBridgeStatus(isFaunaDesktopApp() ? `Auto-started · ${getWorkspaceAccessPolicyLabel(policy)}` : "Ready", "configured");
     } else {
         setWorkspaceBridgeStatus("Saved off", "missing");
     }
     updateWorkspaceBridgeSaveButtonState();
     updateVoiceButtonAvailability();
+}
+
+async function applyWorkspaceAccessPolicy(policy) {
+    const normalized = normalizeWorkspaceAccessPolicy(policy);
+    if (!isFaunaDesktopApp()) {
+        showToast("Desktop agent access policy is available in the desktop app only.", "warning");
+        return;
+    }
+
+    safeLocalStorageSet(WORKSPACE_ACCESS_POLICY_STORAGE_KEY, normalized);
+    updateWorkspaceAccessPolicyUi(normalized);
+    setWorkspaceBridgeStatus("Restarting bridge...", "missing");
+    try {
+        const info = await getFaunaDesktopApi()?.setWorkspaceAccessPolicy?.(normalized);
+        if (info?.bridgeEndpoint) {
+            safeLocalStorageSet(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY, info.bridgeEndpoint);
+        }
+        safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
+        isWorkspaceBridgeEnabled = true;
+        updateWorkspaceBridgeSettingsUi();
+        updateProviderSettingsUi();
+        showToast(`Desktop agent access set to ${getWorkspaceAccessPolicyLabel(normalized)}.`, normalized === WORKSPACE_ACCESS_POLICY_FULL_MACHINE ? "warning" : "success");
+    } catch (err) {
+        updateWorkspaceBridgeSettingsUi();
+        showToast(`Could not change desktop agent access: ${err.message}`, "error");
+    }
 }
 
 workspaceBridgeSaveBtn?.addEventListener("click", () => {
@@ -3564,6 +3695,12 @@ workspaceBridgeTestBtn?.addEventListener("click", async () => {
         setWorkspaceBridgeStatus("Offline", "missing");
         showToast(`Workspace bridge test failed: ${err.message}`, "error");
     }
+});
+
+workspaceAccessPolicyButtons.forEach(button => {
+    button.addEventListener("click", () => {
+        void applyWorkspaceAccessPolicy(button.dataset.workspaceAccessPolicy);
+    });
 });
 
 wanSaveBtn?.addEventListener("click", () => {
@@ -3634,7 +3771,17 @@ archivedChatToggle?.addEventListener("click", () => {
     setArchivedChatHistoryCollapsed(!isArchivedChatHistoryCollapsed);
 });
 
-newChatBtn.onclick = () => startNewChatSession();
+newChatBtn.onclick = event => {
+    event?.stopPropagation?.();
+    if (typeof startNewChatComposerProjectPicker === "function") {
+        startNewChatComposerProjectPicker();
+        return;
+    }
+    startNewChatSession();
+};
+newNormalChatBtn?.addEventListener("click", () => {
+    startNewChatSession({ notify: true });
+});
 focusComposerInput();
 
 // Initialize Token Count visually

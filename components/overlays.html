@@ -569,6 +569,14 @@
                             <button id="localTaskModelsResetBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Reset</button>
                         </div>
                     </div>
+                    <div id="localTaskModelsMissingCard" class="local-task-missing-card" hidden>
+                        <div class="local-task-missing-copy">
+                            <span class="local-task-missing-title">Missing task models</span>
+                            <span id="localTaskModelsMissingSummary" class="local-task-missing-summary">Install the missing Ollama models used by agent routing.</span>
+                        </div>
+                        <div id="localTaskModelsMissingList" class="local-task-missing-list" aria-live="polite"></div>
+                        <button id="localTaskModelsInstallBtn" class="provider-btn provider-btn-primary local-task-install-btn" type="button">Install missing</button>
+                    </div>
                     <div class="settings-control-card settings-control-card-stacked task-models-card">
                         <div class="setting-info">
                             <span class="setting-title">Agent routing</span>
@@ -730,6 +738,23 @@
                         <button id="workspaceBridgeClearBtn" class="provider-btn provider-btn-ghost" type="button">Clear</button>
                     </div>
                     <code class="settings-command-hint">py -3 local-bridge.py --root . --port 8765</code>
+                    <div id="workspaceAccessPolicySection" class="workspace-policy-section" hidden>
+                        <div class="settings-section-heading">
+                            <p class="provider-section-label">Desktop Agent Access</p>
+                            <span id="workspaceAccessPolicyStatus" class="settings-status-badge">Output only</span>
+                        </div>
+                        <p class="settings-section-desc">Choose how much of this machine chat models can reach through local file and command tools.</p>
+                        <div class="workspace-policy-options" role="radiogroup" aria-label="Desktop agent access policy">
+                            <button class="workspace-policy-option" type="button" data-workspace-access-policy="chat-output" aria-pressed="true">
+                                <span>Output folder</span>
+                                <small>Use only this chat's output folder for files and commands.</small>
+                            </button>
+                            <button class="workspace-policy-option workspace-policy-option-danger" type="button" data-workspace-access-policy="full-machine" aria-pressed="false">
+                                <span>Full machine</span>
+                                <small>Allow absolute paths and unblocked terminal commands.</small>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -755,6 +780,10 @@
                         <div class="app-info-row">
                             <span>Bridge</span>
                             <strong id="appInfoBridgeEndpoint">Not set</strong>
+                        </div>
+                        <div class="app-info-row">
+                            <span>Agent access</span>
+                            <strong id="appInfoWorkspaceAccessPolicy">Output only</strong>
                         </div>
                     </div>
                     <div class="provider-actions app-info-actions">
@@ -784,6 +813,10 @@
                             <span>Generated media</span>
                             <code id="appInfoMediaPath">Chat media folder</code>
                         </div>
+                        <div class="app-info-path-row">
+                            <span>Agent output</span>
+                            <code id="appInfoOutputPath">chats/&lt;chatId&gt;/output</code>
+                        </div>
                     </div>
                 </div>
 
@@ -795,7 +828,7 @@
                     <div id="appInfoStoredSettingsSection" class="app-info-section-body">
                         <p class="settings-section-desc">Key names only. Secret values stay hidden.</p>
                         <div id="appInfoStoredKeys" class="app-info-key-list" aria-live="polite">No stored settings yet.</div>
-                        <p class="app-info-footnote">Fauna desktop credits <a href="https://github.com/fleree" target="_blank" rel="noopener noreferrer">fleree</a> on GitHub.</p>
+                        <p class="app-info-footnote">Early app foundation pulled from <a href="https://github.com/fleree" target="_blank" rel="noopener noreferrer">fleree</a> on GitHub.</p>
                     </div>
                 </div>
 

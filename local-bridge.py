@@ -33,6 +33,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 VERSION = "1.0.1"
 DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 128_000
+MAX_WRITE_BODY_BYTES = 5_000_000
 MAX_OPENAI_BODY_BYTES = 32_000_000
 MAX_OPENAI_RESPONSE_BYTES = 32_000_000
 OPENAI_PROXY_TIMEOUT_SECONDS = 180
@@ -94,11 +95,13 @@ WEB_FETCH_OPENER = build_opener(NoRedirectHandler)
 
 
 class BridgeConfig:
-    def __init__(self, root: Path, token: str, shell: str, allow_dangerous: bool) -> None:
+    def __init__(self, root: Path, token: str, shell: str, allow_dangerous: bool, access_policy: str, projects: dict[str, Path] | None = None) -> None:
         self.root = root.resolve()
         self.token = token
         self.shell = shell
         self.allow_dangerous = allow_dangerous
+        self.access_policy = access_policy
+        self.projects = projects or {}
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -149,8 +152,58 @@ def resolve_under_root(root: Path, requested: str | None) -> Path:
     return candidate
 
 
-def list_tree(root: Path, requested: str, depth: int, limit: int) -> dict[str, Any]:
-    base = resolve_under_root(root, requested)
+def resolve_scope_root(config: BridgeConfig, scope: str | None, create_scope: bool = False) -> Path:
+    clean_scope = (scope or "").strip()
+    if not clean_scope:
+        return config.root
+
+    if clean_scope.startswith("project:"):
+        project_id = clean_scope.removeprefix("project:").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", project_id or ""):
+            raise ValueError("Invalid project scope")
+        project_root = config.projects.get(project_id)
+        if not project_root:
+            raise ValueError("Project scope is not registered with this bridge")
+        if not project_root.exists() or not project_root.is_dir():
+            raise FileNotFoundError("Project folder does not exist")
+        return project_root
+
+    scoped_root = resolve_under_root(config.root, clean_scope)
+    if create_scope:
+        scoped_root.mkdir(parents=True, exist_ok=True)
+    return scoped_root
+
+
+def resolve_bridge_path(config: BridgeConfig, requested: str | None, scope: str | None = None, create_scope: bool = False) -> Path:
+    clean = (requested or ".").strip().replace("\\", os.sep)
+    scoped_root = resolve_scope_root(config, scope, create_scope)
+
+    if config.access_policy == "machine" and not scope:
+        expanded = Path(os.path.expanduser(clean or "."))
+        return expanded.resolve() if expanded.is_absolute() else (config.root / expanded).resolve()
+
+    candidate = scoped_root if not clean or clean == "." else (scoped_root / clean).resolve()
+    try:
+        candidate.relative_to(scoped_root)
+    except ValueError as exc:
+        raise ValueError("Path is outside the allowed workspace scope") from exc
+    return candidate
+
+
+def response_path(config: BridgeConfig, target: Path, scope: str | None = None) -> str:
+    if scope:
+        return relative_path(target, resolve_bridge_path(config, ".", scope))
+    if config.access_policy == "machine":
+        return str(target)
+    return relative_path(target, config.root)
+
+
+def response_root(config: BridgeConfig, scope: str | None = None) -> Path:
+    return resolve_bridge_path(config, ".", scope) if scope else config.root
+
+
+def list_tree(config: BridgeConfig, requested: str, depth: int, limit: int, scope: str | None = None) -> dict[str, Any]:
+    base = resolve_bridge_path(config, requested, scope, create_scope=bool(scope))
     if not base.exists():
         raise FileNotFoundError("Path does not exist")
     if not base.is_dir():
@@ -178,13 +231,14 @@ def list_tree(root: Path, requested: str, depth: int, limit: int) -> dict[str, A
                 continue
             try:
                 resolved_child = child.resolve()
-                resolved_child.relative_to(root)
+                if config.access_policy != "machine" or scope:
+                    resolved_child.relative_to(response_root(config, scope))
             except (OSError, ValueError):
                 continue
 
             is_dir = child.is_dir()
             item: dict[str, Any] = {
-                "path": relative_path(resolved_child, root),
+                "path": response_path(config, resolved_child, scope),
                 "name": child.name,
                 "type": "directory" if is_dir else "file",
             }
@@ -200,16 +254,16 @@ def list_tree(root: Path, requested: str, depth: int, limit: int) -> dict[str, A
 
     walk(base, 0)
     return {
-        "root": str(root),
-        "path": relative_path(base, root),
+        "root": str(response_root(config, scope)),
+        "path": response_path(config, base, scope),
         "depth": depth,
         "entries": entries,
         "truncated": truncated,
     }
 
 
-def read_text_file(root: Path, requested: str, max_bytes: int) -> dict[str, Any]:
-    target = resolve_under_root(root, requested)
+def read_text_file(config: BridgeConfig, requested: str, max_bytes: int, scope: str | None = None) -> dict[str, Any]:
+    target = resolve_bridge_path(config, requested, scope)
     if not target.exists():
         raise FileNotFoundError("File does not exist")
     if not target.is_file():
@@ -221,10 +275,40 @@ def read_text_file(root: Path, requested: str, max_bytes: int) -> dict[str, Any]
     raw = raw[:max_bytes]
     text = raw.decode("utf-8", errors="replace")
     return {
-        "path": relative_path(target, root),
+        "path": response_path(config, target, scope),
         "size": target.stat().st_size,
         "truncated": truncated,
         "content": text,
+    }
+
+
+def write_text_file(config: BridgeConfig, payload: dict[str, Any], append: bool = False) -> dict[str, Any]:
+    requested = str(payload.get("path") or "").strip()
+    if not requested:
+        raise ValueError("File path is required")
+    target = resolve_bridge_path(config, requested, payload.get("scope"), create_scope=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() and target.is_dir():
+        raise IsADirectoryError("Path is a directory")
+    content = str(payload.get("content") or payload.get("text") or "")
+    with target.open("a" if append else "w", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+    return {
+        "path": response_path(config, target, payload.get("scope")),
+        "size": target.stat().st_size,
+        "appended": append,
+    }
+
+
+def make_directory(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    requested = str(payload.get("path") or "").strip()
+    if not requested:
+        raise ValueError("Directory path is required")
+    target = resolve_bridge_path(config, requested, payload.get("scope"), create_scope=True)
+    target.mkdir(parents=True, exist_ok=True)
+    return {
+        "path": response_path(config, target, payload.get("scope")),
+        "created": True,
     }
 
 
@@ -421,7 +505,7 @@ def shell_command_args(command: str, shell_name: str) -> tuple[list[str] | str, 
 
 def run_command(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
     command = str(payload.get("command") or "").strip()
-    cwd = resolve_under_root(config.root, str(payload.get("cwd") or "."))
+    cwd = resolve_bridge_path(config, str(payload.get("cwd") or "."), payload.get("scope"), create_scope=bool(payload.get("scope")))
     timeout = clamp_int(payload.get("timeout"), 20, 1, MAX_EXEC_SECONDS)
 
     if not cwd.exists() or not cwd.is_dir():
@@ -449,7 +533,7 @@ def run_command(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]
         stderr = completed.stderr[-MAX_TEXT_BYTES:]
         return {
             "command": command,
-            "cwd": relative_path(cwd, config.root),
+            "cwd": response_path(config, cwd, payload.get("scope")),
             "exitCode": completed.returncode,
             "durationMs": duration_ms,
             "stdout": stdout,
@@ -459,7 +543,7 @@ def run_command(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]
     except subprocess.TimeoutExpired as exc:
         return {
             "command": command,
-            "cwd": relative_path(cwd, config.root),
+            "cwd": response_path(config, cwd, payload.get("scope")),
             "exitCode": None,
             "durationMs": int((time.monotonic() - started) * 1000),
             "stdout": (exc.stdout or "")[-MAX_TEXT_BYTES:] if isinstance(exc.stdout, str) else "",
@@ -743,20 +827,25 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
                     "version": VERSION,
                     "root": str(self.config.root),
                     "shell": self.config.shell,
+                    "accessPolicy": self.config.access_policy,
+                    "allowDangerous": self.config.allow_dangerous,
+                    "projects": len(self.config.projects),
                 })
             elif parsed.path == "/tree":
                 result = list_tree(
-                    self.config.root,
+                    self.config,
                     query.get("path", ["."])[0],
                     clamp_int(query.get("depth", [2])[0], 2, 0, 5),
                     clamp_int(query.get("limit", [220])[0], 220, 1, 800),
+                    query.get("scope", [""])[0] or None,
                 )
                 json_response(self, 200, {"ok": True, **result})
             elif parsed.path == "/read":
                 result = read_text_file(
-                    self.config.root,
+                    self.config,
                     query.get("path", [""])[0],
                     clamp_int(query.get("maxBytes", [80_000])[0], 80_000, 1, MAX_TEXT_BYTES),
+                    query.get("scope", [""])[0] or None,
                 )
                 json_response(self, 200, {"ok": True, **result})
             else:
@@ -779,6 +868,8 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
             max_body_bytes = MAX_OPENAI_BODY_BYTES
         elif parsed.path == "/local-ai":
             max_body_bytes = MAX_LOCAL_AI_BODY_BYTES
+        elif parsed.path == "/write":
+            max_body_bytes = MAX_WRITE_BODY_BYTES
         if length > max_body_bytes:
             json_response(self, 413, {"ok": False, "error": "Request body is too large"})
             return
@@ -788,6 +879,12 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
             payload = json.loads(body or "{}")
             if parsed.path == "/exec":
                 result = run_command(self.config, payload)
+                json_response(self, 200, {"ok": True, **result})
+            elif parsed.path == "/write":
+                result = write_text_file(self.config, payload, append=bool(payload.get("append")))
+                json_response(self, 200, {"ok": True, **result})
+            elif parsed.path == "/mkdir":
+                result = make_directory(self.config, payload)
                 json_response(self, 200, {"ok": True, **result})
             elif parsed.path == "/openai":
                 if payload.get("streamResponse"):
@@ -824,8 +921,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind.")
     parser.add_argument("--token", default="", help="Bridge token. Generated when omitted.")
     parser.add_argument("--shell", choices=["powershell", "cmd", "system"], default="powershell" if os.name == "nt" else "system")
+    parser.add_argument("--access-policy", choices=["workspace", "machine"], default="workspace", help="Path policy. workspace keeps paths under --root; machine also allows absolute local paths.")
+    parser.add_argument("--projects-json", default="{}", help="JSON object mapping registered project ids to absolute project roots.")
     parser.add_argument("--allow-dangerous", action="store_true", help="Disable the small built-in command blocklist.")
     return parser.parse_args()
+
+
+def parse_project_roots(raw_json: str) -> dict[str, Path]:
+    try:
+        parsed = json.loads(raw_json or "{}")
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Invalid --projects-json: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise SystemExit("--projects-json must be a JSON object")
+
+    projects: dict[str, Path] = {}
+    for project_id, project_path in parsed.items():
+        clean_id = str(project_id or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", clean_id):
+            continue
+        path_value = str(project_path or "").strip()
+        if not path_value:
+            continue
+        resolved = Path(path_value).expanduser().resolve()
+        projects[clean_id] = resolved
+    return projects
 
 
 def main() -> None:
@@ -835,12 +955,16 @@ def main() -> None:
         raise SystemExit(f"Workspace root does not exist or is not a directory: {root}")
 
     token = args.token or secrets.token_urlsafe(24)
-    FaunaBridgeHandler.config = BridgeConfig(root, token, args.shell, args.allow_dangerous)
+    projects = parse_project_roots(args.projects_json)
+    FaunaBridgeHandler.config = BridgeConfig(root, token, args.shell, args.allow_dangerous, args.access_policy, projects)
     server = ThreadingHTTPServer((args.host, args.port), FaunaBridgeHandler)
 
     print("Fauna local workspace bridge")
     print(f"URL: http://{args.host}:{args.port}")
     print(f"Root: {root}")
+    print(f"Access policy: {args.access_policy}")
+    print(f"Registered projects: {len(projects)}")
+    print(f"Command blocklist: {'off' if args.allow_dangerous else 'on'}")
     print(f"Token: {token}")
     print("Paste the URL and token into Fauna Settings > Local Workspace Bridge.")
     print("Press Ctrl+C to stop.")

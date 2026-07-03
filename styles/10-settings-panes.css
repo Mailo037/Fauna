@@ -179,6 +179,109 @@
     line-height: 1.45;
 }
 
+.project-content-dialog {
+    width: min(780px, calc(100vw - 36px));
+    max-height: min(720px, calc(100vh - 44px));
+}
+
+.project-content-subtitle {
+    margin: 0;
+}
+
+.project-content-preview {
+    min-height: 160px;
+    max-height: min(480px, calc(100vh - 260px));
+    overflow: auto;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 10px;
+    background: #101010;
+    color: rgba(245, 245, 245, 0.86);
+    font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.48;
+    white-space: pre-wrap;
+}
+
+.project-diff-preview {
+    color: rgba(245, 245, 245, 0.9);
+}
+
+.project-instructions-dialog {
+    width: min(580px, calc(100vw - 36px));
+}
+
+.project-instructions-field {
+    gap: 7px;
+}
+
+.project-instructions-textarea {
+    min-height: 190px;
+    resize: vertical;
+    line-height: 1.45;
+}
+
+.workspace-policy-section {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.workspace-policy-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.workspace-policy-option {
+    display: grid;
+    gap: 4px;
+    min-height: 74px;
+    padding: 11px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: #181818;
+    color: rgba(255, 255, 255, 0.72);
+    text-align: left;
+}
+
+.workspace-policy-option:hover,
+.workspace-policy-option:focus-visible {
+    border-color: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.workspace-policy-option[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--accent) 56%, rgba(255, 255, 255, 0.14));
+    background: color-mix(in srgb, var(--accent) 12%, #181818);
+    color: #f5f7ff;
+}
+
+.workspace-policy-option-danger[aria-pressed="true"] {
+    border-color: rgba(255, 124, 124, 0.54);
+    background: rgba(255, 80, 80, 0.1);
+}
+
+.workspace-policy-option span {
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.workspace-policy-option small {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+@media (max-width: 640px) {
+    .workspace-policy-options {
+        grid-template-columns: 1fr;
+    }
+}
+
 .approval-detail-list {
     display: grid;
     gap: 6px;
@@ -924,6 +1027,10 @@
     white-space: nowrap;
 }
 
+.settings-section-heading .settings-status-badge {
+    max-width: min(180px, 46%);
+}
+
 .settings-status-badge[data-state="configured"] {
     border-color: color-mix(in srgb, var(--accent) 34%, rgba(255, 255, 255, 0.1));
     background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -932,6 +1039,140 @@
 
 .settings-status-badge[data-state="missing"] {
     color: rgba(255, 255, 255, 0.34);
+}
+
+.settings-pane[data-settings-pane-panel="task-models"] .settings-section-heading {
+    align-items: flex-start;
+}
+
+.settings-pane[data-settings-pane-panel="task-models"] .settings-section-heading > div:first-child {
+    min-width: 0;
+}
+
+.settings-pane[data-settings-pane-panel="task-models"] .settings-section-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+}
+
+#localTaskModelsStatus {
+    flex: 0 0 auto;
+    min-width: 74px;
+    max-width: none;
+    color: rgba(255, 255, 255, 0.68);
+    overflow: visible;
+}
+
+#localTaskModelsStatus[data-state="missing"] {
+    border-color: color-mix(in srgb, #f3b36a 28%, rgba(255, 255, 255, 0.08));
+    background: color-mix(in srgb, #f3b36a 10%, rgba(255, 255, 255, 0.035));
+    color: color-mix(in srgb, #f3b36a 82%, #ffffff);
+}
+
+.local-task-missing-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 12px;
+    align-items: center;
+    margin: 10px 0;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, #f3b36a 22%, rgba(255, 255, 255, 0.08));
+    border-radius: 10px;
+    background:
+        linear-gradient(135deg, rgba(243, 179, 106, 0.08), rgba(255, 255, 255, 0.025)),
+        rgba(255, 255, 255, 0.025);
+}
+
+.local-task-missing-card[hidden] {
+    display: none;
+}
+
+.local-task-missing-card[data-state="incompatible"] {
+    border-color: color-mix(in srgb, var(--accent) 24%, rgba(255, 255, 255, 0.08));
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), rgba(255, 255, 255, 0.025)),
+        rgba(255, 255, 255, 0.025);
+}
+
+.local-task-missing-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+
+.local-task-missing-title {
+    color: #f1f1f1;
+    font-size: 12.5px;
+    font-weight: 720;
+}
+
+.local-task-missing-summary {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.local-task-missing-list {
+    display: grid;
+    grid-column: 1 / -1;
+    gap: 6px;
+}
+
+.local-task-missing-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(0, 1.2fr) auto;
+    gap: 8px;
+    align-items: center;
+    min-height: 32px;
+    padding: 7px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.16);
+}
+
+.local-task-missing-model {
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.84);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 11.5px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.local-task-missing-roles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
+.local-task-missing-chip,
+.local-task-missing-state {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 720;
+    line-height: 1;
+}
+
+.local-task-missing-chip {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.58);
+}
+
+.local-task-missing-state {
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, #f3b36a 24%, rgba(255, 255, 255, 0.08));
+    color: color-mix(in srgb, #f3b36a 84%, #ffffff);
+}
+
+.local-task-install-btn {
+    min-width: 116px;
+    white-space: nowrap;
 }
 
 .settings-range-card .settings-range-wrap {

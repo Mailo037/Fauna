@@ -2,8 +2,8 @@
 /* --- Composer: align with settings modal surface language --- */
 .input-container-floating {
     min-height: 96px;
-    gap: 6px;
-    padding: 10px 12px;
+    gap: 0;
+    padding: 14px 12px 5px;
     border-color: rgba(255, 255, 255, 0.1);
     border-radius: 14px;
     background: #202020;
@@ -43,6 +43,7 @@ textarea#prompt::placeholder {
 .input-action-bar {
     gap: 10px;
     padding-top: 7px;
+    padding-bottom: 5px;
     border-top: 1px solid rgba(255, 255, 255, 0.075);
 }
 
@@ -117,6 +118,479 @@ textarea#prompt::placeholder {
     background: rgba(255, 255, 255, 0.08);
 }
 
+.agent-task-mode-wrap,
+.composer-project-wrap {
+    position: relative;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.agent-task-mode-btn,
+.composer-context-btn {
+    display: inline-flex;
+    min-height: 34px;
+    align-items: center;
+    gap: 7px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12.5px;
+    font-weight: 650;
+    line-height: 1;
+    transition: background-color 0.16s var(--ease), border-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.agent-task-mode-btn:hover,
+.agent-task-mode-btn:focus-visible,
+.agent-task-mode-btn[aria-expanded="true"],
+.composer-context-btn:hover:not(:disabled),
+.composer-context-btn:focus-visible,
+.composer-context-btn.active {
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.agent-task-mode-icon {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+}
+
+.agent-task-mode-menu {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 9px);
+    z-index: 390;
+    display: grid;
+    gap: 4px;
+    width: min(286px, calc(100vw - 28px));
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 14px;
+    background: #202020;
+    color: #f5f5f5;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.26);
+}
+
+.agent-task-mode-menu[hidden] {
+    display: none !important;
+}
+
+.agent-task-mode-option {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 48px;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.78);
+    text-align: left;
+}
+
+.agent-task-mode-option:hover,
+.agent-task-mode-option:focus-visible,
+.agent-task-mode-option[aria-checked="true"] {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: #303030;
+    color: #fff;
+}
+
+.agent-task-mode-option-check {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.055);
+    color: color-mix(in srgb, var(--accent) 74%, #fff);
+}
+
+.agent-task-mode-option[aria-checked="false"] .agent-task-mode-option-check {
+    color: rgba(255, 255, 255, 0.22);
+}
+
+.agent-task-mode-option-check svg {
+    width: 14px;
+    height: 14px;
+}
+
+.agent-task-mode-option-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.agent-task-mode-option-label,
+.agent-task-mode-option-desc {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-task-mode-option-label {
+    color: #eeeeee;
+    font-size: 12.5px;
+    font-weight: 680;
+    line-height: 1.15;
+}
+
+.agent-task-mode-option-desc {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10.5px;
+    font-weight: 620;
+    line-height: 1.1;
+}
+
+.composer-project-btn {
+    display: inline-flex;
+    max-width: 190px;
+    min-height: 34px;
+    align-items: center;
+    gap: 7px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12.5px;
+    font-weight: 650;
+    line-height: 1;
+    transition: background-color 0.16s var(--ease), border-color 0.16s var(--ease), color 0.16s var(--ease);
+}
+
+.composer-project-btn.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: #f3f3f3;
+}
+
+.composer-project-btn:hover,
+.composer-project-btn:focus-visible,
+.composer-project-btn[aria-expanded="true"] {
+    border-color: transparent;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.composer-project-icon {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+}
+
+.composer-project-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.composer-project-menu {
+    position: fixed;
+    left: 10px;
+    top: 10px;
+    bottom: auto;
+    z-index: 390;
+    display: grid;
+    gap: 3px;
+    width: min(330px, calc(100vw - 28px));
+    max-height: min(360px, calc(100vh - 168px));
+    padding: 7px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    background: #202020;
+    color: #f5f5f5;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.26);
+}
+
+.composer-project-menu[hidden] {
+    display: none !important;
+}
+
+.composer-project-menu-header {
+    padding: 2px 4px 5px;
+    color: rgba(255, 255, 255, 0.44);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.composer-project-option,
+.composer-project-add {
+    width: 100%;
+    min-height: 40px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.78);
+    text-align: left;
+}
+
+.composer-project-option {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+}
+
+.composer-project-option:hover,
+.composer-project-option:focus-visible,
+.composer-project-option.active,
+.composer-project-add:hover,
+.composer-project-add:focus-visible {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: #303030;
+    color: #fff;
+}
+
+.composer-project-option:disabled {
+    cursor: default;
+    opacity: 0.48;
+}
+
+.composer-project-option:disabled:hover,
+.composer-project-option:disabled:focus-visible {
+    border-color: transparent;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.composer-project-lock-note {
+    padding: 7px 8px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1.35;
+}
+
+.composer-project-option-icon {
+    display: inline-flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.composer-project-option.active .composer-project-option-icon {
+    color: color-mix(in srgb, var(--accent) 78%, #fff);
+}
+
+.composer-project-option-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.composer-project-option-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.composer-project-option-label,
+.composer-project-option-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.composer-project-option-label {
+    color: #eeeeee;
+    font-size: 12.5px;
+    font-weight: 650;
+    line-height: 1.15;
+}
+
+.composer-project-option-meta {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10.5px;
+    font-weight: 620;
+    line-height: 1.1;
+}
+
+.composer-project-add {
+    padding: 0 10px;
+    color: color-mix(in srgb, var(--accent) 76%, #fff);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.composer-context-bar {
+    display: flex;
+    width: calc(100% - 14px);
+    align-self: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    min-height: 46px;
+    margin: 3px auto 0;
+    padding: 6px 12px 10px;
+    border-radius: 0 0 14px 14px;
+    background: #1b1b1b;
+}
+
+.composer-context-bar .agent-task-mode-wrap {
+    display: none;
+}
+
+.composer-context-bar .composer-project-btn,
+.composer-context-bar .composer-context-btn {
+    max-width: 190px;
+    min-height: 30px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 13px;
+    font-weight: 520;
+}
+
+.composer-context-bar .composer-project-btn {
+    gap: 7px;
+}
+
+.composer-context-bar .composer-project-btn.active,
+.composer-context-bar .composer-context-btn.active {
+    color: rgba(255, 255, 255, 0.76);
+}
+
+.composer-context-bar .composer-project-btn:hover,
+.composer-context-bar .composer-project-btn:focus-visible,
+.composer-context-bar .composer-project-btn[aria-expanded="true"],
+.composer-context-bar .composer-context-btn:hover:not(:disabled),
+.composer-context-bar .composer-context-btn:focus-visible {
+    background: transparent;
+    color: #ffffff;
+}
+
+.composer-context-bar .composer-project-icon,
+.composer-context-icon {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.48);
+}
+
+.composer-context-chevron {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.composer-context-btn:disabled {
+    cursor: default;
+    opacity: 0.42;
+}
+
+.composer-context-btn:disabled:hover {
+    color: rgba(255, 255, 255, 0.56);
+}
+
+.new-chat-picker-wrap {
+    position: relative;
+    width: 100%;
+}
+
+.new-chat-picker-wrap .new-chat-item {
+    width: 100%;
+}
+
+.new-chat-project-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 430;
+    display: grid;
+    width: min(356px, calc(100vw - 32px));
+    max-height: min(430px, calc(100vh - 96px));
+    gap: 4px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    background: #202020;
+    color: #f5f5f5;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.26);
+}
+
+.new-chat-project-menu[hidden] {
+    display: none !important;
+}
+
+.new-chat-project-header {
+    display: grid;
+    gap: 2px;
+    padding: 2px 4px 7px;
+}
+
+.new-chat-project-header span {
+    color: #f1f3f8;
+    font-size: 12px;
+    font-weight: 760;
+    line-height: 1.2;
+}
+
+.new-chat-project-header small,
+.new-chat-project-section-label,
+.new-chat-project-empty {
+    color: rgba(255, 255, 255, 0.46);
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1.35;
+}
+
+.new-chat-project-section-label {
+    padding: 7px 4px 2px;
+}
+
+.new-chat-project-empty {
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.new-chat-project-option {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    min-height: 44px;
+    padding: 6px 8px;
+}
+
+.new-chat-project-option-worktree {
+    margin-left: 12px;
+}
+
+.new-chat-project-branch {
+    max-width: 84px;
+    overflow: hidden;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 10.5px;
+    font-weight: 720;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .input-container-floating .composer-control-unavailable,
 .input-container-floating .action-circle-btn:disabled,
 .input-container-floating .action-pill-btn:disabled {
@@ -124,8 +598,8 @@ textarea#prompt::placeholder {
 }
 
 .input-container-floating [data-tooltip]::after {
-    top: calc(100% + 7px);
-    bottom: auto;
+    top: auto;
+    bottom: calc(100% + 7px);
     left: 0;
     width: max-content;
     max-width: min(320px, calc(100vw - 48px));
@@ -234,7 +708,22 @@ textarea#prompt::placeholder {
 
     .input-action-bar {
         align-items: center;
+        flex-wrap: wrap;
+        row-gap: 7px;
         padding-top: 8px;
+    }
+
+    .action-bar-left,
+    .action-bar-right {
+        width: 100%;
+    }
+
+    .action-bar-left {
+        justify-content: flex-start;
+    }
+
+    .action-bar-right {
+        justify-content: flex-end;
     }
 
     .input-container-floating .action-circle-btn,
@@ -256,6 +745,68 @@ textarea#prompt::placeholder {
 
     .input-container-floating .stop-btn {
         border-radius: 999px;
+    }
+
+    .agent-task-mode-btn {
+        width: 44px;
+        max-width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        justify-content: center;
+        padding: 0;
+        border-radius: 10px;
+    }
+
+    .agent-task-mode-label {
+        display: none;
+    }
+
+    .composer-project-btn {
+        width: auto;
+        max-width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        justify-content: center;
+        padding: 0;
+        border-radius: 10px;
+    }
+
+    .composer-project-label {
+        display: none;
+    }
+
+    .composer-project-menu {
+        left: 10px;
+        width: min(320px, calc(100vw - 28px));
+    }
+
+    .agent-task-mode-menu {
+        left: -72px;
+    }
+
+    .composer-context-bar {
+        width: calc(100% - 12px);
+        gap: 4px 10px;
+        min-height: 42px;
+        padding: 5px 10px 9px;
+    }
+
+    .composer-context-bar .composer-project-btn,
+    .composer-context-bar .composer-context-btn {
+        width: auto;
+        max-width: 42vw;
+        min-width: 0;
+        height: 30px;
+        min-height: 30px;
+        justify-content: flex-start;
+        padding: 0;
+        border-radius: 0;
+    }
+
+    .composer-context-bar .composer-project-label {
+        display: inline-block;
     }
 }
 
@@ -1118,5 +1669,55 @@ textarea#prompt::placeholder {
         width: min(222px, calc(100vw - 34px));
         max-height: min(360px, calc(100vh - 104px));
     }
+}
+
+@media (min-width: 769px) {
+    .sidebar:not(.collapsed) {
+        transition: width 0.2s var(--ease), min-width 0.2s var(--ease), padding 0.2s var(--ease), border-color 0.2s var(--ease);
+    }
+
+    .sidebar .sidebar-collapse-toggle {
+        display: inline-flex !important;
+    }
+
+    .sidebar.collapsed {
+        width: var(--sidebar-closed-width) !important;
+        min-width: var(--sidebar-closed-width) !important;
+        max-width: var(--sidebar-closed-width) !important;
+        pointer-events: auto;
+    }
+
+    .sidebar.collapsed > * {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .sidebar.maximized {
+        padding-right: 16px;
+        padding-left: 16px;
+    }
+}
+
+.generated-image-card {
+    isolation: isolate;
+}
+
+.generated-image-card.generated-image-info-open,
+.generated-image-info:focus-within,
+.generated-image-info:hover {
+    z-index: 40;
+}
+
+.generated-image-info {
+    z-index: 45;
+}
+
+.generated-image-info-panel {
+    z-index: 60;
+}
+
+.message-node .assistant-tts-player {
+    position: relative;
+    z-index: 2;
 }
 

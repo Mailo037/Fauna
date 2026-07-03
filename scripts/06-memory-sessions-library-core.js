@@ -60,6 +60,2321 @@ function stripChatTitleRequest(content) {
     return String(content || "").replace(CHAT_TITLE_RE, "").trim();
 }
 
+function hashWorkspaceProjectValue(value) {
+    let hash = 0;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+        hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+    }
+    return Math.abs(hash).toString(36);
+}
+
+function slugWorkspaceProjectValue(value, fallback = "project") {
+    const clean = String(value || "")
+        .trim()
+        .replace(/[^a-zA-Z0-9_.-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 48);
+    return clean || fallback;
+}
+
+function getWorkspaceProjectPathName(projectPath = "") {
+    return String(projectPath || "").split(/[\\/]/).filter(Boolean).pop() || "Project";
+}
+
+function createWorkspaceProjectId(projectPath = "", fallbackName = "project") {
+    const name = slugWorkspaceProjectValue(getWorkspaceProjectPathName(projectPath) || fallbackName);
+    return `project-${name}-${hashWorkspaceProjectValue(String(projectPath || fallbackName).toLowerCase())}`;
+}
+
+function createWorkspaceWorktreeId(projectPath = "", fallbackName = "worktree") {
+    const name = slugWorkspaceProjectValue(getWorkspaceProjectPathName(projectPath) || fallbackName, "worktree");
+    return `worktree-${name}-${hashWorkspaceProjectValue(String(projectPath || fallbackName).toLowerCase())}`;
+}
+
+function createEmptyProjectContext() {
+    return {
+        projectId: "",
+        rootId: ""
+    };
+}
+
+function hasProjectContext(context = createEmptyProjectContext()) {
+    return Boolean(String(context?.rootId || context?.projectId || "").trim());
+}
+
+function normalizeChatWorkspaceMode(value, context = createEmptyProjectContext()) {
+    const clean = String(value || "").trim().toLowerCase();
+    if (clean === "project" || clean === "normal") return clean;
+    return hasProjectContext(context) ? "project" : "normal";
+}
+
+function normalizeStoredSessionProjectContext(raw) {
+    if (!raw || typeof raw !== "object") return createEmptyProjectContext();
+    const projectId = String(raw.projectId || "").trim();
+    const rootId = String(raw.rootId || raw.worktreeId || projectId || "").trim();
+    return {
+        projectId,
+        rootId
+    };
+}
+
+function normalizeWorkspaceProjectWorktree(raw, projectId = "") {
+    if (!raw || typeof raw !== "object") return null;
+    const path = String(raw.path || "").trim();
+    if (!path) return null;
+    const name = cleanSessionTitle(raw.name || raw.branch || getWorkspaceProjectPathName(path), 48);
+    const id = String(raw.id || createWorkspaceWorktreeId(path, name)).trim();
+    return {
+        id,
+        projectId: String(raw.projectId || projectId || "").trim(),
+        name,
+        path,
+        branch: String(raw.branch || "").trim(),
+        createdAt: String(raw.createdAt || ""),
+        updatedAt: String(raw.updatedAt || raw.createdAt || "")
+    };
+}
+
+function normalizeProjectInstructions(value = "") {
+    return String(value || "").replace(/\r\n/g, "\n").trim().slice(0, 6000);
+}
+
+function normalizeWorkspaceProject(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const path = String(raw.path || "").trim();
+    if (!path) return null;
+    const name = cleanSessionTitle(raw.name || getWorkspaceProjectPathName(path), 48);
+    const id = String(raw.id || createWorkspaceProjectId(path, name)).trim();
+    const worktrees = Array.isArray(raw.worktrees)
+        ? raw.worktrees.map(worktree => normalizeWorkspaceProjectWorktree(worktree, id)).filter(Boolean)
+        : [];
+    return {
+        id,
+        name,
+        path,
+        instructions: normalizeProjectInstructions(raw.instructions),
+        createdAt: String(raw.createdAt || ""),
+        updatedAt: String(raw.updatedAt || raw.createdAt || ""),
+        worktrees
+    };
+}
+
+const PROJECT_SORT_OPTIONS = [
+    { id: "updated", label: "Recent", tooltip: "Sort projects: recent first" },
+    { id: "name", label: "Name", tooltip: "Sort projects: name" },
+    { id: "path", label: "Path", tooltip: "Sort projects: path" }
+];
+
+const AGENT_TASK_MODES = [
+    {
+        id: "ask",
+        label: "Ask",
+        description: "Answer and inspect only when useful.",
+        prompt: "Task mode: Ask. Answer directly. Use local tools only when the user asks for project, file, command, or verification work."
+    },
+    {
+        id: "plan",
+        label: "Plan",
+        description: "Inspect first, then propose a plan.",
+        prompt: "Task mode: Plan. Inspect relevant files when helpful, then give a concise plan before making edits. Do not write files unless the user asks you to continue."
+    },
+    {
+        id: "build",
+        label: "Build",
+        description: "Read, edit, and run project checks.",
+        prompt: "Task mode: Build. You may read, create, edit, and run commands inside the selected project or worktree to complete the user's request. Prefer focused changes and verify them when practical."
+    },
+    {
+        id: "review",
+        label: "Review",
+        description: "Find risks without changing files.",
+        prompt: "Task mode: Review. Use a code-review stance. Prioritize bugs, regressions, security risks, and missing tests. Do not edit files unless the user explicitly asks for fixes."
+    }
+];
+
+function normalizeProjectSortMode(value) {
+    const clean = String(value || "").trim().toLowerCase();
+    return PROJECT_SORT_OPTIONS.some(option => option.id === clean) ? clean : "updated";
+}
+
+function normalizeAgentTaskMode(value) {
+    const clean = String(value || "").trim().toLowerCase();
+    return AGENT_TASK_MODES.some(option => option.id === clean) ? clean : "build";
+}
+
+function getAgentTaskModeOption(mode = activeAgentTaskMode) {
+    return AGENT_TASK_MODES.find(option => option.id === mode) || AGENT_TASK_MODES[2];
+}
+
+function normalizeProjectAgentTab(value) {
+    const clean = String(value || "").trim().toLowerCase();
+    if (clean === "files" || clean === "activity" || clean === "chat") return clean;
+    return "menu";
+}
+
+function normalizeProjectExplorerPath(path = ".") {
+    const clean = String(path || ".").replace(/\\/g, "/").replace(/^\/+/, "").trim();
+    if (!clean || clean === ".") return ".";
+    const parts = [];
+    clean.split("/").forEach(part => {
+        const segment = part.trim();
+        if (!segment || segment === ".") return;
+        if (segment === "..") {
+            parts.pop();
+            return;
+        }
+        parts.push(segment);
+    });
+    return parts.join("/") || ".";
+}
+
+const PROJECT_AGENT_DEFAULT_WIDTH = 320;
+const PROJECT_AGENT_MIN_WIDTH = 268;
+const PROJECT_AGENT_MAX_WIDTH = 520;
+
+function normalizeProjectAgentWidth(value) {
+    const width = Number(value);
+    if (!Number.isFinite(width)) return PROJECT_AGENT_DEFAULT_WIDTH;
+    return Math.min(PROJECT_AGENT_MAX_WIDTH, Math.max(PROJECT_AGENT_MIN_WIDTH, Math.round(width)));
+}
+
+let activeProjectSortMode = normalizeProjectSortMode(safeLocalStorageGet(WORKSPACE_PROJECT_SORT_STORAGE_KEY));
+let activeAgentTaskMode = normalizeAgentTaskMode(safeLocalStorageGet(AGENT_TASK_MODE_STORAGE_KEY));
+let activeProjectAgentTab = normalizeProjectAgentTab(safeLocalStorageGet(PROJECT_AGENT_TAB_STORAGE_KEY));
+let activeProjectExplorerPath = normalizeProjectExplorerPath(safeLocalStorageGet(PROJECT_EXPLORER_PATH_STORAGE_KEY));
+let activeProjectAgentWidth = normalizeProjectAgentWidth(safeLocalStorageGet(PROJECT_AGENT_WIDTH_STORAGE_KEY));
+const storedProjectAgentCollapsed = safeLocalStorageGet(PROJECT_AGENT_COLLAPSED_STORAGE_KEY);
+let isProjectAgentCollapsed = storedProjectAgentCollapsed ? storedProjectAgentCollapsed === "true" : true;
+let isProjectAgentMaximized = safeLocalStorageGet(PROJECT_AGENT_MAXIMIZED_STORAGE_KEY) === "true";
+let projectExplorerRootId = "";
+let currentProjectExplorerResult = { entries: [], truncated: false };
+let agentActivityEvents = [];
+let projectPageChatRootId = "";
+let projectPageChatHistory = [];
+
+function getProjectSortOption(mode = activeProjectSortMode) {
+    return PROJECT_SORT_OPTIONS.find(option => option.id === mode) || PROJECT_SORT_OPTIONS[0];
+}
+
+function getProjectTimestamp(item) {
+    const value = Date.parse(item?.updatedAt || item?.createdAt || "");
+    return Number.isFinite(value) ? value : 0;
+}
+
+function compareProjectRoots(a, b) {
+    if (activeProjectSortMode === "name") {
+        return String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" })
+            || String(a.path || "").localeCompare(String(b.path || ""), undefined, { sensitivity: "base" });
+    }
+    if (activeProjectSortMode === "path") {
+        return String(a.path || "").localeCompare(String(b.path || ""), undefined, { sensitivity: "base" })
+            || String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+    }
+    return getProjectTimestamp(b) - getProjectTimestamp(a)
+        || String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
+}
+
+function getSortedWorkspaceProjects() {
+    return [...workspaceProjects]
+        .sort(compareProjectRoots)
+        .map(project => ({
+            ...project,
+            worktrees: [...project.worktrees].sort(compareProjectRoots)
+        }));
+}
+
+function updateProjectSortButton() {
+    if (!projectSortBtn) return;
+    const option = getProjectSortOption();
+    projectSortBtn.dataset.tooltip = option.tooltip;
+    projectSortBtn.setAttribute("aria-label", option.tooltip);
+}
+
+function closeProjectSortMenu() {
+    if (!projectSortMenu || !projectSortBtn) return;
+    projectSortMenu.hidden = true;
+    projectSortBtn.setAttribute("aria-expanded", "false");
+    projectSortBtn.closest(".project-sort-wrap")?.classList.remove("open");
+}
+
+function renderProjectSortMenu() {
+    if (!projectSortMenu) return;
+    projectSortMenu.replaceChildren();
+    PROJECT_SORT_OPTIONS.forEach(option => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "chat-session-menu-item project-sort-menu-item";
+        button.setAttribute("role", "menuitemradio");
+        button.setAttribute("aria-checked", String(option.id === activeProjectSortMode));
+        button.innerHTML = `
+            <svg class="project-sort-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m5 12 4 4L19 6"></path>
+            </svg>
+            <span></span>
+        `;
+        button.querySelector("span").textContent = option.label;
+        button.addEventListener("click", event => {
+            event.stopPropagation();
+            activeProjectSortMode = option.id;
+            safeLocalStorageSet(WORKSPACE_PROJECT_SORT_STORAGE_KEY, activeProjectSortMode);
+            closeProjectSortMenu();
+            updateProjectSortButton();
+            renderProjectList();
+            renderComposerProjectPicker();
+        });
+        projectSortMenu.appendChild(button);
+    });
+}
+
+function toggleProjectSortMenu() {
+    if (!projectSortMenu || !projectSortBtn) return;
+    const willOpen = projectSortMenu.hidden;
+    if (willOpen) {
+        renderProjectSortMenu();
+        closeProjectMenus();
+        projectSortMenu.hidden = false;
+        projectSortBtn.closest(".project-sort-wrap")?.classList.add("open");
+    } else {
+        closeProjectSortMenu();
+    }
+    projectSortBtn.setAttribute("aria-expanded", String(willOpen));
+}
+
+function readStoredWorkspaceProjects() {
+    const raw = safeLocalStorageGet(WORKSPACE_PROJECTS_STORAGE_KEY);
+    if (!raw) return [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map(normalizeWorkspaceProject).filter(Boolean);
+    } catch (err) {
+        console.warn("Could not parse saved Fauna projects:", err);
+        return [];
+    }
+}
+
+function syncWorkspaceProjects(projects = []) {
+    workspaceProjects = (Array.isArray(projects) ? projects : [])
+        .map(normalizeWorkspaceProject)
+        .filter(Boolean);
+    safeLocalStorageSet(WORKSPACE_PROJECTS_STORAGE_KEY, JSON.stringify(workspaceProjects));
+    renderProjectList();
+    renderComposerProjectPicker();
+    updateProjectAgentPanel();
+    updateActiveChatTitle();
+}
+
+function persistWorkspaceProjects({ syncDesktop = true } = {}) {
+    safeLocalStorageSet(WORKSPACE_PROJECTS_STORAGE_KEY, JSON.stringify(workspaceProjects));
+    if (syncDesktop && isFaunaDesktopApp()) {
+        void getFaunaDesktopApi()?.projects?.save?.(workspaceProjects)
+            .then(result => {
+                if (Array.isArray(result?.projects)) syncWorkspaceProjects(result.projects);
+            })
+            .catch(err => showToast(`Project save failed: ${err.message}`, "error"));
+    }
+}
+
+function getWorkspaceProjectById(projectId = "") {
+    return workspaceProjects.find(project => project.id === projectId) || null;
+}
+
+function getWorkspaceProjectRootById(rootId = "") {
+    const id = String(rootId || "").trim();
+    if (!id) return null;
+    for (const project of workspaceProjects) {
+        if (project.id === id) {
+            return {
+                id: project.id,
+                projectId: project.id,
+                name: project.name,
+                path: project.path,
+                branch: "",
+                type: "project",
+                project
+            };
+        }
+        const worktree = project.worktrees.find(item => item.id === id);
+        if (worktree) {
+            return {
+                ...worktree,
+                projectId: project.id,
+                type: "worktree",
+                project
+            };
+        }
+    }
+    return null;
+}
+
+function getSessionProjectRoot(session = getActiveSession()) {
+    const context = normalizeStoredSessionProjectContext(session?.projectContext);
+    return getWorkspaceProjectRootById(context.rootId || context.projectId);
+}
+
+function getSessionWorkspaceMode(session = getActiveSession()) {
+    return normalizeChatWorkspaceMode(session?.workspaceMode, session?.projectContext);
+}
+
+function createProjectContextForRoot(root) {
+    return root?.id
+        ? { projectId: root.projectId || root.id, rootId: root.id }
+        : createEmptyProjectContext();
+}
+
+function isProjectChatSession(session = getActiveSession()) {
+    return getSessionWorkspaceMode(session) === "project";
+}
+
+function getWorkspaceProjectRootForSession(sessionId = activeSessionId) {
+    const session = sessionId ? getChatSessionById(sessionId) : getActiveSession();
+    return getSessionProjectRoot(session);
+}
+
+function getWorkspaceProjectRootForSignal(signal = null) {
+    const sessionId = typeof getGenerationSessionIdForSignal === "function"
+        ? getGenerationSessionIdForSignal(signal)
+        : "";
+    return getWorkspaceProjectRootForSession(sessionId || activeSessionId);
+}
+
+function getActiveWorkspaceProjectBridgeScope(signal = null) {
+    const root = getWorkspaceProjectRootForSignal(signal);
+    return root?.id ? `project:${root.id}` : "";
+}
+
+function getActiveWorkspaceProjectSystemPrompt(sessionId = activeSessionId) {
+    const root = getWorkspaceProjectRootForSession(sessionId);
+    if (!root) return "";
+    const branch = root.type === "worktree" && root.branch ? ` Branch: ${root.branch}.` : "";
+    const instructions = getProjectInstructionsForRoot(root);
+    return [
+        `Active project: ${root.name}. Root path: ${root.path}.${branch} Local file tools and terminal commands are scoped to this selected ${root.type === "worktree" ? "worktree" : "project folder"}. Use relative paths from the project root by default. Create, edit, read, search, and run commands inside this root unless the user explicitly chooses another project.`,
+        instructions ? `Persistent project instructions:\n${instructions}` : ""
+    ].filter(Boolean).join("\n\n");
+}
+
+function buildAgentTaskModeSystemPrompt() {
+    return getAgentTaskModeOption().prompt;
+}
+
+function getProjectInstructionsForRoot(root = getSessionProjectRoot()) {
+    if (!root) return "";
+    const project = root.project || getWorkspaceProjectById(root.projectId || root.id);
+    return normalizeProjectInstructions(project?.instructions);
+}
+
+function getActiveProjectLabel() {
+    return getSessionProjectRoot()?.name || "No project";
+}
+
+function getComposerBranchLabel(root = getSessionProjectRoot()) {
+    if (!root) return "No branch";
+    if (root.branch) return root.branch;
+    const summaryBranch = String(projectBranchSummary?.textContent || "").split("/")[0]?.trim();
+    return summaryBranch && !/no project selected|git status unavailable/i.test(summaryBranch)
+        ? summaryBranch
+        : "main";
+}
+
+function updateComposerProjectContextBar() {
+    const root = getSessionProjectRoot();
+    if (composerLocalWorkBtn) {
+        const localActive = Boolean(root || isWorkspaceBridgeEnabled);
+        composerLocalWorkBtn.classList.toggle("active", localActive);
+        composerLocalWorkBtn.setAttribute("aria-pressed", String(localActive));
+        composerLocalWorkBtn.dataset.tooltip = localActive
+            ? "Local workspace access is on"
+            : "Turn on local workspace access";
+    }
+    if (composerBranchBtn) {
+        composerBranchBtn.disabled = !root;
+        composerBranchBtn.classList.toggle("active", Boolean(root));
+        composerBranchBtn.dataset.tooltip = root
+            ? "Change project or worktree"
+            : "Choose a project first";
+    }
+    if (composerBranchLabel) composerBranchLabel.textContent = getComposerBranchLabel(root);
+}
+
+function enableWorkspaceBridgeForProject() {
+    if (isWorkspaceBridgeEnabled) return;
+    isWorkspaceBridgeEnabled = true;
+    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
+    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = true;
+    updateWorkspaceBridgeSettingsUi?.();
+    updateComposerProjectContextBar();
+}
+
+function ensureProjectAssignableSession() {
+    let session = getActiveSession();
+    if (session) return session;
+    session = createChatSession();
+    session.composerDraft = captureComposerDraft();
+    chatSessions.unshift(session);
+    activeSessionId = session.id;
+    updateActiveChatTitle();
+    updateWorkspaceUrlFragment?.({ replace: true });
+    return session;
+}
+
+function setActiveChatProject(rootId = "", { notify = true } = {}) {
+    const cleanRootId = String(rootId || "").trim();
+    let session = getActiveSession();
+    const root = getWorkspaceProjectRootById(cleanRootId);
+
+    if (!session && root) {
+        startNewChatSession({
+            notify: false,
+            workspaceMode: "project",
+            projectRootId: root.id
+        });
+        if (notify) showToast(`${root.name} project chat ready.`, "success");
+        return;
+    }
+    if (!session) return;
+
+    const currentMode = getSessionWorkspaceMode(session);
+    if (currentMode === "normal" && root) {
+        showToast("Normal chats cannot be moved into a project. Start a project chat from New chat or the project list.", "warning");
+        renderComposerProjectPicker();
+        return;
+    }
+    if (currentMode === "project" && !root) {
+        showToast("Project chats stay attached to a project. Start a normal chat instead.", "warning");
+        renderComposerProjectPicker();
+        return;
+    }
+
+    session.projectContext = root ? createProjectContextForRoot(root) : createEmptyProjectContext();
+    session.workspaceMode = root ? "project" : "normal";
+    session.updatedAt = new Date().toISOString();
+    if (root) enableWorkspaceBridgeForProject();
+    persistChatSessions();
+    renderChatHistory();
+    renderProjectList();
+    renderComposerProjectPicker();
+    updateProjectAgentPanel();
+    updateActiveChatTitle();
+    if (root) void refreshProjectExplorer({ silent: true, refreshBranch: true });
+    if (notify) showToast(root ? `${root.name} selected for this chat.` : "Project cleared for this chat.", root ? "success" : "info");
+}
+
+function renderAgentTaskModeMenu() {
+    if (!agentTaskModeMenu) return;
+    agentTaskModeMenu.replaceChildren();
+    AGENT_TASK_MODES.forEach(option => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "agent-task-mode-option";
+        button.setAttribute("role", "menuitemradio");
+        button.setAttribute("aria-checked", String(option.id === activeAgentTaskMode));
+        button.innerHTML = `
+            <span class="agent-task-mode-option-check" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"></path></svg>
+            </span>
+            <span class="agent-task-mode-option-copy">
+                <span class="agent-task-mode-option-label"></span>
+                <span class="agent-task-mode-option-desc"></span>
+            </span>
+        `;
+        button.querySelector(".agent-task-mode-option-label").textContent = option.label;
+        button.querySelector(".agent-task-mode-option-desc").textContent = option.description;
+        button.addEventListener("click", event => {
+            event.stopPropagation();
+            setAgentTaskMode(option.id);
+            closeAgentTaskModeMenu();
+        });
+        agentTaskModeMenu.appendChild(button);
+    });
+}
+
+function updateAgentTaskModeUi() {
+    const option = getAgentTaskModeOption();
+    if (agentTaskModeLabel) agentTaskModeLabel.textContent = option.label;
+    if (agentTaskModeBtn) {
+        agentTaskModeBtn.dataset.mode = option.id;
+        agentTaskModeBtn.dataset.tooltip = `Task mode: ${option.label}`;
+        agentTaskModeBtn.setAttribute("aria-label", `Task mode: ${option.label}`);
+    }
+    renderAgentTaskModeMenu();
+}
+
+function setAgentTaskMode(mode, { notify = true } = {}) {
+    activeAgentTaskMode = normalizeAgentTaskMode(mode);
+    safeLocalStorageSet(AGENT_TASK_MODE_STORAGE_KEY, activeAgentTaskMode);
+    updateAgentTaskModeUi();
+    if (notify) showToast(`Task mode set to ${getAgentTaskModeOption().label}.`, "success");
+}
+
+function closeAgentTaskModeMenu() {
+    if (!agentTaskModeMenu || !agentTaskModeBtn) return;
+    agentTaskModeMenu.hidden = true;
+    agentTaskModeBtn.setAttribute("aria-expanded", "false");
+}
+
+function toggleAgentTaskModeMenu() {
+    if (!agentTaskModeMenu || !agentTaskModeBtn) return;
+    const willOpen = agentTaskModeMenu.hidden;
+    if (willOpen) {
+        renderAgentTaskModeMenu();
+        agentTaskModeMenu.hidden = false;
+    } else {
+        agentTaskModeMenu.hidden = true;
+    }
+    agentTaskModeBtn.setAttribute("aria-expanded", String(willOpen));
+}
+
+function setProjectAgentTab(tab, { persist = true } = {}) {
+    activeProjectAgentTab = normalizeProjectAgentTab(tab);
+    if (persist) safeLocalStorageSet(PROJECT_AGENT_TAB_STORAGE_KEY, activeProjectAgentTab);
+    const menuActive = activeProjectAgentTab === "menu";
+    const filesActive = activeProjectAgentTab === "files";
+    const activityActive = activeProjectAgentTab === "activity";
+    const chatActive = activeProjectAgentTab === "chat";
+    projectPanelMenuTab?.classList.toggle("active", menuActive);
+    projectFilesTab?.classList.toggle("active", filesActive);
+    projectActivityTab?.classList.toggle("active", activityActive);
+    projectPageChatTab?.classList.toggle("active", chatActive);
+    projectPanelMenuTab?.setAttribute("aria-selected", String(menuActive));
+    projectFilesTab?.setAttribute("aria-selected", String(filesActive));
+    projectActivityTab?.setAttribute("aria-selected", String(activityActive));
+    projectPageChatTab?.setAttribute("aria-selected", String(chatActive));
+    if (projectMenuPane) projectMenuPane.hidden = !menuActive;
+    if (projectFilesPane) projectFilesPane.hidden = !filesActive;
+    if (projectActivityPane) projectActivityPane.hidden = !activityActive;
+    if (projectPageChatPane) projectPageChatPane.hidden = !chatActive;
+}
+
+function getActiveProjectBridgeOptions() {
+    const root = getSessionProjectRoot();
+    return root?.id ? { scope: `project:${root.id}` } : null;
+}
+
+function getProjectParentPath(path = ".") {
+    const clean = normalizeProjectExplorerPath(path);
+    if (clean === ".") return ".";
+    const parts = clean.split("/").filter(Boolean);
+    parts.pop();
+    return parts.join("/") || ".";
+}
+
+function renderProjectExplorerMessage(message, state = "muted") {
+    if (!projectExplorerList) return;
+    const node = document.createElement("div");
+    node.className = `project-explorer-message project-explorer-message-${state}`;
+    node.textContent = message;
+    projectExplorerList.replaceChildren(node);
+}
+
+function applyProjectAgentWidth() {
+    document.documentElement.style.setProperty("--project-agent-width", `${activeProjectAgentWidth}px`);
+}
+
+function setProjectAgentWidth(width, { persist = true } = {}) {
+    activeProjectAgentWidth = normalizeProjectAgentWidth(width);
+    applyProjectAgentWidth();
+    if (persist) {
+        safeLocalStorageSet(PROJECT_AGENT_WIDTH_STORAGE_KEY, String(activeProjectAgentWidth));
+    }
+}
+
+function updateProjectAgentDockState(root = getSessionProjectRoot()) {
+    const hasProject = Boolean(root);
+    const isOpen = !isProjectAgentCollapsed;
+    applyProjectAgentWidth();
+    if (projectAgentPanel) projectAgentPanel.hidden = !isOpen;
+    if (projectAgentExpandBtn) {
+        projectAgentExpandBtn.hidden = true;
+        projectAgentExpandBtn.setAttribute("aria-expanded", String(isOpen));
+    }
+    projectAgentCollapseBtn?.setAttribute("aria-expanded", String(isOpen));
+    windowWorkspacePanelToggleBtn?.setAttribute("aria-expanded", String(isOpen));
+    if (windowWorkspacePanelToggleBtn) {
+        windowWorkspacePanelToggleBtn.setAttribute("aria-label", isOpen ? "Close workspace panel" : "Open workspace menu");
+        windowWorkspacePanelToggleBtn.dataset.tooltip = isOpen ? "Close workspace panel" : "Open workspace menu";
+    }
+    if (windowWorkspacePanelMaximizeBtn) {
+        windowWorkspacePanelMaximizeBtn.hidden = !isOpen;
+        windowWorkspacePanelMaximizeBtn.setAttribute("aria-pressed", String(isOpen && isProjectAgentMaximized));
+        windowWorkspacePanelMaximizeBtn.setAttribute("aria-label", isProjectAgentMaximized ? "Restore workspace panel" : "Maximize workspace panel");
+        windowWorkspacePanelMaximizeBtn.dataset.tooltip = isProjectAgentMaximized ? "Restore workspace panel" : "Maximize workspace panel";
+    }
+    document.body?.classList.toggle("project-agent-open", isOpen);
+    document.body?.classList.toggle("project-agent-collapsed", !isOpen);
+    document.body?.classList.toggle("project-agent-maximized", isOpen && isProjectAgentMaximized);
+}
+
+function setProjectAgentCollapsed(collapsed, { persist = true, refresh = false } = {}) {
+    isProjectAgentCollapsed = Boolean(collapsed);
+    if (persist) {
+        safeLocalStorageSet(PROJECT_AGENT_COLLAPSED_STORAGE_KEY, isProjectAgentCollapsed ? "true" : "false");
+    }
+    updateProjectAgentPanel();
+    if (!isProjectAgentCollapsed && refresh) {
+        void refreshProjectExplorer({ silent: true, refreshBranch: true });
+    }
+}
+
+function setProjectAgentMaximized(maximized, { persist = true } = {}) {
+    isProjectAgentMaximized = Boolean(maximized);
+    if (persist) {
+        safeLocalStorageSet(PROJECT_AGENT_MAXIMIZED_STORAGE_KEY, isProjectAgentMaximized ? "true" : "false");
+    }
+    updateProjectAgentDockState();
+}
+
+function openProjectWorkspacePanel(tab = "menu", { refresh = false } = {}) {
+    setProjectAgentTab(tab);
+    setProjectAgentCollapsed(false, { refresh: refresh || tab === "files" });
+}
+
+async function openProjectTerminalFromPanel() {
+    const root = getSessionProjectRoot();
+    if (!root) {
+        showToast("Select a project first.", "warning");
+        return;
+    }
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.projects?.openTerminal) {
+        showToast("Opening a real terminal is available in the desktop app.", "warning");
+        return;
+    }
+    const activityId = recordAgentActivity({
+        kind: "terminal",
+        label: "Open terminal",
+        detail: root.path,
+        status: "running"
+    });
+    try {
+        const result = await desktopApi.projects.openTerminal(root.path);
+        if (result?.ok === false) throw new Error(result.message || "Terminal could not be opened.");
+        updateAgentActivityEvent(activityId, {
+            status: "done",
+            detail: result?.command ? `${result.command} in ${root.path}` : root.path
+        });
+        showToast(`Terminal opened in ${root.name}.`, "success");
+    } catch (err) {
+        updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
+        showToast(`Could not open terminal: ${err.message}`, "error");
+    }
+}
+
+function toggleProjectWorkspacePanel() {
+    if (isProjectAgentCollapsed) {
+        openProjectWorkspacePanel("menu");
+        return;
+    }
+    setProjectAgentCollapsed(true);
+}
+
+function handleWorkspacePanelAction(action = "") {
+    switch (action) {
+        case "files":
+            openProjectWorkspacePanel("files", { refresh: true });
+            return;
+        case "terminal":
+            void openProjectTerminalFromPanel();
+            return;
+        case "inspect":
+            openProjectWorkspacePanel("activity");
+            void openProjectDiffReview();
+            return;
+        case "browser":
+            showToast("Browser panel is not connected yet.", "info");
+            return;
+        case "page-chat":
+            openProjectWorkspacePanel("chat");
+            window.requestAnimationFrame(() => projectPageChatInput?.focus?.());
+            return;
+        default:
+            openProjectWorkspacePanel("menu");
+    }
+}
+
+function startProjectAgentResize(event) {
+    if (!projectAgentResizeHandle || event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = activeProjectAgentWidth;
+    document.body?.classList.add("project-agent-resizing");
+    projectAgentResizeHandle.setPointerCapture?.(event.pointerId);
+
+    const onPointerMove = moveEvent => {
+        moveEvent.preventDefault();
+        setProjectAgentWidth(startWidth + (startX - moveEvent.clientX), { persist: false });
+    };
+    const onPointerUp = () => {
+        document.body?.classList.remove("project-agent-resizing");
+        safeLocalStorageSet(PROJECT_AGENT_WIDTH_STORAGE_KEY, String(activeProjectAgentWidth));
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("pointercancel", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    window.addEventListener("pointercancel", onPointerUp, { once: true });
+}
+
+function updateProjectAgentPanel() {
+    const root = getSessionProjectRoot();
+    updateProjectAgentDockState(root);
+    setProjectAgentTab(activeProjectAgentTab, { persist: false });
+    if (projectAgentTitle) projectAgentTitle.textContent = root?.name || "Workspace";
+    if (projectBranchSummary) {
+        projectBranchSummary.textContent = root
+            ? `${root.type === "worktree" ? "Worktree" : "Project"}: ${root.name}`
+            : "No project selected";
+    }
+    if (!root) {
+        projectExplorerRootId = "";
+        currentProjectExplorerResult = { entries: [], truncated: false };
+        if (projectExplorerPath) projectExplorerPath.textContent = ".";
+        if (projectExplorerFilterInput) projectExplorerFilterInput.value = "";
+        renderProjectExplorerMessage("Select a project to browse files.", "muted");
+        ensureProjectPageChatRoot();
+        return;
+    }
+    if (projectExplorerRootId !== root.id) {
+        projectExplorerRootId = root.id;
+        activeProjectExplorerPath = ".";
+        currentProjectExplorerResult = { entries: [], truncated: false };
+        if (projectExplorerFilterInput) projectExplorerFilterInput.value = "";
+        safeLocalStorageSet(PROJECT_EXPLORER_PATH_STORAGE_KEY, activeProjectExplorerPath);
+    }
+    if (projectExplorerPath) projectExplorerPath.textContent = activeProjectExplorerPath;
+    ensureProjectPageChatRoot();
+    renderAgentActivityList();
+}
+
+function recordAgentActivity(activity = {}) {
+    const now = new Date();
+    const item = {
+        id: `activity-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        kind: String(activity.kind || "tool"),
+        label: String(activity.label || "Agent activity"),
+        detail: String(activity.detail || activity.input || ""),
+        input: String(activity.input || ""),
+        status: String(activity.status || "done"),
+        project: getActiveProjectLabel(),
+        createdAt: now.toISOString()
+    };
+    agentActivityEvents = [item, ...agentActivityEvents].slice(0, 36);
+    renderAgentActivityList();
+    return item.id;
+}
+
+function updateAgentActivityEvent(activityId, updates = {}) {
+    const id = String(activityId || "");
+    if (!id) return;
+    const item = agentActivityEvents.find(event => event.id === id);
+    if (!item) return;
+    Object.assign(item, {
+        ...updates,
+        updatedAt: new Date().toISOString()
+    });
+    renderAgentActivityList();
+}
+
+function renderAgentActivityList() {
+    if (!agentActivityList) return;
+    agentActivityList.replaceChildren();
+    if (!agentActivityEvents.length) {
+        const empty = document.createElement("div");
+        empty.className = "agent-activity-empty";
+        empty.textContent = "Tool calls and project actions appear here.";
+        agentActivityList.appendChild(empty);
+        return;
+    }
+    agentActivityEvents.forEach(event => {
+        const row = document.createElement("div");
+        row.className = "agent-activity-row";
+        row.dataset.status = event.status || "done";
+        row.innerHTML = `
+            <span class="agent-activity-dot" aria-hidden="true"></span>
+            <span class="agent-activity-copy">
+                <span class="agent-activity-title"></span>
+                <span class="agent-activity-detail"></span>
+            </span>
+            <span class="agent-activity-status"></span>
+        `;
+        row.querySelector(".agent-activity-title").textContent = event.label;
+        row.querySelector(".agent-activity-detail").textContent = [event.project, event.detail || event.input].filter(Boolean).join(" / ");
+        row.querySelector(".agent-activity-status").textContent = event.status || "Done";
+        agentActivityList.appendChild(row);
+    });
+}
+
+function formatProjectFileSize(size) {
+    if (typeof size !== "number" || !Number.isFinite(size)) return "";
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`;
+    return `${Math.round(size / 1024 / 102.4) / 10} MB`;
+}
+
+function getProjectExplorerFilterText() {
+    return String(projectExplorerFilterInput?.value || "").trim().toLowerCase();
+}
+
+function matchesProjectExplorerFilter(entry = {}, filterText = "") {
+    if (!filterText) return true;
+    return [entry.name, entry.path, entry.type]
+        .filter(Boolean)
+        .some(value => String(value).toLowerCase().includes(filterText));
+}
+
+function renderProjectExplorerCurrentEntries() {
+    if (!projectExplorerList) return;
+    const result = currentProjectExplorerResult || {};
+    const entries = Array.isArray(result.entries) ? result.entries : [];
+    const filterText = getProjectExplorerFilterText();
+    const visibleEntries = filterText
+        ? entries.filter(entry => matchesProjectExplorerFilter(entry, filterText))
+        : entries;
+    if (projectExplorerPath) projectExplorerPath.textContent = activeProjectExplorerPath;
+    if (projectExplorerUpBtn) projectExplorerUpBtn.disabled = activeProjectExplorerPath === ".";
+    projectExplorerList.replaceChildren();
+    if (activeProjectExplorerPath !== ".") {
+        const up = createProjectExplorerRow({
+            name: "..",
+            path: getProjectParentPath(activeProjectExplorerPath),
+            type: "directory"
+        }, { parent: true });
+        projectExplorerList.appendChild(up);
+    }
+    visibleEntries.forEach(entry => projectExplorerList.appendChild(createProjectExplorerRow(entry)));
+    if (!visibleEntries.length) {
+        const message = filterText
+            ? "No matching files."
+            : (result.truncated ? "Tree was truncated." : "No files found.");
+        const empty = document.createElement("div");
+        empty.className = "project-explorer-message project-explorer-message-muted";
+        empty.textContent = message;
+        projectExplorerList.appendChild(empty);
+    }
+    if (result.truncated) {
+        const truncated = document.createElement("div");
+        truncated.className = "project-explorer-message project-explorer-message-warning";
+        truncated.textContent = "Showing a limited file list.";
+        projectExplorerList.appendChild(truncated);
+    }
+}
+
+function renderProjectExplorerEntries(result = {}) {
+    currentProjectExplorerResult = {
+        ...result,
+        entries: Array.isArray(result.entries) ? result.entries : []
+    };
+    renderProjectExplorerCurrentEntries();
+}
+
+function createProjectExplorerRow(entry = {}, { parent = false } = {}) {
+    const isDirectory = entry.type === "directory";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `project-explorer-row${isDirectory ? " project-explorer-row-dir" : " project-explorer-row-file"}`;
+    button.innerHTML = `
+        <svg class="project-explorer-row-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            ${isDirectory
+                ? '<path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>'
+                : '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>'}
+        </svg>
+        <span class="project-explorer-row-name"></span>
+        <span class="project-explorer-row-meta"></span>
+    `;
+    button.querySelector(".project-explorer-row-name").textContent = parent ? "Parent folder" : (entry.name || entry.path || "Untitled");
+    button.querySelector(".project-explorer-row-meta").textContent = isDirectory ? "Folder" : formatProjectFileSize(entry.size);
+    button.addEventListener("click", () => {
+        if (isDirectory) {
+            void refreshProjectExplorer({ path: entry.path || "." });
+        } else {
+            void openProjectFilePreview(entry.path || "");
+        }
+    });
+    return button;
+}
+
+async function refreshProjectBranchSummary(root = getSessionProjectRoot()) {
+    if (!root || !projectBranchSummary || !hasWorkspaceBridgeAccess()) return;
+    try {
+        const bridgeOptions = getActiveProjectBridgeOptions();
+        const branchResult = await runWorkspaceCommand("git branch --show-current", ".", 10, null, bridgeOptions);
+        const statusResult = await runWorkspaceCommand("git status --short", ".", 10, null, bridgeOptions);
+        const branch = String(branchResult.stdout || "").trim() || root.branch || "detached";
+        const dirtyLines = String(statusResult.stdout || "").trim().split(/\r?\n/).filter(Boolean).length;
+        projectBranchSummary.textContent = `${branch} / ${dirtyLines ? `${dirtyLines} changed` : "clean"}`;
+        updateComposerProjectContextBar();
+    } catch (err) {
+        projectBranchSummary.textContent = `${root.name} / git status unavailable`;
+        updateComposerProjectContextBar();
+    }
+}
+
+async function refreshProjectExplorer({ path = activeProjectExplorerPath, silent = false, refreshBranch = false } = {}) {
+    const root = getSessionProjectRoot();
+    if (!root) {
+        updateProjectAgentPanel();
+        return;
+    }
+    if (!hasWorkspaceBridgeAccess()) {
+        currentProjectExplorerResult = { entries: [], truncated: false };
+        renderProjectExplorerMessage("Connect the Local Workspace Bridge to browse project files.", "warning");
+        return;
+    }
+    activeProjectExplorerPath = normalizeProjectExplorerPath(path);
+    safeLocalStorageSet(PROJECT_EXPLORER_PATH_STORAGE_KEY, activeProjectExplorerPath);
+    if (projectExplorerPath) projectExplorerPath.textContent = activeProjectExplorerPath;
+    currentProjectExplorerResult = { entries: [], truncated: false };
+    renderProjectExplorerMessage("Loading files...", "muted");
+    const activityId = silent ? "" : recordAgentActivity({
+        kind: "files",
+        label: "List files",
+        detail: activeProjectExplorerPath,
+        status: "running"
+    });
+    try {
+        const result = await listWorkspaceTree(activeProjectExplorerPath, 0, null, 160, getActiveProjectBridgeOptions());
+        renderProjectExplorerEntries(result);
+        if (activityId) updateAgentActivityEvent(activityId, { status: "done" });
+        if (refreshBranch) void refreshProjectBranchSummary(root);
+    } catch (err) {
+        currentProjectExplorerResult = { entries: [], truncated: false };
+        renderProjectExplorerMessage(err.message || "Could not list project files.", "warning");
+        if (activityId) updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
+        if (!silent) showToast(`Could not browse project: ${err.message}`, "error");
+    }
+}
+
+function openProjectContentDialog({
+    title = "Project file",
+    subtitle = "",
+    content = "",
+    primaryLabel = "",
+    onPrimary = null
+} = {}) {
+    const overlay = document.createElement("div");
+    overlay.className = "approval-modal";
+    overlay.setAttribute("role", "presentation");
+    const dialog = document.createElement("section");
+    dialog.className = "approval-dialog project-content-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "projectContentDialogTitle");
+    const titleNode = document.createElement("h2");
+    titleNode.id = "projectContentDialogTitle";
+    titleNode.textContent = title;
+    const subtitleNode = document.createElement("p");
+    subtitleNode.className = "project-content-subtitle";
+    subtitleNode.textContent = subtitle;
+    const pre = document.createElement("pre");
+    pre.className = "project-content-preview";
+    pre.textContent = content || "[No content]";
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const closeButton = document.createElement("button");
+    closeButton.className = "provider-btn provider-btn-secondary";
+    closeButton.type = "button";
+    closeButton.textContent = "Close";
+    const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        overlay.remove();
+    };
+    const onKeyDown = event => {
+        if (event.key === "Escape") close();
+    };
+    closeButton.addEventListener("click", close);
+    if (primaryLabel && typeof onPrimary === "function") {
+        const primaryButton = document.createElement("button");
+        primaryButton.className = "provider-btn provider-btn-primary";
+        primaryButton.type = "button";
+        primaryButton.textContent = primaryLabel;
+        primaryButton.addEventListener("click", () => {
+            onPrimary();
+            close();
+        });
+        actions.append(closeButton, primaryButton);
+    } else {
+        actions.appendChild(closeButton);
+    }
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+    dialog.append(titleNode);
+    if (subtitle) dialog.appendChild(subtitleNode);
+    dialog.append(pre, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => closeButton.focus(), 0);
+}
+
+async function openProjectFilePreview(path = "") {
+    const cleanPath = normalizeProjectExplorerPath(path);
+    if (!cleanPath || cleanPath === ".") return;
+    if (!hasWorkspaceBridgeAccess()) {
+        showToast("Connect the Local Workspace Bridge first.", "warning");
+        return;
+    }
+    const activityId = recordAgentActivity({
+        kind: "file",
+        label: "Read file",
+        detail: cleanPath,
+        status: "running"
+    });
+    try {
+        const result = await readWorkspaceFile(cleanPath, null, getActiveProjectBridgeOptions());
+        updateAgentActivityEvent(activityId, { status: "done" });
+        openProjectContentDialog({
+            title: result.path || cleanPath,
+            subtitle: `${Number(result.size || 0).toLocaleString()} bytes${result.truncated ? " / truncated" : ""}`,
+            content: result.content || "",
+            primaryLabel: "Add path",
+            onPrimary: () => {
+                if (!input) return;
+                const insertion = `\`${result.path || cleanPath}\``;
+                input.value = [input.value.trim(), insertion].filter(Boolean).join(" ");
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+                input.focus();
+            }
+        });
+    } catch (err) {
+        updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
+        showToast(`Could not read file: ${err.message}`, "error");
+    }
+}
+
+function getProjectCommandStatus(result = {}) {
+    if (result.timedOut) return "Timed out";
+    return Number(result.exitCode || 0) === 0 ? "Passed" : "Failed";
+}
+
+function getProjectCommandSignalLine(result = {}) {
+    const text = String(result.stderr || result.stdout || "")
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .find(Boolean);
+    return text || "No command output.";
+}
+
+function formatProjectCommandOutput(result = {}) {
+    const status = getProjectCommandStatus(result);
+    const stdout = trimLocalToolText ? trimLocalToolText(result.stdout || "") : String(result.stdout || "");
+    const stderr = trimLocalToolText ? trimLocalToolText(result.stderr || "") : String(result.stderr || "");
+    return [
+        `${status}: ${result.command || ""}`,
+        `Exit code: ${result.exitCode ?? "timeout"} / Duration: ${result.durationMs ?? 0}ms`,
+        `Signal: ${getProjectCommandSignalLine(result)}`,
+        stdout ? `\nStdout:\n${stdout}` : "",
+        stderr ? `\nStderr:\n${stderr}` : ""
+    ].filter(Boolean).join("\n");
+}
+
+async function runProjectCommandFromPanel() {
+    const command = String(projectCommandInput?.value || "").trim();
+    if (!command) {
+        showToast("Enter a command first.", "warning");
+        return;
+    }
+    if (!getSessionProjectRoot()) {
+        showToast("Select a project first.", "warning");
+        return;
+    }
+    if (!hasWorkspaceBridgeAccess()) {
+        showToast("Connect the Local Workspace Bridge first.", "warning");
+        return;
+    }
+    const activityId = recordAgentActivity({
+        kind: "terminal",
+        label: "Run command",
+        detail: command,
+        status: "running"
+    });
+    if (projectCommandRunBtn) projectCommandRunBtn.disabled = true;
+    if (projectCommandOutput) {
+        projectCommandOutput.hidden = false;
+        projectCommandOutput.textContent = `Running: ${command}`;
+    }
+    try {
+        const result = await runWorkspaceCommand(command, activeProjectExplorerPath || ".", 60, null, getActiveProjectBridgeOptions());
+        const output = formatProjectCommandOutput(result);
+        if (projectCommandOutput) projectCommandOutput.textContent = output;
+        updateAgentActivityEvent(activityId, {
+            status: Number(result.exitCode || 0) === 0 && !result.timedOut ? "done" : "failed",
+            detail: `${command} / ${getProjectCommandStatus(result)}`
+        });
+        void refreshProjectBranchSummary();
+    } catch (err) {
+        if (projectCommandOutput) projectCommandOutput.textContent = `Command failed: ${err.message}`;
+        updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
+        showToast(`Command failed: ${err.message}`, "error");
+    } finally {
+        if (projectCommandRunBtn) projectCommandRunBtn.disabled = false;
+    }
+}
+
+function resetProjectPageChat(root = getSessionProjectRoot()) {
+    projectPageChatRootId = root?.id || "";
+    projectPageChatHistory = [];
+    if (!projectPageChatLog) return;
+    const empty = document.createElement("div");
+    empty.className = "project-page-chat-empty";
+    empty.textContent = root
+        ? `Ask about ${root.name}. The AI can use this project's files and terminal tools.`
+        : "Select a project chat first to use workspace page chat.";
+    projectPageChatLog.replaceChildren(empty);
+}
+
+function ensureProjectPageChatRoot() {
+    const root = getSessionProjectRoot();
+    const rootId = root?.id || "";
+    if (rootId !== projectPageChatRootId) {
+        resetProjectPageChat(root);
+    }
+    return root;
+}
+
+function appendProjectPageChatMessage(role, content = "") {
+    if (!projectPageChatLog) return null;
+    projectPageChatLog.querySelector(".project-page-chat-empty")?.remove();
+    const message = document.createElement("div");
+    message.className = `project-page-chat-message project-page-chat-message-${role}`;
+    const label = document.createElement("div");
+    label.className = "project-page-chat-role";
+    label.textContent = role === "user" ? "You" : role === "assistant" ? "Fauna" : "System";
+    const body = document.createElement("div");
+    body.className = "project-page-chat-body";
+    if (role === "assistant" && typeof renderMarkdown === "function") {
+        body.innerHTML = renderMarkdown(content || "");
+    } else {
+        body.textContent = content || "";
+    }
+    message.append(label, body);
+    projectPageChatLog.appendChild(message);
+    projectPageChatLog.scrollTop = projectPageChatLog.scrollHeight;
+    return body;
+}
+
+function setProjectPageChatBusy(busy) {
+    if (projectPageChatSendBtn) projectPageChatSendBtn.disabled = Boolean(busy);
+    if (projectPageChatInput) projectPageChatInput.disabled = Boolean(busy);
+}
+
+async function sendProjectPageChatMessage() {
+    const prompt = String(projectPageChatInput?.value || "").trim();
+    if (!prompt) return;
+    const root = ensureProjectPageChatRoot();
+    if (!root) {
+        showToast("Start or select a project chat first.", "warning");
+        return;
+    }
+    if (!hasWorkspaceBridgeAccess()) {
+        showToast("Connect the Local Workspace Bridge first.", "warning");
+        return;
+    }
+    if (!canUseComposerTools()) {
+        showToast(`${getActiveComposerModelLabel()} cannot call tools. Choose a tool-capable model first.`, "warning");
+        return;
+    }
+
+    const userMessage = {
+        role: "user",
+        content: prompt,
+        createdAt: new Date().toISOString()
+    };
+    projectPageChatHistory.push(userMessage);
+    appendProjectPageChatMessage("user", prompt);
+    if (projectPageChatInput) {
+        projectPageChatInput.value = "";
+        projectPageChatInput.style.height = "";
+    }
+
+    const assistantBody = appendProjectPageChatMessage("assistant", "Thinking...");
+    const controller = new AbortController();
+    setProjectPageChatBusy(true);
+    const routedModel = chooseModelForRequest(prompt, [], null, null);
+    const activityId = recordAgentActivity({
+        kind: "chat",
+        label: "Page chat",
+        detail: prompt,
+        status: "running"
+    });
+
+    try {
+        const data = await sendOllamaChatWithLocalTools(
+            projectPageChatHistory,
+            {
+                ...getActiveChatRequestOptions(),
+                sessionId: activeSessionId
+            },
+            routedModel,
+            controller.signal,
+            assistantBody,
+            {
+                enabled: true,
+                preserveActiveModel: shouldPreserveActiveLocalModelForRoute(routedModel)
+            }
+        );
+        const assistantMessage = getAssistantMessageForConversation(data, routedModel);
+        projectPageChatHistory.push(assistantMessage);
+        if (!data.__faunaAlreadyRendered) {
+            assistantBody.innerHTML = typeof renderMarkdown === "function"
+                ? renderMarkdown(assistantMessage.content || "")
+                : "";
+            if (!assistantBody.innerHTML) assistantBody.textContent = assistantMessage.content || "";
+        }
+        if (typeof setupCodeSandbox === "function") setupCodeSandbox(assistantBody);
+        updateAgentActivityEvent(activityId, { status: "done", detail: prompt });
+    } catch (err) {
+        assistantBody.textContent = `Page chat failed: ${err.message}`;
+        updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
+        showToast(`Page chat failed: ${err.message}`, "error");
+    } finally {
+        setProjectPageChatBusy(false);
+        projectPageChatInput?.focus?.();
+        projectPageChatLog.scrollTop = projectPageChatLog.scrollHeight;
+    }
+}
+
+async function openProjectDiffReview() {
+    if (!getSessionProjectRoot()) {
+        showToast("Select a project first.", "warning");
+        return;
+    }
+    if (!hasWorkspaceBridgeAccess()) {
+        showToast("Connect the Local Workspace Bridge first.", "warning");
+        return;
+    }
+    const activityId = recordAgentActivity({
+        kind: "diff",
+        label: "Review changes",
+        detail: "git diff",
+        status: "running"
+    });
+    try {
+        const bridgeOptions = getActiveProjectBridgeOptions();
+        const stat = await runWorkspaceCommand("git diff --stat -- .", ".", 20, null, bridgeOptions);
+        const diff = await runWorkspaceCommand("git diff -- .", ".", 20, null, bridgeOptions);
+        const statText = String(stat.stdout || stat.stderr || "").trim();
+        const diffText = String(diff.stdout || diff.stderr || "").trim();
+        const content = [
+            statText || "No diff stat output.",
+            diffText ? `\n${diffText}` : "\nNo working tree changes."
+        ].join("\n");
+        updateAgentActivityEvent(activityId, { status: "done" });
+        openProjectContentDialog({
+            title: "Review changes",
+            subtitle: "Current project working tree diff",
+            content
+        });
+    } catch (err) {
+        updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
+        showToast(`Could not review diff: ${err.message}`, "error");
+    }
+}
+
+function openProjectInstructionsDialog(root = getSessionProjectRoot()) {
+    const project = root?.project || getWorkspaceProjectById(root?.projectId || root?.id);
+    if (!project) {
+        showToast("Select a project first.", "warning");
+        return;
+    }
+    const overlay = document.createElement("div");
+    overlay.className = "approval-modal";
+    overlay.setAttribute("role", "presentation");
+    const dialog = document.createElement("section");
+    dialog.className = "approval-dialog project-dialog project-instructions-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "projectInstructionsTitle");
+    const titleNode = document.createElement("h2");
+    titleNode.id = "projectInstructionsTitle";
+    titleNode.textContent = "Project instructions";
+    const message = document.createElement("p");
+    message.textContent = `Saved instructions for ${project.name}. Fauna includes them whenever this project or one of its worktrees is selected.`;
+    const label = document.createElement("label");
+    label.className = "chat-rename-field project-instructions-field";
+    const labelText = document.createElement("span");
+    labelText.textContent = "Instructions";
+    const textarea = document.createElement("textarea");
+    textarea.className = "settings-input project-instructions-textarea";
+    textarea.rows = 10;
+    textarea.maxLength = 6000;
+    textarea.value = project.instructions || "";
+    label.append(labelText, textarea);
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "provider-btn provider-btn-secondary";
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.className = "provider-btn provider-btn-primary";
+    saveButton.type = "button";
+    saveButton.textContent = "Save";
+    const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        overlay.remove();
+    };
+    const save = () => {
+        project.instructions = normalizeProjectInstructions(textarea.value);
+        project.updatedAt = new Date().toISOString();
+        persistWorkspaceProjects();
+        showToast(project.instructions ? "Project instructions saved." : "Project instructions cleared.", project.instructions ? "success" : "info");
+        close();
+    };
+    const onKeyDown = event => {
+        if (event.key === "Escape") close();
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") save();
+    };
+    cancelButton.addEventListener("click", close);
+    saveButton.addEventListener("click", save);
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+    actions.append(cancelButton, saveButton);
+    dialog.append(titleNode, message, label, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => textarea.focus(), 0);
+}
+
+function shouldRequireWorkspaceWriteApproval() {
+    return activeAgentTaskMode !== "build";
+}
+
+function createSimpleWorkspaceDiff(path = "file", before = "", after = "") {
+    if (before === after) return "No content changes.";
+    const beforeLines = String(before || "").split(/\r?\n/);
+    const afterLines = String(after || "").split(/\r?\n/);
+    let start = 0;
+    while (start < beforeLines.length && start < afterLines.length && beforeLines[start] === afterLines[start]) {
+        start += 1;
+    }
+    let beforeEnd = beforeLines.length - 1;
+    let afterEnd = afterLines.length - 1;
+    while (beforeEnd >= start && afterEnd >= start && beforeLines[beforeEnd] === afterLines[afterEnd]) {
+        beforeEnd -= 1;
+        afterEnd -= 1;
+    }
+    const contextStart = Math.max(0, start - 3);
+    const contextEndBefore = Math.min(beforeLines.length - 1, beforeEnd + 3);
+    const contextEndAfter = Math.min(afterLines.length - 1, afterEnd + 3);
+    const lines = [`--- ${path}`, `+++ ${path}`];
+    for (let index = contextStart; index < start; index += 1) {
+        lines.push(` ${beforeLines[index] || ""}`);
+    }
+    for (let index = start; index <= beforeEnd; index += 1) {
+        lines.push(`-${beforeLines[index] || ""}`);
+    }
+    for (let index = start; index <= afterEnd; index += 1) {
+        lines.push(`+${afterLines[index] || ""}`);
+    }
+    const trailingStart = Math.max(start, beforeEnd + 1, afterEnd + 1);
+    const trailingCount = Math.max(contextEndBefore, contextEndAfter) - trailingStart + 1;
+    for (let offset = 0; offset < trailingCount; offset += 1) {
+        const value = beforeLines[trailingStart + offset] ?? afterLines[trailingStart + offset] ?? "";
+        lines.push(` ${value}`);
+    }
+    return lines.join("\n");
+}
+
+function showWorkspaceDiffApprovalDialog({ path = "", mode = "write", diff = "" } = {}) {
+    return new Promise(resolve => {
+        const overlay = document.createElement("div");
+        overlay.className = "approval-modal";
+        overlay.setAttribute("role", "presentation");
+        const dialog = document.createElement("section");
+        dialog.className = "approval-dialog project-content-dialog";
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-labelledby", "workspaceDiffApprovalTitle");
+        const titleNode = document.createElement("h2");
+        titleNode.id = "workspaceDiffApprovalTitle";
+        titleNode.textContent = "Review file change";
+        const message = document.createElement("p");
+        message.className = "project-content-subtitle";
+        message.textContent = `${mode === "append_file" ? "Append to" : "Write"} ${path}`;
+        const pre = document.createElement("pre");
+        pre.className = "project-content-preview project-diff-preview";
+        pre.textContent = diff || "[No diff preview]";
+        const actions = document.createElement("div");
+        actions.className = "approval-actions";
+        const cancelButton = document.createElement("button");
+        cancelButton.className = "provider-btn provider-btn-secondary";
+        cancelButton.type = "button";
+        cancelButton.textContent = "Cancel";
+        const applyButton = document.createElement("button");
+        applyButton.className = "provider-btn provider-btn-primary";
+        applyButton.type = "button";
+        applyButton.textContent = "Apply change";
+        const close = approved => {
+            document.removeEventListener("keydown", onKeyDown);
+            overlay.remove();
+            resolve(approved);
+        };
+        const onKeyDown = event => {
+            if (event.key === "Escape") close(false);
+        };
+        cancelButton.addEventListener("click", () => close(false));
+        applyButton.addEventListener("click", () => close(true));
+        overlay.addEventListener("click", event => {
+            if (event.target === overlay) close(false);
+        });
+        document.addEventListener("keydown", onKeyDown);
+        actions.append(cancelButton, applyButton);
+        dialog.append(titleNode, message, pre, actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        window.setTimeout(() => applyButton.focus(), 0);
+    });
+}
+
+async function confirmWorkspaceWriteWithDiff(toolCall, signal = null, bridgeOptions = {}) {
+    if (!shouldRequireWorkspaceWriteApproval()) return true;
+    const path = String(toolCall?.path || "").trim();
+    if (!path) return true;
+    const nextContent = String(toolCall.content ?? toolCall.text ?? toolCall.body ?? "");
+    let previousContent = "";
+    try {
+        const previous = await readWorkspaceFile(path, signal, bridgeOptions);
+        previousContent = String(previous.content || "");
+    } catch (err) {
+        previousContent = "";
+    }
+    const after = toolCall.tool === "append_file" ? `${previousContent}${nextContent}` : nextContent;
+    const approved = await showWorkspaceDiffApprovalDialog({
+        path,
+        mode: toolCall.tool,
+        diff: createSimpleWorkspaceDiff(path, previousContent, after)
+    });
+    if (!approved) throw new Error("File change canceled in diff review.");
+    return true;
+}
+
+function createProjectMenuItem(action, label, iconMarkup, onSelect) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `chat-session-menu-item project-menu-item project-menu-item-${action}`;
+    button.setAttribute("role", "menuitem");
+    button.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconMarkup}</svg>
+        <span></span>
+    `;
+    button.querySelector("span").textContent = label;
+    button.addEventListener("click", event => {
+        event.stopPropagation();
+        closeProjectMenus();
+        onSelect();
+    });
+    return button;
+}
+
+function closeProjectMenus(except = null) {
+    document.querySelectorAll(".project-menu-wrap.open").forEach(menuWrap => {
+        if (except && menuWrap === except) return;
+        menuWrap.classList.remove("open");
+        const trigger = menuWrap.querySelector(".project-menu-trigger");
+        const menu = menuWrap.querySelector(".project-menu");
+        trigger?.setAttribute("aria-expanded", "false");
+        if (menu) menu.hidden = true;
+    });
+}
+
+function getProjectChatSessions(rootId = "", { includeArchived = false } = {}) {
+    const cleanRootId = String(rootId || "").trim();
+    if (!cleanRootId) return [];
+    return chatSessions
+        .filter(session => (includeArchived || !session.archived) && getSessionProjectRoot(session)?.id === cleanRootId)
+        .sort(compareChatSessions);
+}
+
+function activateOrCreateProjectChat(rootId = "") {
+    const root = getWorkspaceProjectRootById(rootId);
+    if (!root) return;
+    const existingSession = getProjectChatSessions(root.id)[0];
+    if (existingSession) {
+        activateChatSession(existingSession.id);
+        return;
+    }
+    startNewChatSession({
+        workspaceMode: "project",
+        projectRootId: root.id
+    });
+}
+
+function renderProjectRow(root, { nested = false } = {}) {
+    const activeRoot = getSessionProjectRoot();
+    const row = document.createElement("div");
+    row.className = `project-row${nested ? " project-row-worktree" : ""}`;
+    row.classList.toggle("active", activeRoot?.id === root.id);
+
+    const mainButton = document.createElement("button");
+    mainButton.type = "button";
+    mainButton.className = "project-main-btn";
+    mainButton.setAttribute("aria-current", activeRoot?.id === root.id ? "page" : "false");
+    mainButton.innerHTML = `
+        <svg class="project-row-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            ${root.type === "worktree"
+                ? '<path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><circle cx="6" cy="3" r="2"></circle><circle cx="18" cy="21" r="2"></circle><circle cx="18" cy="12" r="2"></circle>'
+                : '<path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>'}
+        </svg>
+        <span class="project-row-copy">
+            <span class="project-row-name"></span>
+            <span class="project-row-path"></span>
+        </span>
+    `;
+    mainButton.querySelector(".project-row-name").textContent = root.name;
+    mainButton.querySelector(".project-row-path").textContent = root.type === "worktree" && root.branch ? root.branch : root.path;
+    mainButton.addEventListener("click", () => activateOrCreateProjectChat(root.id));
+
+    const menuWrap = document.createElement("div");
+    menuWrap.className = "project-menu-wrap";
+    const menuButton = document.createElement("button");
+    menuButton.type = "button";
+    menuButton.className = "project-menu-trigger";
+    menuButton.setAttribute("aria-label", `Options for ${root.name}`);
+    menuButton.setAttribute("aria-haspopup", "menu");
+    menuButton.setAttribute("aria-expanded", "false");
+    menuButton.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="19" cy="12" r="1.7"></circle></svg>';
+
+    const menu = document.createElement("div");
+    menu.className = "chat-session-menu project-menu";
+    menu.setAttribute("role", "menu");
+    menu.hidden = true;
+    menu.append(
+        createProjectMenuItem("open", "Open in Explorer", '<path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path><path d="m14 12 4-4"></path><path d="M15 8h3v3"></path>', () => openWorkspaceProjectPath(root)),
+        createProjectMenuItem("worktree", "Create worktree", '<path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><path d="M12 5v6"></path><path d="M9 8h6"></path>', () => openCreateWorktreeDialog(root.project)),
+        createProjectMenuItem("rename", "Rename project", '<path d="M12 20h9"></path><path d="m16.5 3.5 4 4L7 21l-4 1 1-4 12.5-14.5Z"></path>', () => openProjectRenameDialog(root)),
+        createProjectMenuItem("remove", root.type === "worktree" ? "Remove worktree" : "Remove project", '<path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 14H6L5 6"></path>', () => removeWorkspaceProjectRoot(root))
+    );
+    if (root.type === "worktree") {
+        menu.querySelector(".project-menu-item-worktree")?.remove();
+    }
+
+    menuButton.addEventListener("click", event => {
+        event.stopPropagation();
+        const willOpen = !menuWrap.classList.contains("open");
+        closeProjectMenus(menuWrap);
+        menuWrap.classList.toggle("open", willOpen);
+        menuButton.setAttribute("aria-expanded", String(willOpen));
+        menu.hidden = !willOpen;
+    });
+
+    menuWrap.append(menuButton, menu);
+    row.append(mainButton, menuWrap);
+    return row;
+}
+
+function appendProjectChatRows(container, root) {
+    getProjectChatSessions(root.id).forEach(session => {
+        container.appendChild(createChatSessionRow(session, {
+            variant: "project-chat-session-row",
+            hideProjectBadge: true
+        }));
+    });
+}
+
+function renderProjectList() {
+    if (!projectList) return;
+    projectList.replaceChildren();
+    updateProjectSortButton();
+    const activeRoot = getSessionProjectRoot();
+    getSortedWorkspaceProjects().forEach(project => {
+        const projectRoot = {
+            id: project.id,
+            projectId: project.id,
+            name: project.name,
+            path: project.path,
+            branch: "",
+            type: "project",
+            project
+        };
+        projectList.appendChild(renderProjectRow(projectRoot));
+        appendProjectChatRows(projectList, projectRoot);
+        project.worktrees.forEach(worktree => {
+            const worktreeRoot = {
+                ...worktree,
+                projectId: project.id,
+                type: "worktree",
+                project
+            };
+            projectList.appendChild(renderProjectRow(worktreeRoot, { nested: true }));
+            appendProjectChatRows(projectList, worktreeRoot);
+        });
+    });
+    if (workspaceProjects.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "project-empty-state";
+        empty.innerHTML = `
+            <svg class="project-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>
+                <path d="M12 10v6"></path>
+                <path d="M9 13h6"></path>
+            </svg>
+            <span>No project folders yet</span>
+        `;
+        projectList.appendChild(empty);
+    }
+    projectList.dataset.hasActiveProject = activeRoot ? "true" : "false";
+}
+
+function renderComposerProjectPicker() {
+    if (composerProjectLabel) composerProjectLabel.textContent = getActiveProjectLabel();
+    const activeSession = getActiveSession();
+    const activeMode = getSessionWorkspaceMode(activeSession);
+    const isNormalLocked = Boolean(activeSession && activeMode === "normal");
+    const isProjectLocked = activeMode === "project";
+    if (composerProjectBtn) {
+        const activeRoot = getSessionProjectRoot();
+        composerProjectBtn.classList.toggle("active", Boolean(activeRoot));
+        composerProjectBtn.dataset.tooltip = activeRoot
+            ? `Project: ${activeRoot.path}`
+            : "Normal chat";
+    }
+    updateComposerProjectContextBar();
+    if (!composerProjectMenu) return;
+    composerProjectMenu.replaceChildren();
+
+    const header = document.createElement("div");
+    header.className = "composer-project-menu-header";
+    header.textContent = "Project";
+    composerProjectMenu.appendChild(header);
+
+    const createOption = ({ id = "", label, meta = "", type = "project", disabled = false }) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "composer-project-option";
+        button.classList.toggle("active", (getSessionProjectRoot()?.id || "") === id);
+        button.disabled = disabled;
+        button.innerHTML = `
+            <span class="composer-project-option-icon" aria-hidden="true"></span>
+            <span class="composer-project-option-copy"><span class="composer-project-option-label"></span><span class="composer-project-option-meta"></span></span>
+        `;
+        button.querySelector(".composer-project-option-icon").innerHTML = type === "none"
+            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path></svg>'
+            : type === "worktree"
+                ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><circle cx="6" cy="3" r="2"></circle><circle cx="18" cy="21" r="2"></circle><circle cx="18" cy="12" r="2"></circle></svg>'
+                : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg>';
+        button.querySelector(".composer-project-option-label").textContent = label;
+        button.querySelector(".composer-project-option-meta").textContent = meta;
+        button.addEventListener("click", () => {
+            if (disabled) return;
+            closeComposerProjectMenu();
+            setActiveChatProject(id);
+        });
+        composerProjectMenu.appendChild(button);
+    };
+
+    createOption({
+        id: "",
+        label: "No project",
+        meta: isProjectLocked ? "Project chats stay attached" : "Normal chat",
+        type: "none",
+        disabled: isProjectLocked
+    });
+    if (isNormalLocked) {
+        const lockNote = document.createElement("div");
+        lockNote.className = "composer-project-lock-note";
+        lockNote.textContent = "Normal chats cannot be moved into projects. Use New chat to choose a project.";
+        composerProjectMenu.appendChild(lockNote);
+    }
+    getSortedWorkspaceProjects().forEach(project => {
+        createOption({ id: project.id, label: project.name, meta: project.path, type: "project", disabled: isNormalLocked });
+        project.worktrees.forEach(worktree => {
+            createOption({ id: worktree.id, label: worktree.name, meta: worktree.branch || worktree.path, type: "worktree", disabled: isNormalLocked });
+        });
+    });
+
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "composer-project-add";
+    addButton.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>
+            <path d="M12 10v6"></path>
+            <path d="M9 13h6"></path>
+        </svg>
+        <span>Add project folder</span>
+    `;
+    addButton.addEventListener("click", () => {
+        closeComposerProjectMenu();
+        void chooseWorkspaceProjectFolders();
+    });
+    composerProjectMenu.appendChild(addButton);
+}
+
+function getProjectPickerIconMarkup(type = "project") {
+    if (type === "none") {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path></svg>';
+    }
+    if (type === "worktree") {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><circle cx="6" cy="3" r="2"></circle><circle cx="18" cy="21" r="2"></circle><circle cx="18" cy="12" r="2"></circle></svg>';
+    }
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg>';
+}
+
+function createNewChatProjectOption({ id = "", label, meta = "", type = "project", branch = "" }) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `new-chat-project-option composer-project-option${type === "worktree" ? " new-chat-project-option-worktree" : ""}`;
+    button.innerHTML = `
+        <span class="composer-project-option-icon" aria-hidden="true"></span>
+        <span class="composer-project-option-copy">
+            <span class="composer-project-option-label"></span>
+            <span class="composer-project-option-meta"></span>
+        </span>
+        ${branch ? '<span class="new-chat-project-branch"></span>' : ""}
+    `;
+    button.querySelector(".composer-project-option-icon").innerHTML = getProjectPickerIconMarkup(type);
+    button.querySelector(".composer-project-option-label").textContent = label;
+    button.querySelector(".composer-project-option-meta").textContent = meta;
+    const branchBadge = button.querySelector(".new-chat-project-branch");
+    if (branchBadge) branchBadge.textContent = branch;
+    button.addEventListener("click", () => {
+        closeNewChatProjectMenu();
+        if (id) {
+            startNewChatSession({
+                workspaceMode: "project",
+                projectRootId: id
+            });
+            return;
+        }
+        startNewChatSession({ notify: true });
+    });
+    return button;
+}
+
+function renderNewChatProjectPicker() {
+    if (!newChatProjectMenu) return;
+    newChatProjectMenu.replaceChildren();
+
+    const header = document.createElement("div");
+    header.className = "new-chat-project-header";
+    header.innerHTML = `
+        <span>Start new chat</span>
+        <small>Choose where Fauna should work.</small>
+    `;
+    newChatProjectMenu.appendChild(header);
+
+    newChatProjectMenu.appendChild(createNewChatProjectOption({
+        id: "",
+        label: "No project",
+        meta: "Normal chat",
+        type: "none"
+    }));
+
+    const projects = getSortedWorkspaceProjects();
+    if (projects.length) {
+        const sectionLabel = document.createElement("div");
+        sectionLabel.className = "new-chat-project-section-label";
+        sectionLabel.textContent = "Projects";
+        newChatProjectMenu.appendChild(sectionLabel);
+    }
+
+    projects.forEach(project => {
+        newChatProjectMenu.appendChild(createNewChatProjectOption({
+            id: project.id,
+            label: project.name,
+            meta: project.path,
+            type: "project"
+        }));
+        project.worktrees.forEach(worktree => {
+            newChatProjectMenu.appendChild(createNewChatProjectOption({
+                id: worktree.id,
+                label: worktree.name,
+                meta: worktree.path,
+                type: "worktree",
+                branch: worktree.branch || "worktree"
+            }));
+        });
+    });
+
+    if (!projects.length) {
+        const empty = document.createElement("div");
+        empty.className = "new-chat-project-empty";
+        empty.textContent = "No project folders yet.";
+        newChatProjectMenu.appendChild(empty);
+    }
+
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "new-chat-project-add composer-project-add";
+    addButton.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>
+            <path d="M12 10v6"></path>
+            <path d="M9 13h6"></path>
+        </svg>
+        <span>Add project folder</span>
+    `;
+    addButton.addEventListener("click", () => {
+        closeNewChatProjectMenu();
+        void chooseWorkspaceProjectFolders();
+    });
+    newChatProjectMenu.appendChild(addButton);
+}
+
+function closeNewChatProjectMenu() {
+    if (!newChatProjectMenu || !newChatBtn) return;
+    newChatProjectMenu.hidden = true;
+    newChatBtn.setAttribute("aria-expanded", "false");
+}
+
+function toggleNewChatProjectMenu() {
+    if (!newChatProjectMenu || !newChatBtn) return;
+    const willOpen = newChatProjectMenu.hidden;
+    if (willOpen) {
+        closeComposerProjectMenu();
+        closeProjectMenus();
+        closeProjectSortMenu();
+        renderNewChatProjectPicker();
+        newChatProjectMenu.hidden = false;
+        const firstOption = newChatProjectMenu.querySelector("button");
+        window.requestAnimationFrame(() => firstOption?.focus?.());
+    } else {
+        newChatProjectMenu.hidden = true;
+    }
+    newChatBtn.setAttribute("aria-expanded", String(willOpen));
+}
+
+function closeComposerProjectMenu() {
+    if (!composerProjectMenu || !composerProjectBtn) return;
+    composerProjectMenu.hidden = true;
+    composerProjectBtn.setAttribute("aria-expanded", "false");
+    newChatBtn?.setAttribute("aria-expanded", "false");
+}
+
+function ensureComposerProjectMenuPortal() {
+    if (!composerProjectMenu || composerProjectMenu.parentElement === document.body) return;
+    document.body.appendChild(composerProjectMenu);
+}
+
+function positionComposerProjectMenu() {
+    if (!composerProjectMenu || !composerProjectBtn || composerProjectMenu.hidden) return;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth || 0;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight || 0;
+    const viewportMargin = 10;
+    const anchorRect = composerProjectBtn.getBoundingClientRect();
+    const maxAvailableWidth = Math.max(220, viewportWidth - (viewportMargin * 2));
+    const menuWidth = Math.min(330, maxAvailableWidth);
+    const maxMenuHeight = Math.max(180, Math.min(360, viewportHeight - (viewportMargin * 2)));
+
+    composerProjectMenu.style.position = "fixed";
+    composerProjectMenu.style.width = `${menuWidth}px`;
+    composerProjectMenu.style.maxHeight = `${maxMenuHeight}px`;
+    composerProjectMenu.style.right = "auto";
+    composerProjectMenu.style.bottom = "auto";
+    composerProjectMenu.style.left = `${Math.min(Math.max(viewportMargin, anchorRect.left), viewportWidth - menuWidth - viewportMargin)}px`;
+    composerProjectMenu.style.top = "0px";
+
+    const measuredHeight = Math.min(composerProjectMenu.getBoundingClientRect().height || maxMenuHeight, maxMenuHeight);
+    const preferredTop = anchorRect.top - measuredHeight - 9;
+    const fallbackTop = anchorRect.bottom + 9;
+    const top = preferredTop >= viewportMargin
+        ? preferredTop
+        : Math.min(fallbackTop, viewportHeight - measuredHeight - viewportMargin);
+
+    composerProjectMenu.style.top = `${Math.min(Math.max(viewportMargin, top), viewportHeight - measuredHeight - viewportMargin)}px`;
+}
+
+function openComposerProjectMenu({ focusFirst = false } = {}) {
+    if (!composerProjectMenu || !composerProjectBtn) return;
+    ensureComposerProjectMenuPortal();
+    renderComposerProjectPicker();
+    composerProjectMenu.hidden = false;
+    positionComposerProjectMenu();
+    composerProjectBtn.setAttribute("aria-expanded", "true");
+    newChatBtn?.setAttribute("aria-expanded", "true");
+    if (focusFirst) {
+        const firstOption = composerProjectMenu.querySelector("button:not(:disabled)");
+        window.requestAnimationFrame(() => {
+            positionComposerProjectMenu();
+            firstOption?.focus?.();
+        });
+    } else {
+        window.requestAnimationFrame(positionComposerProjectMenu);
+    }
+}
+
+function toggleComposerProjectMenu({ focusFirst = false } = {}) {
+    if (!composerProjectMenu || !composerProjectBtn) return;
+    if (composerProjectMenu.hidden) {
+        openComposerProjectMenu({ focusFirst });
+        return;
+    }
+    closeComposerProjectMenu();
+}
+
+function startNewChatComposerProjectPicker() {
+    if (activeSessionId) {
+        const currentSession = saveCurrentSession({ render: false, updateUrl: false });
+        if (currentSession && !chatSessionHasContent(currentSession) && !currentSession.archived) {
+            chatSessions = chatSessions.filter(session => session.id !== currentSession.id);
+        }
+    }
+    restoreEmptyChatDraft({ updateUrl: false });
+    setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: true, closeSidebar: false, updateUrl: true, urlMode: "replace" });
+    sidebarController.close();
+    closeNewChatProjectMenu();
+    openComposerProjectMenu({ focusFirst: true });
+    focusComposerInput({ force: true });
+}
+
+async function chooseWorkspaceProjectFolders() {
+    const api = getFaunaDesktopApi()?.projects;
+    if (!api?.chooseFolders) {
+        showToast("Project folders can be selected in the desktop app.", "warning");
+        return;
+    }
+    try {
+        const result = await api.chooseFolders();
+        if (result?.cancelled) return;
+        syncWorkspaceProjects(result?.projects || []);
+        showToast(result?.added > 0 ? `${result.added} project ${result.added === 1 ? "folder" : "folders"} added.` : "Project list updated.", "success");
+    } catch (err) {
+        showToast(`Could not add project folder: ${err.message}`, "error");
+    }
+}
+
+async function openWorkspaceProjectPath(root) {
+    const api = getFaunaDesktopApi()?.projects;
+    if (!api?.openPath) {
+        showToast("Opening project folders is available in the desktop app.", "warning");
+        return;
+    }
+    try {
+        const result = await api.openPath(root?.path || "");
+        if (result?.ok === false) throw new Error(result.message || "Explorer could not open the folder.");
+    } catch (err) {
+        showToast(`Could not open project: ${err.message}`, "error");
+    }
+}
+
+function openProjectRenameDialog(root) {
+    if (!root) return;
+    const overlay = document.createElement("div");
+    overlay.className = "approval-modal";
+    overlay.setAttribute("role", "presentation");
+    const dialog = document.createElement("section");
+    dialog.className = "approval-dialog project-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "projectRenameTitle");
+    const titleNode = document.createElement("h2");
+    titleNode.id = "projectRenameTitle";
+    titleNode.textContent = "Rename project";
+    const inputLabel = document.createElement("label");
+    inputLabel.className = "chat-rename-field";
+    inputLabel.innerHTML = '<span>Project name</span>';
+    const nameInput = document.createElement("input");
+    nameInput.className = "settings-input chat-rename-input";
+    nameInput.type = "text";
+    nameInput.maxLength = 48;
+    nameInput.value = root.name;
+    inputLabel.appendChild(nameInput);
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "provider-btn provider-btn-secondary";
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel";
+    const saveButton = document.createElement("button");
+    saveButton.className = "provider-btn provider-btn-primary";
+    saveButton.type = "button";
+    saveButton.textContent = "Save";
+    const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        overlay.remove();
+    };
+    const save = () => {
+        const name = cleanSessionTitle(nameInput.value || root.name, 48);
+        const project = getWorkspaceProjectById(root.projectId || root.id);
+        if (!project) return close();
+        if (root.type === "worktree") {
+            const worktree = project.worktrees.find(item => item.id === root.id);
+            if (worktree) worktree.name = name;
+        } else {
+            project.name = name;
+        }
+        project.updatedAt = new Date().toISOString();
+        persistWorkspaceProjects();
+        renderProjectList();
+        renderComposerProjectPicker();
+        updateActiveChatTitle();
+        showToast("Project name updated.", "success");
+        close();
+    };
+    const onKeyDown = event => {
+        if (event.key === "Escape") close();
+        if (event.key === "Enter" && document.activeElement === nameInput) save();
+    };
+    cancelButton.addEventListener("click", close);
+    saveButton.addEventListener("click", save);
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+    actions.append(cancelButton, saveButton);
+    dialog.append(titleNode, inputLabel, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => {
+        nameInput.focus();
+        nameInput.select();
+    }, 0);
+}
+
+function getDefaultWorktreeBranch(project) {
+    const base = slugWorkspaceProjectValue(project?.name || "worktree", "worktree").toLowerCase();
+    return `codex/${base}-${Date.now().toString(36)}`;
+}
+
+function openCreateWorktreeDialog(project) {
+    if (!project) return;
+    const overlay = document.createElement("div");
+    overlay.className = "approval-modal";
+    overlay.setAttribute("role", "presentation");
+    const dialog = document.createElement("section");
+    dialog.className = "approval-dialog project-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "projectWorktreeTitle");
+    const titleNode = document.createElement("h2");
+    titleNode.id = "projectWorktreeTitle";
+    titleNode.textContent = "Create worktree";
+    const message = document.createElement("p");
+    message.textContent = `Fauna will create a sibling worktree for ${project.name}.`;
+    const inputLabel = document.createElement("label");
+    inputLabel.className = "chat-rename-field";
+    inputLabel.innerHTML = '<span>Branch name</span>';
+    const branchInput = document.createElement("input");
+    branchInput.className = "settings-input chat-rename-input";
+    branchInput.type = "text";
+    branchInput.value = getDefaultWorktreeBranch(project);
+    inputLabel.appendChild(branchInput);
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "provider-btn provider-btn-secondary";
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel";
+    const createButton = document.createElement("button");
+    createButton.className = "provider-btn provider-btn-primary";
+    createButton.type = "button";
+    createButton.textContent = "Create";
+    const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        overlay.remove();
+    };
+    const create = async () => {
+        const branch = String(branchInput.value || "").trim();
+        if (!branch) {
+            showToast("Add a branch name first.", "warning");
+            return;
+        }
+        const api = getFaunaDesktopApi()?.projects;
+        if (!api?.createWorktree) {
+            showToast("Worktree creation is available in the desktop app.", "warning");
+            return;
+        }
+        createButton.disabled = true;
+        try {
+            const result = await api.createWorktree({ projectId: project.id, branch });
+            syncWorkspaceProjects(result?.projects || []);
+            if (result?.worktree?.id) setActiveChatProject(result.worktree.id, { notify: false });
+            showToast("Worktree created and selected.", "success");
+            close();
+        } catch (err) {
+            createButton.disabled = false;
+            showToast(`Could not create worktree: ${err.message}`, "error");
+        }
+    };
+    const onKeyDown = event => {
+        if (event.key === "Escape") close();
+        if (event.key === "Enter" && document.activeElement === branchInput) void create();
+    };
+    cancelButton.addEventListener("click", close);
+    createButton.addEventListener("click", () => { void create(); });
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+    actions.append(cancelButton, createButton);
+    dialog.append(titleNode, message, inputLabel, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => {
+        branchInput.focus();
+        branchInput.select();
+    }, 0);
+}
+
+function removeWorkspaceProjectRoot(root) {
+    if (!root) return;
+    if (root.type === "worktree") {
+        const project = getWorkspaceProjectById(root.projectId);
+        if (project) project.worktrees = project.worktrees.filter(worktree => worktree.id !== root.id);
+    } else {
+        workspaceProjects = workspaceProjects.filter(project => project.id !== root.id);
+    }
+    chatSessions.forEach(session => {
+        const context = normalizeStoredSessionProjectContext(session.projectContext);
+        const removed = root.type === "worktree"
+            ? context.rootId === root.id
+            : context.projectId === root.id;
+        if (removed) session.projectContext = createEmptyProjectContext();
+    });
+    persistWorkspaceProjects();
+    persistChatSessions();
+    renderProjectList();
+    renderComposerProjectPicker();
+    updateProjectAgentPanel();
+    updateActiveChatTitle();
+    showToast(root.type === "worktree" ? "Worktree removed from Fauna." : "Project removed from Fauna.", "info");
+}
+
+let isProjectListCollapsed = safeLocalStorageGet("faunaProjectListCollapsed") === "true";
+
+function setProjectListCollapsed(collapsed, { persist = true } = {}) {
+    isProjectListCollapsed = Boolean(collapsed);
+    projectList?.toggleAttribute("hidden", isProjectListCollapsed);
+    projectListToggle?.setAttribute("aria-expanded", String(!isProjectListCollapsed));
+    if (projectListToggle) {
+        projectListToggle.dataset.tooltip = isProjectListCollapsed ? "Expand projects" : "Collapse projects";
+    }
+    if (persist) safeLocalStorageSet("faunaProjectListCollapsed", isProjectListCollapsed ? "true" : "false");
+}
+
+projectListToggle?.addEventListener("click", () => {
+    setProjectListCollapsed(!isProjectListCollapsed);
+});
+projectSortBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    toggleProjectSortMenu();
+});
+addProjectFolderBtn?.addEventListener("click", () => {
+    void chooseWorkspaceProjectFolders();
+});
+agentTaskModeBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    toggleAgentTaskModeMenu();
+});
+composerProjectBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    toggleComposerProjectMenu();
+});
+composerLocalWorkBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    isWorkspaceBridgeEnabled = !isWorkspaceBridgeEnabled;
+    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, isWorkspaceBridgeEnabled ? "true" : "false");
+    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
+    updateWorkspaceBridgeSettingsUi?.();
+    updateProviderSettingsUi?.();
+    updateComposerProjectContextBar();
+    showToast(isWorkspaceBridgeEnabled ? "Local workspace access enabled." : "Local workspace access disabled.", isWorkspaceBridgeEnabled ? "success" : "info");
+});
+composerBranchBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    openComposerProjectMenu({ focusFirst: true });
+});
+windowWorkspacePanelToggleBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    toggleProjectWorkspacePanel();
+});
+windowWorkspacePanelMaximizeBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    if (isProjectAgentCollapsed) openProjectWorkspacePanel("menu");
+    setProjectAgentMaximized(!isProjectAgentMaximized);
+});
+projectPanelMenuTab?.addEventListener("click", () => openProjectWorkspacePanel("menu"));
+projectPanelAddTabBtn?.addEventListener("click", () => openProjectWorkspacePanel("menu"));
+projectFilesTab?.addEventListener("click", () => openProjectWorkspacePanel("files", { refresh: true }));
+projectActivityTab?.addEventListener("click", () => openProjectWorkspacePanel("activity"));
+projectPageChatTab?.addEventListener("click", () => openProjectWorkspacePanel("chat"));
+workspaceMenuButtons.forEach(button => {
+    button.addEventListener("click", () => handleWorkspacePanelAction(button.dataset.workspacePanelAction));
+});
+projectAgentCollapseBtn?.addEventListener("click", () => {
+    setProjectAgentCollapsed(true);
+});
+projectAgentExpandBtn?.addEventListener("click", () => {
+    openProjectWorkspacePanel("menu");
+});
+projectAgentResizeHandle?.addEventListener("pointerdown", startProjectAgentResize);
+projectAgentResizeHandle?.addEventListener("keydown", event => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const direction = event.key === "ArrowLeft" ? 1 : -1;
+    setProjectAgentWidth(activeProjectAgentWidth + (direction * 24));
+});
+projectExplorerFilterInput?.addEventListener("input", renderProjectExplorerCurrentEntries);
+projectExplorerRefreshBtn?.addEventListener("click", () => {
+    void refreshProjectExplorer({ refreshBranch: true });
+});
+projectExplorerUpBtn?.addEventListener("click", () => {
+    void refreshProjectExplorer({ path: getProjectParentPath(activeProjectExplorerPath) });
+});
+projectInstructionsBtn?.addEventListener("click", () => openProjectInstructionsDialog());
+projectDiffReviewBtn?.addEventListener("click", () => {
+    void openProjectDiffReview();
+});
+projectWorktreeActionBtn?.addEventListener("click", () => {
+    const root = getSessionProjectRoot();
+    const project = root?.project || getWorkspaceProjectById(root?.projectId || root?.id);
+    if (!project) {
+        showToast("Select a project first.", "warning");
+        return;
+    }
+    openCreateWorktreeDialog(project);
+});
+projectCommandRunBtn?.addEventListener("click", () => {
+    void runProjectCommandFromPanel();
+});
+projectCommandInput?.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void runProjectCommandFromPanel();
+});
+projectPageChatSendBtn?.addEventListener("click", () => {
+    void sendProjectPageChatMessage();
+});
+projectPageChatInput?.addEventListener("input", () => {
+    projectPageChatInput.style.height = "auto";
+    projectPageChatInput.style.height = `${Math.min(118, projectPageChatInput.scrollHeight)}px`;
+});
+projectPageChatInput?.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    void sendProjectPageChatMessage();
+});
+document.addEventListener("click", event => {
+    if (!event.target?.closest?.(".agent-task-mode-wrap")) closeAgentTaskModeMenu();
+    if (!event.target?.closest?.(".composer-project-wrap")) closeComposerProjectMenu();
+    if (!event.target?.closest?.(".new-chat-picker-wrap")) closeNewChatProjectMenu();
+    if (!event.target?.closest?.(".project-menu-wrap")) closeProjectMenus();
+    if (!event.target?.closest?.(".project-sort-wrap")) closeProjectSortMenu();
+});
+window.addEventListener("resize", positionComposerProjectMenu);
+window.addEventListener("scroll", positionComposerProjectMenu, true);
+document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    closeAgentTaskModeMenu();
+    closeComposerProjectMenu();
+    closeNewChatProjectMenu();
+    closeProjectMenus();
+    closeProjectSortMenu();
+});
+setProjectAgentWidth(activeProjectAgentWidth, { persist: false });
+setProjectListCollapsed(isProjectListCollapsed, { persist: false });
+updateProjectSortButton();
+updateAgentTaskModeUi();
+updateProjectAgentPanel();
+renderAgentActivityList();
+
 function shouldRequestAssistantChatTitle(messages = conversationHistory, sessionId = activeSessionId) {
     const hasAssistantReply = (Array.isArray(messages) ? messages : [])
         .some(message => message?.role === "assistant");
@@ -94,7 +2409,7 @@ function applyAssistantChatTitle(content, sessionId = activeSessionId) {
 
 function createChatSession(overrides = {}) {
     const now = new Date().toISOString();
-    return {
+    const session = {
         id: createSessionId(),
         title: "Current Session",
         createdAt: now,
@@ -106,10 +2421,15 @@ function createChatSession(overrides = {}) {
         chatHtml: "",
         conversationHistory: [],
         composerDraft: createEmptyComposerDraft(),
+        projectContext: createEmptyProjectContext(),
+        workspaceMode: "normal",
         sessionTotalTokens: 0,
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER,
         ...overrides
     };
+    session.projectContext = normalizeStoredSessionProjectContext(session.projectContext);
+    session.workspaceMode = normalizeChatWorkspaceMode(session.workspaceMode, session.projectContext);
+    return session;
 }
 
 function createEmptyComposerDraft() {
@@ -179,6 +2499,8 @@ function normalizeStoredChatSession(raw) {
         chatHtml: sanitizeChatHtmlMediaSources(typeof raw.chatHtml === "string" ? raw.chatHtml : ""),
         conversationHistory,
         composerDraft: normalizeStoredComposerDraft(raw.composerDraft),
+        projectContext: normalizeStoredSessionProjectContext(raw.projectContext),
+        workspaceMode: normalizeChatWorkspaceMode(raw.workspaceMode, normalizeStoredSessionProjectContext(raw.projectContext)),
         sessionTotalTokens: Math.max(historyTokenTotal, trustedStoredTotal || 0),
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER
     });
@@ -532,6 +2854,8 @@ function serializeChatSession(session, options = {}) {
         chatHtml: includeHtml ? sanitizeChatHtmlMediaSources(session.chatHtml || "") : "",
         conversationHistory: conversation,
         composerDraft: serializeComposerDraftForStorage(session.composerDraft),
+        projectContext: normalizeStoredSessionProjectContext(session.projectContext),
+        workspaceMode: normalizeChatWorkspaceMode(session.workspaceMode, session.projectContext),
         sessionTotalTokens: normalizeTokenCount(session.sessionTotalTokens) || 0,
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER
     };
@@ -889,11 +3213,13 @@ function openChatInfoDialog(sessionId) {
     window.setTimeout(() => closeButton.focus(), 0);
 }
 
-function createChatSessionRow(session) {
+function createChatSessionRow(session, { variant = "", hideProjectBadge = false } = {}) {
     const generating = typeof isSessionGenerating === "function" && isSessionGenerating(session.id) === true;
     const generationComplete = typeof hasUnreadGenerationCompletion === "function" && hasUnreadGenerationCompletion(session.id) === true;
+    const sessionProjectRoot = getSessionProjectRoot(session);
     const row = document.createElement("div");
     row.className = "chat-session-row";
+    if (variant) row.classList.add(variant);
     row.classList.toggle("active", session.id === activeSessionId);
     row.classList.toggle("pinned", session.pinned);
     row.classList.toggle("archived", session.archived);
@@ -918,6 +3244,13 @@ function createChatSessionRow(session) {
     label.className = "chat-label";
     label.textContent = session.title;
     mainButton.append(dot, label);
+    if (sessionProjectRoot && !hideProjectBadge) {
+        const projectBadge = document.createElement("span");
+        projectBadge.className = "chat-project-badge";
+        projectBadge.dataset.tooltip = sessionProjectRoot.name;
+        projectBadge.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg>';
+        mainButton.appendChild(projectBadge);
+    }
     mainButton.addEventListener("click", () => activateChatSession(session.id));
 
     const activitySpinner = document.createElement("span");
@@ -1021,7 +3354,9 @@ function renderChatHistory() {
     if (!chatHistoryList && !archivedChatList) return;
     if (chatHistoryList) chatHistoryList.innerHTML = "";
     if (archivedChatList) archivedChatList.innerHTML = "";
-    const visibleSessions = chatSessions.filter(session => !session.archived).sort(compareChatSessions);
+    const visibleSessions = chatSessions
+        .filter(session => !session.archived && getSessionWorkspaceMode(session) !== "project")
+        .sort(compareChatSessions);
     const archivedSessions = chatSessions.filter(session => session.archived).sort(compareChatSessions);
     appendChatSessionGroup(chatHistoryList, "", visibleSessions);
     if (archivedHistorySection) {
@@ -1030,6 +3365,7 @@ function renderChatHistory() {
     }
     appendChatSessionGroup(archivedChatList || chatHistoryList, archivedChatList ? "" : "Archived", archivedSessions);
     setArchivedChatHistoryCollapsed(isArchivedChatHistoryCollapsed, { persist: false });
+    renderProjectList();
 }
 
 function setChatHistoryCollapsed(collapsed, { persist = true } = {}) {
@@ -1287,6 +3623,8 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
 
     updateTokenDisplay();
     updateActiveChatTitle();
+    renderProjectList();
+    renderComposerProjectPicker();
     updateGenerationUi?.({ renderHistory: false });
 }
 
@@ -1307,6 +3645,8 @@ function restoreEmptyChatDraft({ render = true, persist = true, updateUrl = true
 
     updateTokenDisplay();
     updateActiveChatTitle();
+    renderProjectList();
+    renderComposerProjectPicker();
     updateGenerationUi?.({ renderHistory: false });
     if (persist) persistChatSessions();
     if (render) renderChatHistory();
@@ -1339,12 +3679,40 @@ function activateChatSession(sessionId, { captureCurrent = true, closeSidebar = 
     if (updateUrl) updateWorkspaceUrlFragment({ replace: urlMode === "replace" });
 }
 
-function startNewChatSession({ notify = true, updateUrl = true, urlMode = "push" } = {}) {
+function startNewChatSession({ notify = true, updateUrl = true, urlMode = "push", workspaceMode = "normal", projectRootId = "" } = {}) {
+    const projectRoot = workspaceMode === "project" ? getWorkspaceProjectRootById(projectRootId) : null;
+    if (workspaceMode === "project" && !projectRoot) {
+        showToast("Select a project first.", "warning");
+        return;
+    }
+
     if (activeSessionId) {
         const currentSession = saveCurrentSession({ render: false, updateUrl: false });
         if (currentSession && !chatSessionHasContent(currentSession) && !currentSession.archived) {
             chatSessions = chatSessions.filter(session => session.id !== currentSession.id);
         }
+    }
+
+    if (projectRoot) {
+        const session = createChatSession({
+            workspaceMode: "project",
+            projectContext: createProjectContextForRoot(projectRoot)
+        });
+        chatSessions.unshift(session);
+        activeSessionId = session.id;
+        restoreChatSessionToView(session);
+        setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: true, closeSidebar: false, updateUrl, urlMode });
+        enableWorkspaceBridgeForProject();
+        persistChatSessions();
+        renderChatHistory();
+        renderProjectList();
+        renderComposerProjectPicker();
+        updateProjectAgentPanel();
+        void refreshProjectExplorer({ silent: true, refreshBranch: true });
+        sidebarController.close();
+        focusComposerInput({ force: true });
+        if (notify) showToast(`${projectRoot.name} project chat ready.`, "info");
+        return;
     }
 
     restoreEmptyChatDraft({ updateUrl: false });
