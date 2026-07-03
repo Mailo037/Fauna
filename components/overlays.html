@@ -800,6 +800,30 @@
                 </div>
 
                 <div class="provider-model-section settings-panel-section app-info-collapsible" data-app-info-section>
+                    <button class="app-info-section-toggle" type="button" data-app-info-toggle aria-expanded="true" aria-controls="appInfoLegalSection">
+                        <span class="provider-section-label">Legal</span>
+                        <svg class="app-info-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                    </button>
+                    <div id="appInfoLegalSection" class="app-info-section-body">
+                        <div class="app-legal-card">
+                            <span class="app-legal-kicker">License</span>
+                            <strong>MIT License</strong>
+                            <p>You may use, copy, modify, publish, and distribute Fauna as long as the MIT license notice stays included.</p>
+                        </div>
+                        <div class="app-legal-card">
+                            <span class="app-legal-kicker">Local services</span>
+                            <strong>Use only trusted workspaces</strong>
+                            <p>Ollama, ComfyUI/Wan, and the Local Workspace Bridge run on your machine. The bridge is opt-in, token-protected, and should stay on localhost unless you explicitly accept the risk.</p>
+                        </div>
+                        <div class="app-legal-card">
+                            <span class="app-legal-kicker">Third-party services</span>
+                            <strong>Configured providers have their own terms</strong>
+                            <p>When you connect services such as OpenAI, Google, Bing, DuckDuckGo, Wikipedia, or Pollinations, review their terms and privacy policies before sending data.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="provider-model-section settings-panel-section app-info-collapsible" data-app-info-section>
                     <button class="app-info-section-toggle" type="button" data-app-info-toggle aria-expanded="true" aria-controls="appInfoMaintenanceSection">
                         <span class="provider-section-label">Maintenance</span>
                         <svg class="app-info-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>

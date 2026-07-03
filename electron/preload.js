@@ -79,6 +79,9 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   pullOllamaModel(payload = {}) {
     return ipcRenderer.invoke("fauna:ollama-pull", payload);
   },
+  cancelOllamaPull(payload = {}) {
+    return ipcRenderer.invoke("fauna:ollama-pull-cancel", payload);
+  },
   onOllamaPullProgress(handler) {
     return onRendererEvent("fauna:ollama-pull-progress", handler);
   },

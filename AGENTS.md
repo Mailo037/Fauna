@@ -83,4 +83,4 @@ After meaningful UI or behavior changes, verify:
 
 ## Desktop Versioning
 
-- After every successfully completed prompt involving the desktop app, increment the app version in `major.minor.bugfix` format.
+- Increment the app version in `major.minor.bugfix` format only when you build and intend to distribute the desktop app.

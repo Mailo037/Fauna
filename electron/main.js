@@ -86,6 +86,7 @@ let pendingOpenChatId = "";
 let pendingQuickPrompt = "";
 let pendingQuickPayload = null;
 let pendingNewChat = false;
+const activeOllamaPulls = new Map();
 let updateState = {
   status: "idle",
   message: "Updates ready",
@@ -349,6 +350,7 @@ function createTimeoutSignal(timeoutMs = 0) {
     ? setTimeout(() => controller.abort(), timeout)
     : null;
   return {
+    controller,
     signal: controller.signal,
     clear: () => {
       if (timeoutId) clearTimeout(timeoutId);
@@ -692,6 +694,12 @@ async function pullOllamaModelWithProgress(event, payload = {}) {
 
   for (const baseUrl of OLLAMA_BASE_URL_CANDIDATES) {
     const timeout = createTimeoutSignal(30 * 60 * 1000);
+    activeOllamaPulls.set(requestId, {
+      controller: timeout.controller,
+      modelId,
+      baseUrl,
+      startedAt: Date.now()
+    });
     try {
       const response = await fetch(`${baseUrl}/api/pull`, {
         method: "POST",
@@ -714,13 +722,35 @@ async function pullOllamaModelWithProgress(event, payload = {}) {
         ...finalData
       };
     } catch (error) {
+      if (timeout.signal.aborted) {
+        emitProgress({ status: "cancelled", done: true });
+        throw new Error("Model download cancelled.");
+      }
       lastError = error;
     } finally {
+      activeOllamaPulls.delete(requestId);
       timeout.clear();
     }
   }
 
   throw new Error(lastError?.message || `Could not pull ${modelId}.`);
+}
+
+function cancelOllamaPull(payload = {}) {
+  const requestId = String(payload.requestId || "").trim();
+  if (!requestId) return { ok: false, message: "Missing Ollama pull request id." };
+  const active = activeOllamaPulls.get(requestId);
+  if (!active) {
+    return { ok: false, requestId, message: "Ollama pull is not active." };
+  }
+  active.controller?.abort?.();
+  activeOllamaPulls.delete(requestId);
+  return {
+    ok: true,
+    requestId,
+    modelId: active.modelId || "",
+    message: "Ollama pull cancelled."
+  };
 }
 
 function getDesktopInfo() {
@@ -1745,6 +1775,7 @@ function registerIpc() {
   ipcMain.handle("fauna:ollama-status", () => getOllamaStatus());
   ipcMain.handle("fauna:ollama-fetch", (_event, payload) => proxyOllamaRequest(payload));
   ipcMain.handle("fauna:ollama-pull", (event, payload) => pullOllamaModelWithProgress(event, payload));
+  ipcMain.handle("fauna:ollama-pull-cancel", (_event, payload) => cancelOllamaPull(payload));
   ipcMain.handle("fauna:start-ollama", () => startOllamaHttpService());
   ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
   ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));

@@ -23,6 +23,11 @@ const appWindowBar = document.getElementById("appWindowBar");
 const windowBackBtn = document.getElementById("windowBackBtn");
 const windowForwardBtn = document.getElementById("windowForwardBtn");
 const windowLocationLabel = document.getElementById("windowLocationLabel");
+const changelogMenuWrap = document.getElementById("changelogMenuWrap");
+const changelogBtn = document.getElementById("changelogBtn");
+const changelogPanel = document.getElementById("changelogPanel");
+const changelogSummary = document.getElementById("changelogSummary");
+const changelogList = document.getElementById("changelogList");
 const windowUpdateBtn = document.getElementById("windowUpdateBtn");
 const windowUpdateNotice = document.getElementById("windowUpdateNotice");
 const windowUpdateNoticeText = document.getElementById("windowUpdateNoticeText");
@@ -359,11 +364,69 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.6";
-const FAUNA_APP_BUILD_ID = "20260703-onboarding-autostart";
+const FAUNA_APP_VERSION = "0.1.7";
+const FAUNA_APP_BUILD_ID = "20260703-changelog-download-controls";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
+const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.1.7",
+        date: "2026-07-03",
+        commit: "v0.1.7",
+        title: "Changelog, legal info, and download controls",
+        changes: [
+            "Added a topbar changelog menu generated from the recent desktop commit history.",
+            "Added MIT license metadata, legal usage notes, and Settings > Info legal cards.",
+            "Added persisted Ollama model download cards with logs, pause, resume, stop, and clear controls.",
+            "Collapsed the download chip until hover, focus, open, start, or finish, and kept window controls visible."
+        ]
+    },
+    {
+        version: "0.1.6",
+        date: "2026-07-03",
+        commit: "818f6db",
+        title: "Onboarding and Ollama startup flow",
+        changes: [
+            "Added guided onboarding for choosing local Ollama or OpenAI setup.",
+            "Added visible Ollama startup, status checks, and model pull progress in the desktop shell.",
+            "Expanded local services settings with voice pipeline and task-model setup controls."
+        ]
+    },
+    {
+        version: "0.1.5",
+        date: "2026-07-03",
+        commit: "06fc421",
+        title: "Desktop task routing and release fixes",
+        changes: [
+            "Improved desktop routing for chats, quick actions, and background task handoff.",
+            "Updated realtime voice, model switching, and command pipeline behavior for packaged builds.",
+            "Refined update status handling and release metadata."
+        ]
+    },
+    {
+        version: "0.1.1",
+        date: "2026-07-03",
+        commit: "cdae802",
+        title: "First release-ready desktop app",
+        changes: [
+            "Added the frameless desktop window, quick prompt window, persistent AppData storage, and updater wiring.",
+            "Moved chats and generated media into desktop-managed files while keeping browser storage fallback.",
+            "Added desktop settings, app info, cache reset, local model controls, and workspace bridge improvements."
+        ]
+    },
+    {
+        version: "0.1.0",
+        date: "2026-07-02",
+        commit: "6fedc9a",
+        title: "Desktop window bar and agent loop updates",
+        changes: [
+            "Introduced the custom desktop window bar and window-control integration.",
+            "Added agent loop controls and app update metadata for the desktop track.",
+            "Prepared the static web app for Electron packaging."
+        ]
+    }
+];
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
 const LIBRARY_ITEMS_STORAGE_KEY = "faunaLibraryItems";
@@ -413,6 +476,11 @@ const LOCAL_TASK_VIDEO_MODEL_STORAGE_KEY = "faunaLocalTaskVideoModel";
 const OLLAMA_AUTO_START_STORAGE_KEY = "faunaOllamaAutoStart";
 const ONBOARDING_COMPLETED_STORAGE_KEY = "faunaOnboardingCompletedVersion";
 const ONBOARDING_VERSION = "20260703-onboarding-v1";
+const MODEL_DOWNLOAD_TASKS_STORAGE_KEY = "faunaModelDownloadTasks";
+const MODEL_DOWNLOAD_MAX_PERSISTED_TASKS = 8;
+const MODEL_DOWNLOAD_MAX_LOG_LINES = 80;
+const MODEL_DOWNLOAD_START_PEEK_MS = 5200;
+const MODEL_DOWNLOAD_FINISH_PEEK_MS = 9000;
 const COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY = "faunaCompletionNotificationsEnabled";
 const COMPLETION_SOUND_ENABLED_STORAGE_KEY = "faunaCompletionSoundEnabled";
 const COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY = "faunaCompletionOnlyUnfocused";
@@ -706,6 +774,53 @@ async function installFaunaAppUpdate() {
     window.location.reload();
 }
 
+function closeChangelogMenu() {
+    if (!changelogPanel || !changelogBtn) return;
+    changelogPanel.hidden = true;
+    changelogBtn.setAttribute("aria-expanded", "false");
+}
+
+function openChangelogMenu() {
+    if (!changelogPanel || !changelogBtn) return;
+    renderChangelogMenu();
+    changelogPanel.hidden = false;
+    changelogBtn.setAttribute("aria-expanded", "true");
+}
+
+function renderChangelogMenu() {
+    if (!changelogList) return;
+    if (changelogSummary) {
+        changelogSummary.textContent = `${FAUNA_CHANGELOG_ENTRIES.length} recent desktop releases`;
+    }
+    changelogList.replaceChildren(...FAUNA_CHANGELOG_ENTRIES.map(entry => {
+        const article = document.createElement("article");
+        article.className = "changelog-entry";
+
+        const header = document.createElement("header");
+        header.className = "changelog-entry-head";
+        const titleWrap = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = `Fauna ${entry.version}`;
+        const subtitle = document.createElement("small");
+        subtitle.textContent = `${entry.date} - ${entry.commit}`;
+        titleWrap.append(title, subtitle);
+        const badge = document.createElement("span");
+        badge.textContent = entry.title;
+        header.append(titleWrap, badge);
+
+        const list = document.createElement("ul");
+        list.className = "changelog-change-list";
+        entry.changes.forEach(change => {
+            const item = document.createElement("li");
+            item.textContent = change;
+            list.appendChild(item);
+        });
+
+        article.append(header, list);
+        return article;
+    }));
+}
+
 function initializeWindowBar() {
     if (!appWindowBar) return;
     const desktopApi = getFaunaDesktopApi();
@@ -732,6 +847,11 @@ function initializeWindowBar() {
     });
     windowUpdateInstallBtn?.addEventListener("click", () => {
         void installFaunaAppUpdate();
+    });
+    changelogBtn?.addEventListener("click", event => {
+        event.stopPropagation();
+        if (changelogPanel?.hidden) openChangelogMenu();
+        else closeChangelogMenu();
     });
 
     if (desktopApi) {
@@ -1016,7 +1136,10 @@ let codeWorkbenchLoadTimer = null;
 let codeWorkbenchEditTimer = null;
 let codeWorkbenchLoadToken = 0;
 const modelDownloadTasks = new Map();
+const modelDownloadAbortControllers = new Map();
 let modelDownloadCloseTimer = null;
+let modelDownloadPeekTimer = null;
+let expandedModelDownloadTaskId = "";
 const voiceCueLastPlayedAt = new Map();
 const disabledButtonStates = new Map();
 const sidebarController = createSidebarController();
@@ -1494,6 +1617,20 @@ function getModelDownloadTaskId(modelId) {
     return `ollama:${String(modelId || "").trim() || "model"}`;
 }
 
+function normalizeModelDownloadState(state = "active") {
+    return ["active", "paused", "stopped", "done", "error", "interrupted"].includes(state)
+        ? state
+        : "active";
+}
+
+function getModelDownloadTask(id) {
+    return modelDownloadTasks.get(id) || null;
+}
+
+function getModelDownloadTaskState(id) {
+    return getModelDownloadTask(id)?.state || "";
+}
+
 function getModelDownloadPercent(task) {
     if (!task) return 0;
     const explicit = Number(task.progress);
@@ -1506,12 +1643,146 @@ function getModelDownloadPercent(task) {
     return task.state === "done" ? 100 : 0;
 }
 
+function formatModelDownloadBytes(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "";
+    const units = ["B", "KB", "MB", "GB"];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+    return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function getModelDownloadLogTime(timestamp = Date.now()) {
+    try {
+        return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch {
+        return "";
+    }
+}
+
+function normalizeModelDownloadLog(entry) {
+    if (typeof entry === "string") {
+        return { time: Date.now(), level: "info", message: entry };
+    }
+    const message = String(entry?.message || "").trim();
+    if (!message) return null;
+    return {
+        time: Number(entry?.time) || Date.now(),
+        level: ["info", "success", "warning", "error"].includes(entry?.level) ? entry.level : "info",
+        message
+    };
+}
+
+function normalizeModelDownloadTask(rawTask = {}, { markInterrupted = false } = {}) {
+    const modelId = String(rawTask.modelId || rawTask.name || "model").trim() || "model";
+    const id = String(rawTask.id || getModelDownloadTaskId(modelId));
+    let state = normalizeModelDownloadState(rawTask.state || "active");
+    let detail = String(rawTask.detail || rawTask.status || "Waiting for Ollama...");
+    const logs = Array.isArray(rawTask.logs)
+        ? rawTask.logs.map(normalizeModelDownloadLog).filter(Boolean).slice(-MODEL_DOWNLOAD_MAX_LOG_LINES)
+        : [];
+
+    if (markInterrupted && state === "active") {
+        state = "interrupted";
+        detail = "Fauna restarted before this download finished. Resume to continue.";
+        logs.push({
+            time: Date.now(),
+            level: "warning",
+            message: "Download was interrupted by an app restart."
+        });
+    }
+
+    return {
+        id,
+        modelId,
+        requestId: String(rawTask.requestId || ""),
+        state,
+        status: String(rawTask.status || detail),
+        detail,
+        completed: Number(rawTask.completed) || 0,
+        total: Number(rawTask.total) || 0,
+        progress: Number.isFinite(Number(rawTask.progress)) ? Number(rawTask.progress) : 0,
+        startedAt: Number(rawTask.startedAt) || Date.now(),
+        updatedAt: Number(rawTask.updatedAt) || Date.now(),
+        lastLogMessage: String(rawTask.lastLogMessage || ""),
+        logs: logs.slice(-MODEL_DOWNLOAD_MAX_LOG_LINES)
+    };
+}
+
+function getPersistedModelDownloadTasks() {
+    try {
+        const raw = safeLocalStorageGet(MODEL_DOWNLOAD_TASKS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.warn("Could not read model download tasks:", err);
+        return [];
+    }
+}
+
+function persistModelDownloadTasks() {
+    const tasks = Array.from(modelDownloadTasks.values())
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, MODEL_DOWNLOAD_MAX_PERSISTED_TASKS)
+        .map(task => ({
+            ...task,
+            logs: Array.isArray(task.logs) ? task.logs.slice(-MODEL_DOWNLOAD_MAX_LOG_LINES) : []
+        }));
+    safeLocalStorageSet(MODEL_DOWNLOAD_TASKS_STORAGE_KEY, JSON.stringify(tasks), { silent: true });
+}
+
+function restoreModelDownloadTasks() {
+    const restored = getPersistedModelDownloadTasks()
+        .map(task => normalizeModelDownloadTask(task, { markInterrupted: true }))
+        .filter(task => task.modelId);
+    restored.forEach(task => modelDownloadTasks.set(task.id, task));
+    if (restored.length > 0) {
+        peekModelDownloadButton(MODEL_DOWNLOAD_FINISH_PEEK_MS);
+        renderModelDownloadMenu();
+    }
+}
+
 function hasActiveModelDownloads() {
     return Array.from(modelDownloadTasks.values()).some(task => task.state === "active");
 }
 
+function hasAttentionModelDownloads() {
+    return Array.from(modelDownloadTasks.values()).some(task => ["active", "paused", "error", "interrupted"].includes(task.state));
+}
+
 function isModelDownloadActive(modelId) {
     return modelDownloadTasks.get(getModelDownloadTaskId(modelId))?.state === "active";
+}
+
+function isModelDownloadTaskCancelled(id) {
+    return ["paused", "stopped"].includes(getModelDownloadTaskState(id));
+}
+
+function setModelDownloadAbortController(id, controller) {
+    if (!id) return;
+    if (controller) modelDownloadAbortControllers.set(id, controller);
+    else modelDownloadAbortControllers.delete(id);
+}
+
+function clearModelDownloadAbortController(id) {
+    modelDownloadAbortControllers.delete(id);
+}
+
+function peekModelDownloadButton(durationMs = MODEL_DOWNLOAD_START_PEEK_MS) {
+    if (!modelDownloadMenuWrap) return;
+    if (modelDownloadPeekTimer) {
+        window.clearTimeout(modelDownloadPeekTimer);
+        modelDownloadPeekTimer = null;
+    }
+    modelDownloadMenuWrap.classList.add("peek");
+    modelDownloadPeekTimer = window.setTimeout(() => {
+        modelDownloadMenuWrap?.classList.remove("peek");
+        modelDownloadPeekTimer = null;
+    }, durationMs);
 }
 
 function closeModelDownloadMenu() {
@@ -1531,7 +1802,7 @@ function scheduleModelDownloadAutoHide() {
         window.clearTimeout(modelDownloadCloseTimer);
         modelDownloadCloseTimer = null;
     }
-    if (hasActiveModelDownloads()) return;
+    if (hasAttentionModelDownloads()) return;
     modelDownloadCloseTimer = window.setTimeout(() => {
         if (modelDownloadPanel && !modelDownloadPanel.hidden) return;
         modelDownloadMenuWrap?.setAttribute("hidden", "");
@@ -1540,15 +1811,21 @@ function scheduleModelDownloadAutoHide() {
 
 function renderModelDownloadMenu() {
     if (!modelDownloadMenuWrap || !modelDownloadBtn || !modelDownloadList) return;
+    const wasPanelOpen = Boolean(modelDownloadPanel && !modelDownloadPanel.hidden);
     const tasks = Array.from(modelDownloadTasks.values())
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     const activeTasks = tasks.filter(task => task.state === "active");
     const errorTasks = tasks.filter(task => task.state === "error");
+    const pausedTasks = tasks.filter(task => ["paused", "interrupted"].includes(task.state));
     const visible = tasks.length > 0;
     modelDownloadMenuWrap.hidden = !visible;
     if (!visible) {
         closeModelDownloadMenu();
         return;
+    }
+    if (wasPanelOpen && modelDownloadPanel) {
+        modelDownloadPanel.hidden = false;
+        modelDownloadBtn.setAttribute("aria-expanded", "true");
     }
 
     const averageProgress = activeTasks.length
@@ -1562,27 +1839,49 @@ function renderModelDownloadMenu() {
     if (modelDownloadLabel) {
         modelDownloadLabel.textContent = activeTasks.length > 0
             ? `Downloading ${roundedProgress}%`
-            : errorTasks.length > 0 ? "Download failed" : "Downloaded";
+            : errorTasks.length > 0 ? "Download failed" : tasks[0]?.state === "paused" ? "Download paused" : tasks[0]?.state === "interrupted" ? "Resume download" : "Downloaded";
     }
     if (modelDownloadCount) modelDownloadCount.textContent = String(activeTasks.length || tasks.length);
     if (modelDownloadSummary) {
         modelDownloadSummary.textContent = activeTasks.length > 0
             ? `${activeTasks.length} active model ${activeTasks.length === 1 ? "download" : "downloads"}`
-            : errorTasks.length > 0 ? `${errorTasks.length} model ${errorTasks.length === 1 ? "needs" : "need"} attention` : "All model downloads finished";
+            : errorTasks.length > 0
+                ? `${errorTasks.length} model ${errorTasks.length === 1 ? "needs" : "need"} attention`
+                : pausedTasks.length > 0
+                    ? `${pausedTasks.length} model ${pausedTasks.length === 1 ? "is" : "are"} waiting to resume`
+                    : "All model downloads finished";
     }
 
     modelDownloadList.replaceChildren(...tasks.map(task => {
-        const item = document.createElement("div");
+        const item = document.createElement("article");
         item.className = `model-download-item model-download-item-${task.state || "active"}`;
+        item.dataset.downloadTaskId = task.id;
         const percent = Math.round(getModelDownloadPercent(task));
+        const isExpanded = expandedModelDownloadTaskId === task.id;
         item.style.setProperty("--download-progress", `${percent}%`);
+
+        const main = document.createElement("button");
+        main.className = "model-download-item-main";
+        main.type = "button";
+        main.dataset.downloadToggle = task.id;
+        main.setAttribute("aria-expanded", String(isExpanded));
 
         const top = document.createElement("div");
         top.className = "model-download-item-top";
         const name = document.createElement("strong");
         name.textContent = task.modelId || "Ollama model";
         const state = document.createElement("span");
-        state.textContent = task.state === "done" ? "Done" : task.state === "error" ? "Failed" : percent > 0 ? `${percent}%` : "Starting";
+        state.textContent = task.state === "done"
+            ? "Done"
+            : task.state === "error"
+                ? "Failed"
+                : task.state === "paused"
+                    ? "Paused"
+                    : task.state === "stopped"
+                        ? "Stopped"
+                        : task.state === "interrupted"
+                            ? "Interrupted"
+                            : percent > 0 ? `${percent}%` : "Starting";
         top.append(name, state);
 
         const detail = document.createElement("small");
@@ -1594,73 +1893,242 @@ function renderModelDownloadMenu() {
         const fill = document.createElement("span");
         bar.appendChild(fill);
 
-        item.append(top, detail, bar);
+        main.append(top, detail, bar);
+        item.appendChild(main);
+
+        if (isExpanded) {
+            item.appendChild(renderModelDownloadDetails(task));
+        }
         return item;
     }));
 
     scheduleModelDownloadAutoHide();
 }
 
-function startModelDownloadTask(modelId, detail = "Starting download") {
+function renderModelDownloadDetails(task) {
+    const details = document.createElement("div");
+    details.className = "model-download-expanded";
+
+    const metrics = document.createElement("div");
+    metrics.className = "model-download-metrics";
+    const percent = Math.round(getModelDownloadPercent(task));
+    const downloaded = formatModelDownloadBytes(task.completed);
+    const total = formatModelDownloadBytes(task.total);
+    metrics.textContent = total ? `${percent}% - ${downloaded || "0 B"} of ${total}` : `${percent}%`;
+
+    const log = document.createElement("div");
+    log.className = "model-download-log";
+    const lines = Array.isArray(task.logs) ? task.logs.slice(-12) : [];
+    if (lines.length === 0) {
+        const empty = document.createElement("small");
+        empty.textContent = "No process logs yet.";
+        log.appendChild(empty);
+    } else {
+        lines.forEach(line => {
+            const row = document.createElement("p");
+            row.dataset.level = line.level || "info";
+            const time = document.createElement("span");
+            time.textContent = getModelDownloadLogTime(line.time);
+            const message = document.createElement("code");
+            message.textContent = line.message;
+            row.append(time, message);
+            log.appendChild(row);
+        });
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "model-download-actions";
+    const state = task.state || "active";
+    if (state === "active") {
+        actions.append(
+            createModelDownloadAction(task.id, "pause", "Pause"),
+            createModelDownloadAction(task.id, "stop", "Stop", "danger")
+        );
+    } else if (["paused", "interrupted", "error"].includes(state)) {
+        actions.append(
+            createModelDownloadAction(task.id, "resume", "Resume"),
+            createModelDownloadAction(task.id, "stop", "Stop", "danger")
+        );
+    } else {
+        actions.append(createModelDownloadAction(task.id, "clear", "Clear"));
+    }
+
+    details.append(metrics, log, actions);
+    return details;
+}
+
+function createModelDownloadAction(taskId, action, label, tone = "") {
+    const button = document.createElement("button");
+    button.className = `model-download-action${tone ? ` ${tone}` : ""}`;
+    button.type = "button";
+    button.dataset.downloadAction = action;
+    button.dataset.downloadTaskId = taskId;
+    button.textContent = label;
+    return button;
+}
+
+function updateModelDownloadTask(id, patch = {}, options = {}) {
+    const existing = modelDownloadTasks.get(id);
+    if (!existing) return;
+    const nextLogs = Array.isArray(patch.logs)
+        ? patch.logs.map(normalizeModelDownloadLog).filter(Boolean)
+        : Array.isArray(existing.logs) ? [...existing.logs] : [];
+    const logMessage = String(options.log || "").trim();
+    if (logMessage) {
+        nextLogs.push({
+            time: Date.now(),
+            level: options.level || "info",
+            message: logMessage
+        });
+    }
+    const next = {
+        ...existing,
+        ...patch,
+        state: normalizeModelDownloadState(patch.state || existing.state || "active"),
+        logs: nextLogs.slice(-MODEL_DOWNLOAD_MAX_LOG_LINES),
+        updatedAt: Date.now()
+    };
+    modelDownloadTasks.set(id, next);
+    persistModelDownloadTasks();
+    renderModelDownloadMenu();
+}
+
+function startModelDownloadTask(modelId, detail = "Starting download", options = {}) {
     const id = getModelDownloadTaskId(modelId);
+    const existing = modelDownloadTasks.get(id);
     modelDownloadTasks.set(id, {
+        ...existing,
         id,
         modelId,
+        requestId: String(options.requestId || existing?.requestId || ""),
         state: "active",
         status: detail,
         detail,
-        completed: 0,
-        total: 0,
-        progress: 0,
-        startedAt: Date.now(),
-        updatedAt: Date.now()
+        completed: options.resume ? Number(existing?.completed) || 0 : 0,
+        total: options.resume ? Number(existing?.total) || 0 : 0,
+        progress: options.resume ? Number(existing?.progress) || 0 : 0,
+        startedAt: options.resume && existing?.startedAt ? existing.startedAt : Date.now(),
+        updatedAt: Date.now(),
+        logs: Array.isArray(existing?.logs) ? existing.logs.slice(-MODEL_DOWNLOAD_MAX_LOG_LINES) : []
     });
     if (modelDownloadCloseTimer) {
         window.clearTimeout(modelDownloadCloseTimer);
         modelDownloadCloseTimer = null;
     }
-    renderModelDownloadMenu();
+    updateModelDownloadTask(id, {}, { log: detail });
+    peekModelDownloadButton(MODEL_DOWNLOAD_START_PEEK_MS);
     return id;
 }
 
-function updateModelDownloadTask(id, patch = {}) {
-    const existing = modelDownloadTasks.get(id);
-    if (!existing) return;
-    const next = {
-        ...existing,
-        ...patch,
-        state: patch.state || existing.state || "active",
-        updatedAt: Date.now()
-    };
-    modelDownloadTasks.set(id, next);
-    renderModelDownloadMenu();
-}
-
 function finishModelDownloadTask(id, { ok = true, detail = "" } = {}) {
+    clearModelDownloadAbortController(id);
     updateModelDownloadTask(id, {
         state: ok ? "done" : "error",
         progress: ok ? 100 : undefined,
         detail: detail || (ok ? "Installed" : "Download failed")
+    }, {
+        log: detail || (ok ? "Model installed." : "Download failed."),
+        level: ok ? "success" : "error"
     });
+    peekModelDownloadButton(MODEL_DOWNLOAD_FINISH_PEEK_MS);
 }
 
 function applyOllamaPullProgress(modelId, data = {}) {
     const id = getModelDownloadTaskId(modelId);
+    if (!modelDownloadTasks.has(id)) {
+        startModelDownloadTask(modelId, "Receiving Ollama progress");
+    }
+    const task = modelDownloadTasks.get(id);
+    if (isModelDownloadTaskCancelled(id)) return;
     const status = String(data.status || "").trim();
     const digest = String(data.digest || "").replace(/^sha256:/i, "").slice(0, 12);
     const completed = Number(data.completed);
     const total = Number(data.total);
     const hasProgress = Number.isFinite(completed) && Number.isFinite(total) && total > 0;
+    const percent = hasProgress ? Math.round((completed / total) * 100) : 0;
     const detail = digest && hasProgress
         ? `${status || "Pulling layer"} ${digest}`
         : status || "Downloading model";
+    const logMessage = hasProgress
+        ? `${detail} - ${percent}%${formatModelDownloadBytes(completed) && formatModelDownloadBytes(total) ? ` (${formatModelDownloadBytes(completed)} / ${formatModelDownloadBytes(total)})` : ""}`
+        : detail;
     updateModelDownloadTask(id, {
         status,
         detail,
         completed: hasProgress ? completed : undefined,
         total: hasProgress ? total : undefined,
-        progress: hasProgress ? (completed / total) * 100 : undefined
+        progress: hasProgress ? (completed / total) * 100 : undefined,
+        lastLogMessage: logMessage
+    }, {
+        log: task?.lastLogMessage === logMessage ? "" : logMessage,
+        level: data.error ? "error" : data.done || status === "success" ? "success" : "info"
     });
+}
+
+async function requestCancelModelDownload(task) {
+    const controller = modelDownloadAbortControllers.get(task.id);
+    controller?.abort?.();
+    const desktopApi = getFaunaDesktopApi();
+    if (desktopApi?.cancelOllamaPull && task.requestId) {
+        try {
+            await desktopApi.cancelOllamaPull({ requestId: task.requestId, modelId: task.modelId });
+        } catch (err) {
+            console.warn("Could not cancel desktop Ollama pull:", err);
+        }
+    }
+}
+
+function pauseModelDownloadTask(id) {
+    const task = getModelDownloadTask(id);
+    if (!task) return;
+    updateModelDownloadTask(id, {
+        state: "paused",
+        detail: "Paused. Resume to continue the Ollama pull."
+    }, { log: "Download paused.", level: "warning" });
+    if (typeof setLocalModelsStatus === "function") {
+        setLocalModelsStatus("Download paused", "missing");
+    }
+    void requestCancelModelDownload(task);
+}
+
+function stopModelDownloadTask(id) {
+    const task = getModelDownloadTask(id);
+    if (!task) return;
+    updateModelDownloadTask(id, {
+        state: "stopped",
+        detail: "Stopped by user."
+    }, { log: "Download stopped.", level: "warning" });
+    if (typeof setLocalModelsStatus === "function") {
+        setLocalModelsStatus("Download stopped", "missing");
+    }
+    void requestCancelModelDownload(task);
+}
+
+function resumeModelDownloadTask(id) {
+    const task = getModelDownloadTask(id);
+    if (!task || !task.modelId || task.state === "active") return;
+    if (typeof pullOllamaModel !== "function") {
+        showToast("Model download resume is not ready yet.", "warning");
+        return;
+    }
+    updateModelDownloadTask(id, {
+        state: "active",
+        detail: "Resuming download..."
+    }, { log: "Resume requested." });
+    void pullOllamaModel(task.modelId, { resume: true }).then(result => {
+        if (result?.cancelled) return;
+    }).catch(err => {
+        finishModelDownloadTask(id, { ok: false, detail: err.message });
+        showToast(`Resume failed: ${err.message}`, "error");
+    });
+}
+
+function clearModelDownloadTask(id) {
+    clearModelDownloadAbortController(id);
+    modelDownloadTasks.delete(id);
+    if (expandedModelDownloadTaskId === id) expandedModelDownloadTaskId = "";
+    persistModelDownloadTasks();
+    renderModelDownloadMenu();
 }
 
 modelDownloadBtn?.addEventListener("click", event => {
@@ -1670,11 +2138,48 @@ modelDownloadBtn?.addEventListener("click", event => {
     else closeModelDownloadMenu();
 });
 
+modelDownloadList?.addEventListener("click", event => {
+    const actionButton = event.target.closest("[data-download-action]");
+    if (actionButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = actionButton.dataset.downloadTaskId || "";
+        const action = actionButton.dataset.downloadAction || "";
+        if (action === "pause") pauseModelDownloadTask(id);
+        else if (action === "resume") resumeModelDownloadTask(id);
+        else if (action === "stop") stopModelDownloadTask(id);
+        else if (action === "clear") clearModelDownloadTask(id);
+        return;
+    }
+
+    const toggle = event.target.closest("[data-download-toggle]");
+    if (!toggle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = toggle.dataset.downloadToggle || "";
+    expandedModelDownloadTaskId = expandedModelDownloadTaskId === id ? "" : id;
+    renderModelDownloadMenu();
+});
+
 document.addEventListener("click", event => {
     if (!modelDownloadMenuWrap || modelDownloadMenuWrap.hidden) return;
     if (event.target instanceof Node && modelDownloadMenuWrap.contains(event.target)) return;
     closeModelDownloadMenu();
 });
+
+document.addEventListener("click", event => {
+    if (!changelogMenuWrap || changelogPanel?.hidden) return;
+    if (event.target instanceof Node && changelogMenuWrap.contains(event.target)) return;
+    closeChangelogMenu();
+});
+
+document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    closeModelDownloadMenu();
+    closeChangelogMenu();
+});
+
+restoreModelDownloadTasks();
 
 function getFriendlyError(error, fallbackTitle = "Something went wrong") {
     const rawMessage = error?.message || String(error || fallbackTitle);

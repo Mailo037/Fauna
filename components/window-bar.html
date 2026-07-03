@@ -22,6 +22,27 @@
     </div>
 
     <div class="window-bar-right">
+        <div id="changelogMenuWrap" class="changelog-menu-wrap">
+            <button id="changelogBtn" class="window-bar-icon-btn changelog-btn" type="button" aria-label="Open changelog" aria-expanded="false" aria-controls="changelogPanel" data-tooltip="Changelog">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M8 6h13"></path>
+                    <path d="M8 12h13"></path>
+                    <path d="M8 18h13"></path>
+                    <path d="M3 6h.01"></path>
+                    <path d="M3 12h.01"></path>
+                    <path d="M3 18h.01"></path>
+                </svg>
+            </button>
+            <div id="changelogPanel" class="changelog-panel" hidden>
+                <header class="changelog-panel-head">
+                    <div>
+                        <strong>Changelog</strong>
+                        <small id="changelogSummary">Recent desktop updates</small>
+                    </div>
+                </header>
+                <div id="changelogList" class="changelog-list"></div>
+            </div>
+        </div>
         <div id="modelDownloadMenuWrap" class="model-download-menu-wrap" hidden>
             <button id="modelDownloadBtn" class="model-download-btn" type="button" aria-expanded="false" aria-controls="modelDownloadPanel" data-tooltip="Model downloads">
                 <span class="model-download-icon" aria-hidden="true">

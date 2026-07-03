@@ -3111,12 +3111,13 @@ async function pullOllamaModelThroughDesktop(modelId, requestId) {
     }
 }
 
-async function pullOllamaModelThroughFetch(modelId) {
+async function pullOllamaModelThroughFetch(modelId, options = {}) {
     const res = await ollamaFetch(OLLAMA_PULL_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         desktopTimeoutMs: 30 * 60 * 1000,
-        body: JSON.stringify({ name: modelId, stream: true })
+        body: JSON.stringify({ name: modelId, stream: true }),
+        signal: options.signal
     });
     if (!res.ok) {
         const errorText = await res.text().catch(() => "");
@@ -3134,19 +3135,29 @@ async function pullOllamaModelThroughFetch(modelId) {
     return finalData;
 }
 
-async function pullOllamaModel(modelId) {
-    const taskId = startModelDownloadTask(modelId, "Waiting for Ollama");
+async function pullOllamaModel(modelId, options = {}) {
     const requestId = createOllamaPullRequestId(modelId);
+    const taskId = startModelDownloadTask(modelId, options.resume ? "Resuming Ollama pull" : "Waiting for Ollama", {
+        requestId,
+        resume: Boolean(options.resume)
+    });
+    const controller = new AbortController();
+    setModelDownloadAbortController(taskId, controller);
     try {
         setLocalModelsStatus(`Pulling ${modelId}`, "missing");
         const data = await pullOllamaModelThroughDesktop(modelId, requestId)
-            || await pullOllamaModelThroughFetch(modelId);
+            || await pullOllamaModelThroughFetch(modelId, { signal: controller.signal });
         if (data?.error) throw new Error(data.error);
         finishModelDownloadTask(taskId, { ok: true, detail: "Installed" });
         return data;
     } catch (err) {
+        if (isModelDownloadTaskCancelled(taskId)) {
+            return { cancelled: true, state: getModelDownloadTaskState(taskId) };
+        }
         finishModelDownloadTask(taskId, { ok: false, detail: err.message });
         throw err;
+    } finally {
+        clearModelDownloadAbortController(taskId);
     }
 }
 
@@ -3271,7 +3282,8 @@ async function installMissingOllamaModels() {
         for (const modelId of missing) {
             setLocalModelsStatus(`Pulling ${modelId}`, "missing");
             showToast(`Pulling ${modelId} from Ollama...`, "info");
-            await pullOllamaModel(modelId);
+            const result = await pullOllamaModel(modelId);
+            if (result?.cancelled) return;
         }
 
         await checkOllamaStatus();
