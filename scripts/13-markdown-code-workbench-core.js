@@ -158,12 +158,52 @@ function renderWebsiteReference(url, label = "") {
     return `<a class="website-reference" href="${escapeHtml(reference.url)}" target="_blank" rel="noopener noreferrer" data-tooltip="${escapeHtml(`Open ${displayName}`)}" aria-label="${escapeHtml(ariaLabel)}"><span class="website-reference-icon" aria-hidden="true">${faviconUrl ? `<img class="website-reference-favicon" src="${escapeHtml(faviconUrl)}" alt="" loading="lazy" decoding="async">` : ""}<span class="website-reference-fallback" ${faviconUrl ? "hidden" : ""}>${escapeHtml(reference.host.slice(0, 1).toUpperCase() || "W")}</span></span><span class="website-reference-label">${escapeHtml(displayName)}</span></a>`;
 }
 
+function getHexColorMentionPattern() {
+    return /(^|[^A-Za-z0-9_-])(#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{3}))(?![0-9A-Fa-f])/g;
+}
+
+function getHexColorSwatchMarkup(color) {
+    const safeColor = String(color || "");
+    if (!/^#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(safeColor)) return escapeHtml(safeColor);
+    return `<span class="hex-color-swatch" style="--hex-color-preview: ${escapeHtml(safeColor)};" aria-hidden="true"></span>`;
+}
+
+function decorateHexColorsInFormattedText(html) {
+    return String(html || "").replace(getHexColorMentionPattern(), (_match, prefix, color) => {
+        return `${prefix}<span class="hex-color-token"><span class="hex-color-value">${escapeHtml(color)}</span>${getHexColorSwatchMarkup(color)}</span>`;
+    });
+}
+
+function formatInlineCodeWithHexSwatches(value) {
+    const source = String(value || "");
+    let output = "";
+    let lastIndex = 0;
+
+    const appendCode = text => {
+        if (!text) return;
+        output += `<code>${escapeHtml(text)}</code>`;
+    };
+
+    for (const match of source.matchAll(getHexColorMentionPattern())) {
+        const matchIndex = match.index || 0;
+        const prefix = match[1] || "";
+        const color = match[2] || "";
+        const colorIndex = matchIndex + prefix.length;
+        appendCode(source.slice(lastIndex, colorIndex));
+        output += `<span class="hex-color-token hex-color-token-code"><code>${escapeHtml(color)}</code>${getHexColorSwatchMarkup(color)}</span>`;
+        lastIndex = colorIndex + color.length;
+    }
+
+    appendCode(source.slice(lastIndex));
+    return output || "<code></code>";
+}
+
 function formatInlinePlainText(segment) {
     let safe = escapeHtml(segment);
     safe = safe.replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>");
     safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
     safe = safe.replace(/\*(.+?)\*/g, "<em>$1</em>");
-    return safe;
+    return decorateHexColorsInFormattedText(safe);
 }
 
 function getInlineReferenceCandidates(text) {
@@ -255,7 +295,7 @@ function renderMarkdownLinks(text) {
 function formatInlineMarkdownText(str) {
     return String(str || "").split(/(`[^`\n]+`)/g).map(segment => {
         if (/^`[^`\n]+`$/.test(segment)) {
-            return `<code>${escapeHtml(segment.slice(1, -1))}</code>`;
+            return formatInlineCodeWithHexSwatches(segment.slice(1, -1));
         }
         return renderMarkdownLinks(segment);
     }).join("");

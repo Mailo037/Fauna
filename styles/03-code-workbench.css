@@ -82,6 +82,40 @@
     display: none;
 }
 
+.hex-color-token {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.32em;
+    max-width: 100%;
+    white-space: nowrap;
+    vertical-align: -0.13em;
+}
+
+.hex-color-token-code {
+    gap: 0.24em;
+}
+
+.hex-color-swatch {
+    width: 0.86em;
+    min-width: 0.86em;
+    height: 0.86em;
+    border: 1px solid rgba(255, 255, 255, 0.58);
+    border-radius: 3px;
+    background:
+        linear-gradient(var(--hex-color-preview), var(--hex-color-preview)),
+        conic-gradient(#d7d7d7 25%, #ffffff 0 50%, #d7d7d7 0 75%, #ffffff 0) 0 0 / 6px 6px;
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.28),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="light"] .hex-color-swatch {
+    border-color: rgba(20, 26, 22, 0.38);
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.72),
+        inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
 .code-action-btn,
 .code-run-btn,
 .code-combined-preview-btn {
