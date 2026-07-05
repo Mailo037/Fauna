@@ -134,7 +134,7 @@ function renderFileReference(path, line = "", endLine = "", label = "") {
     ].filter(Boolean).join(" ");
     const extension = getFileReferenceExtension(path);
     const knownEntry = getKnownWorkspaceReferenceEntry(path);
-    const iconLabel = (extension || (knownEntry?.type === "directory" || /[\\/]$/.test(path) ? "dir" : "file")).slice(0, 4).toUpperCase();
+    const iconLabel = (extension || (knownEntry?.type === "directory" || /[\\/]$/.test(path) ? "dir" : "file")).slice(0, 4).toLowerCase();
     const tooltip = [
         path,
         getFileReferenceLineLabel(line, endLine) ? `(${getFileReferenceLineLabel(line, endLine)})` : ""
@@ -553,7 +553,7 @@ const PREVIEW_RUNTIME_ERROR_SHIM = `(() => {
             "box-shadow: 0 18px 48px rgba(127, 29, 29, 0.16);",
             "font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;",
             "}",
-            "#" + ERROR_BOX_ID + " strong { font-size: 12px; letter-spacing: 0; text-transform: uppercase; }",
+            "#" + ERROR_BOX_ID + " strong { font-size: 12px; letter-spacing: 0; text-transform: none; }",
             "#" + ERROR_BOX_ID + " code { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: inherit; }",
             "@media (prefers-color-scheme: dark) {",
             "#" + ERROR_BOX_ID + " { background: rgba(45, 18, 18, 0.96); color: #fecaca; border-color: rgba(248, 113, 113, 0.42); }",

@@ -8,7 +8,7 @@
     <meta name="theme-color" content="#5b7cfa" />
     <link rel="icon" type="image/png" href="favicon.png?v=20260705-brand-icon">
     <link rel="apple-touch-icon" href="favicon.png?v=20260705-brand-icon">
-    <link rel="stylesheet" href="styles.css?v=20260705-changelog-popover-fit">
+    <link rel="stylesheet" href="styles.css?v=20260705-no-caps">
 </head>
 <body>
     <div data-include="components/window-bar.html"></div>
@@ -81,6 +81,23 @@
                         </svg>
                     </div>
                     <h2>No library items</h2>
+                    <p>Upload images, videos, code previews, or reference files you want to reuse across chats.</p>
+                    <div class="library-empty-actions">
+                        <button id="libraryEmptyUploadButton" class="library-empty-btn library-empty-btn-primary" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M12 21V9"></path>
+                                <path d="m7 14 5-5 5 5"></path>
+                                <path d="M5 3h14"></path>
+                            </svg>
+                            <span>Upload item</span>
+                        </button>
+                        <button id="libraryEmptyChatButton" class="library-empty-btn" type="button">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"></path>
+                            </svg>
+                            <span>Back to chat</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -92,6 +109,6 @@
     <div data-include="components/overlays.html"></div>
     <div data-include="components/templates.html"></div>
 
-    <script type="module" src="app-shell.js?v=20260705-changelog-popover"></script>
+    <script type="module" src="app-shell.js?v=20260705-no-caps"></script>
 </body>
 </html>

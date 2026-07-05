@@ -2080,7 +2080,7 @@ body.project-agent-maximized .project-explorer-sidebar {
     font-size: 10px;
     font-weight: 820;
     line-height: 1;
-    text-transform: uppercase;
+    text-transform: none;
 }
 
 .project-page-chat-body {

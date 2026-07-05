@@ -792,9 +792,9 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
 }
 
 function getContextCompactionRoleLabel(role) {
-    if (role === "system") return "SYSTEM";
-    if (role === "assistant") return "ASSISTANT";
-    return "USER";
+    if (role === "system") return "System";
+    if (role === "assistant") return "Assistant";
+    return "User";
 }
 
 function serializeMessagesForContextEstimate(messages = []) {
@@ -1333,6 +1333,12 @@ libraryClearSelectionButton?.addEventListener("click", clearLibrarySelection);
 libraryDeleteSelectedButton?.addEventListener("click", deleteSelectedLibraryItems);
 libraryUploadButton?.addEventListener("click", () => {
     libraryUploadInput?.click();
+});
+libraryEmptyUploadButton?.addEventListener("click", () => {
+    libraryUploadInput?.click();
+});
+libraryEmptyChatButton?.addEventListener("click", () => {
+    setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: true, closeSidebar: true });
 });
 libraryUploadInput?.addEventListener("change", event => {
     void addUploadedFilesToLibrary(event.target.files);
@@ -1938,10 +1944,10 @@ input.addEventListener("paste", e => {
 
 function getAttachmentKindLabel(file) {
     if (file.type?.startsWith("image/")) {
-        return (file.type.split("/")[1] || "image").toUpperCase();
+        return (file.type.split("/")[1] || "image").toLowerCase();
     }
     const extension = file.name.includes(".") ? file.name.split(".").pop() : "";
-    return (extension || file.type || "file").toUpperCase();
+    return (extension || file.type || "file").toLowerCase();
 }
 
 function isCodeLikeAttachment(file) {

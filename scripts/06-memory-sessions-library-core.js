@@ -2010,20 +2010,20 @@ function getProjectFileKind(entry = {}, { parent = false } = {}) {
 
 function getProjectFileIconMarkup(kind = "file", extension = "") {
     const labels = {
-        config: "CFG",
-        css: "CSS",
-        file: extension ? extension.slice(0, 3).toUpperCase() : "FILE",
+        config: "cfg",
+        css: "css",
+        file: extension ? extension.slice(0, 3).toLowerCase() : "file",
         html: "#",
-        javascript: "JS",
+        javascript: "js",
         json: "{}",
-        license: "TXT",
+        license: "txt",
         markdown: "M",
         package: "{}",
-        react: "JSX",
-        svg: "SVG",
+        react: "jsx",
+        svg: "svg",
         terminal: "$",
-        text: "TXT",
-        typescript: "TS"
+        text: "txt",
+        typescript: "ts"
     };
     const svgIcons = {
         audio: '<path d="M9 18V6l10-2v12"></path><circle cx="7" cy="18" r="3"></circle><circle cx="17" cy="16" r="3"></circle>',
@@ -7484,7 +7484,7 @@ async function createUploadedLibraryItem(file, index = 0) {
     const title = file.name || (type === "image" ? "Uploaded image" : type === "video" ? "Uploaded video" : "Uploaded code");
     const sizeLabel = formatLibraryUploadSize(file.size);
     const titleExt = String(title).includes(".") ? String(title).split(".").pop() : "";
-    const extension = getMimeExtension(file.type, titleExt || type).toUpperCase();
+    const extension = getMimeExtension(file.type, titleExt || type).toLowerCase();
     const base = {
         type,
         origin: "upload",

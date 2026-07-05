@@ -3,7 +3,6 @@ import { safeLocalStorageGet, safeLocalStorageSet } from "./storage.js";
 function getInitialTheme(storageKey) {
     const saved = safeLocalStorageGet(storageKey);
     if (saved === "light" || saved === "dark") return saved;
-    if (window.matchMedia?.("(prefers-color-scheme: light)").matches) return "light";
     return "dark";
 }
 

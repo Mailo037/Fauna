@@ -1,6 +1,6 @@
 import { createSidebarController } from "./modules/sidebar.js";
 import { createImageLightbox } from "./modules/lightbox.js";
-import { createThemeController } from "./modules/theme.js";
+import { createThemeController } from "./modules/theme.js?v=20260705-no-caps";
 import { createModelSwitcher } from "./modules/model-switcher.js?v=20260705-side-chat-composer-full";
 import {
     DEFAULT_OPENAI_CHAT_MODEL_OPTIONS,
@@ -16,7 +16,7 @@ import {
     safeLocalStorageRemove
 } from "./modules/storage.js";
 
-const FAUNA_SCRIPT_CHUNK_VERSION = "20260705-changelog-popover";
+const FAUNA_SCRIPT_CHUNK_VERSION = "20260705-no-caps";
 const FAUNA_SCRIPT_DEPENDENCIES_KEY = "__faunaScriptDependencies";
 const FAUNA_SCRIPT_CHUNKS = [
     "./scripts/01-dom-state-feedback.js",

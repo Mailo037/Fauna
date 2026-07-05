@@ -50,7 +50,7 @@
             grid-template-rows: 54px minmax(0, 1fr) auto;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 18px;
+            border-radius: 14px;
             background: var(--bg);
             box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
         }
@@ -157,8 +157,8 @@
             color: var(--dim);
             font-size: 11px;
             font-weight: 820;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
+            text-transform: none;
+            letter-spacing: 0;
         }
 
         .recent-chat {
@@ -170,7 +170,7 @@
             min-height: 48px;
             padding: 8px 10px;
             border: 1px solid transparent;
-            border-radius: 12px;
+            border-radius: 10px;
             background: transparent;
             color: var(--text);
             text-align: left;
@@ -226,11 +226,20 @@
 
         .empty-state {
             display: grid;
-            gap: 8px;
-            padding: 18px 0;
+            gap: 6px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.035);
             color: var(--muted);
-            font-size: 13px;
+            font-size: 12px;
             line-height: 1.45;
+        }
+
+        .empty-state strong {
+            color: var(--text);
+            font-size: 12.5px;
+            line-height: 1.2;
         }
 
         .quick-composer {
@@ -248,7 +257,7 @@
             min-height: 106px;
             padding: 14px 14px 12px;
             border: 1px solid var(--border);
-            border-radius: 22px;
+            border-radius: 16px;
             background: var(--panel);
         }
 
@@ -495,8 +504,8 @@
 
         <main class="quick-main">
             <section class="greeting">
-                <h1>Moin! Was liegt an?</h1>
-                <p>Ask something quick, or jump back into one of your recent chats.</p>
+                <h1>Ready for a quick prompt?</h1>
+                <p>Send a note to the current chat, attach a file, or jump back into recent work.</p>
             </section>
             <section class="recent-list" aria-labelledby="recentHeading">
                 <div id="recentHeading" class="recent-heading">Recent chats</div>
@@ -723,7 +732,7 @@
         function renderRecentChats(items = []) {
             if (!recentChats) return;
             if (!items.length) {
-                recentChats.innerHTML = '<div class="empty-state">No recent chats yet. Start with a quick prompt below.</div>';
+                recentChats.innerHTML = '<div class="empty-state"><strong>No recent chats yet</strong><span>Start with the composer below, or open Fauna for the full workspace.</span></div>';
                 return;
             }
             recentChats.replaceChildren(...items.map(item => {

@@ -402,15 +402,15 @@ function getToolActivitySummary(items, fallbackTitle = "Thinking about") {
 function getToolActivityExtensionLabel(detail = "") {
     const extension = String(detail || "").match(/\.([a-z0-9]+)(?:$|[\s?#])/i)?.[1]?.toLowerCase();
     const labels = {
-        html: "HTML",
-        css: "CSS",
+        html: "html",
+        css: "css",
         js: "Script",
         mjs: "Script",
         cjs: "Script",
-        ts: "TS",
-        jsx: "JSX",
-        tsx: "TSX",
-        json: "JSON",
+        ts: "ts",
+        jsx: "jsx",
+        tsx: "tsx",
+        json: "json",
         md: "Markdown",
         py: "Python",
         ps1: "PowerShell",
@@ -475,7 +475,7 @@ function getImageActivitySettings(options = {}) {
     if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
         parts.push(`${width}x${height}`);
     }
-    if (format) parts.push(format.toUpperCase());
+    if (format) parts.push(format.toLowerCase());
 
     return parts.join(", ");
 }
@@ -877,10 +877,10 @@ function getCodeLanguageLabel(lang, fallback = "") {
         js: "JavaScript",
         javascript: "JavaScript",
         mjs: "JavaScript",
-        jsx: "JSX",
+        jsx: "jsx",
         ts: "TypeScript",
         typescript: "TypeScript",
-        tsx: "TSX",
+        tsx: "tsx",
         py: "Python",
         python: "Python",
         sh: "Shell",
@@ -896,19 +896,19 @@ function getCodeLanguageLabel(lang, fallback = "") {
         batch: "Batch",
         terminal: "Terminal",
         console: "Terminal",
-        html: "HTML",
-        htm: "HTML",
-        xhtml: "HTML",
-        svg: "SVG",
-        css: "CSS",
-        json: "JSON",
+        html: "html",
+        htm: "html",
+        xhtml: "html",
+        svg: "svg",
+        css: "css",
+        json: "json",
         md: "Markdown",
         markdown: "Markdown",
-        sql: "SQL",
-        yaml: "YAML",
-        yml: "YAML"
+        sql: "sql",
+        yaml: "yaml",
+        yml: "yaml"
     };
-    return labels[normalized] || (normalized ? normalized.toUpperCase() : "Code");
+    return labels[normalized] || (normalized ? normalized.toLowerCase() : "Code");
 }
 
 function tokenSpan(kind, value) {
