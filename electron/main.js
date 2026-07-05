@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, protocol, screen, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, protocol, screen, session, shell, Notification } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -91,6 +91,8 @@ let pendingQuickPrompt = "";
 let pendingQuickPayload = null;
 let pendingNewChat = false;
 const activeOllamaPulls = new Map();
+const activeNativeNotifications = new Set();
+const activeTerminalSessions = new Map();
 let updateState = {
   status: "idle",
   message: "Updates ready",
@@ -330,6 +332,123 @@ async function openWorkspaceProjectTerminal(projectPath) {
     }
   }
   return { ok: false, message: "No terminal launcher was available." };
+}
+
+function getTerminalShellLaunch() {
+  if (process.platform === "win32") {
+    if (canLaunchExecutable("pwsh.exe")) {
+      return { command: "pwsh.exe", args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"], newline: "\r\n" };
+    }
+    if (canLaunchExecutable("powershell.exe")) {
+      return { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"], newline: "\r\n" };
+    }
+    return { command: "cmd.exe", args: [], newline: "\r\n" };
+  }
+  const shellPath = process.env.SHELL || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+  return { command: shellPath, args: ["-i"], newline: "\n" };
+}
+
+function sendTerminalSessionEvent(sessionId, payload = {}) {
+  const targetWindow = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  targetWindow?.webContents?.send("fauna:terminal-data", {
+    sessionId,
+    ...payload
+  });
+}
+
+async function startProjectTerminalSession(payload = {}) {
+  const resolvedPath = path.resolve(String(payload.projectPath || ""));
+  if (!resolvedPath || !fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isDirectory()) {
+    return { ok: false, message: "Project folder does not exist." };
+  }
+  const launch = getTerminalShellLaunch();
+  if (!launch.command || !canLaunchExecutable(launch.command)) {
+    return { ok: false, message: "No terminal shell was available." };
+  }
+  const sessionId = `terminal-${Date.now().toString(36)}-${crypto.randomBytes(4).toString("hex")}`;
+  try {
+    const child = spawn(launch.command, launch.args, {
+      cwd: resolvedPath,
+      env: {
+        ...process.env,
+        TERM: process.env.TERM || "xterm-256color"
+      },
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    activeTerminalSessions.set(sessionId, {
+      child,
+      cwd: resolvedPath,
+      command: launch.command,
+      newline: launch.newline
+    });
+    child.stdout?.on("data", chunk => {
+      sendTerminalSessionEvent(sessionId, { type: "stdout", data: String(chunk) });
+    });
+    child.stderr?.on("data", chunk => {
+      sendTerminalSessionEvent(sessionId, { type: "stderr", data: String(chunk) });
+    });
+    child.on("error", error => {
+      sendTerminalSessionEvent(sessionId, { type: "error", data: error.message || String(error) });
+    });
+    child.on("exit", (code, signal) => {
+      activeTerminalSessions.delete(sessionId);
+      sendTerminalSessionEvent(sessionId, {
+        type: "exit",
+        code,
+        signal,
+        data: `\n[terminal exited${Number.isFinite(code) ? ` with code ${code}` : signal ? ` from ${signal}` : ""}]\n`
+      });
+    });
+    sendTerminalSessionEvent(sessionId, {
+      type: "system",
+      data: `Started ${launch.command} in ${resolvedPath}\n`
+    });
+    return {
+      ok: true,
+      sessionId,
+      cwd: resolvedPath,
+      command: launch.command,
+      newline: launch.newline
+    };
+  } catch (error) {
+    return { ok: false, message: error.message || String(error) };
+  }
+}
+
+function writeProjectTerminalSession(payload = {}) {
+  const sessionId = String(payload.sessionId || "");
+  const session = activeTerminalSessions.get(sessionId);
+  if (!session || !session.child || session.child.killed || session.child.stdin?.destroyed) {
+    return { ok: false, message: "Terminal session is not running." };
+  }
+  const data = String(payload.data ?? "");
+  if (!data) return { ok: true };
+  try {
+    session.child.stdin.write(data);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error.message || String(error) };
+  }
+}
+
+function stopProjectTerminalSession(payload = {}) {
+  const sessionId = String(payload.sessionId || "");
+  const session = activeTerminalSessions.get(sessionId);
+  if (!session) return { ok: true };
+  activeTerminalSessions.delete(sessionId);
+  try {
+    session.child.kill();
+  } catch {
+    // The process may already be gone.
+  }
+  return { ok: true };
+}
+
+function stopAllTerminalSessions() {
+  for (const sessionId of activeTerminalSessions.keys()) {
+    stopProjectTerminalSession({ sessionId });
+  }
 }
 
 function runGitCommand(args, cwd, timeoutMs = 30000) {
@@ -1547,7 +1666,8 @@ function configureMediaPermissions() {
     "camera",
     "audioCapture",
     "videoCapture",
-    "display-capture"
+    "display-capture",
+    "notifications"
   ]);
 
   const isAllowed = (webContents, permission) => (
@@ -1734,6 +1854,57 @@ function getTrayImage() {
   const image = nativeImage.createFromPath(iconPath);
   if (!image.isEmpty()) return image.resize({ width: 16, height: 16 });
   return nativeImage.createFromPath(path.join(getAppRoot(), "favicon.png")).resize({ width: 16, height: 16 });
+}
+
+function getNotificationPermissionInfo() {
+  const supported = typeof Notification?.isSupported === "function" ? Notification.isSupported() : Boolean(Notification);
+  return {
+    supported,
+    permission: supported ? "granted" : "unsupported"
+  };
+}
+
+function normalizeNotificationPayload(payload = {}) {
+  const normalized = payload && typeof payload === "object" ? payload : {};
+  const title = String(normalized.title || "Fauna").trim().slice(0, 120) || "Fauna";
+  const body = String(normalized.body || "").trim().slice(0, 500);
+  const tag = String(normalized.tag || "").trim().slice(0, 160);
+  const sessionId = String(normalized.sessionId || "").trim().slice(0, 160);
+  return {
+    title,
+    body,
+    tag,
+    sessionId,
+    silent: normalized.silent !== false
+  };
+}
+
+function showNativeNotification(payload = {}) {
+  const permission = getNotificationPermissionInfo();
+  if (!permission.supported) {
+    return { ok: false, ...permission, message: "Native notifications are not supported on this system." };
+  }
+
+  const normalized = normalizeNotificationPayload(payload);
+  const notification = new Notification({
+    title: normalized.title,
+    body: normalized.body,
+    silent: normalized.silent,
+    icon: getAppIconPath()
+  });
+
+  activeNativeNotifications.add(notification);
+  notification.once("close", () => activeNativeNotifications.delete(notification));
+  notification.once("failed", () => activeNativeNotifications.delete(notification));
+  notification.on("click", () => {
+    showMainWindow();
+    sendToRenderer("fauna:notification-clicked", {
+      tag: normalized.tag,
+      sessionId: normalized.sessionId
+    });
+  });
+  notification.show();
+  return { ok: true, ...permission };
 }
 
 function getChatIdFromArgv(argv = []) {
@@ -2099,12 +2270,22 @@ function registerIpc() {
   ipcMain.on("fauna:file-url", (event, filePath) => {
     event.returnValue = selectedFileUrlForPath(filePath);
   });
+  ipcMain.handle("fauna:clipboard-write-text", (_event, value) => {
+    clipboard.writeText(String(value ?? ""));
+    return { ok: true };
+  });
+  ipcMain.handle("fauna:notifications-permission", () => getNotificationPermissionInfo());
+  ipcMain.handle("fauna:notifications-request", () => getNotificationPermissionInfo());
+  ipcMain.handle("fauna:notifications-show", (_event, payload) => showNativeNotification(payload));
   ipcMain.handle("fauna:save-generated-media", (_event, payload) => saveGeneratedMedia(payload));
   ipcMain.handle("fauna:desktop-info", () => getDesktopInfo());
   ipcMain.handle("fauna:projects-choose-folders", () => chooseWorkspaceProjectFolders());
   ipcMain.handle("fauna:projects-save", (_event, projects) => saveWorkspaceProjects(projects));
   ipcMain.handle("fauna:projects-open-path", (_event, projectPath) => openWorkspaceProjectPath(projectPath));
   ipcMain.handle("fauna:projects-open-terminal", (_event, projectPath) => openWorkspaceProjectTerminal(projectPath));
+  ipcMain.handle("fauna:terminal-start", (_event, payload) => startProjectTerminalSession(payload));
+  ipcMain.handle("fauna:terminal-write", (_event, payload) => writeProjectTerminalSession(payload));
+  ipcMain.handle("fauna:terminal-stop", (_event, payload) => stopProjectTerminalSession(payload));
   ipcMain.handle("fauna:projects-create-worktree", (_event, payload) => createWorkspaceProjectWorktree(payload));
   ipcMain.handle("fauna:ollama-status", () => getOllamaStatus());
   ipcMain.handle("fauna:ollama-fetch", (_event, payload) => proxyOllamaRequest(payload));
@@ -2226,6 +2407,7 @@ if (!gotSingleInstanceLock) {
 
 app.on("before-quit", () => {
   app.isQuitting = true;
+  stopAllTerminalSessions();
   if (bridgeProcess && !bridgeProcess.killed) {
     bridgeProcess.kill();
   }

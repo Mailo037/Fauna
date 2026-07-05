@@ -1476,6 +1476,39 @@ function getGeneratedMediaCopyText(url, fallbackText) {
     return MEDIA_DATA_URL_PREFIX_RE.test(String(url || "")) ? fallbackText : (url || fallbackText);
 }
 
+function isContextCompactionMessage(message) {
+    return Boolean(
+        message
+        && typeof message === "object"
+        && message.contextCompaction
+        && message.contextCompaction.type === CONTEXT_COMPACTION_MESSAGE_TYPE
+    );
+}
+
+function cloneContextCompactionMetadata(metadata) {
+    if (!metadata || typeof metadata !== "object") return null;
+    return {
+        type: CONTEXT_COMPACTION_MESSAGE_TYPE,
+        summary: String(metadata.summary || ""),
+        nextStep: String(metadata.nextStep || ""),
+        carryForward: Array.isArray(metadata.carryForward)
+            ? metadata.carryForward.map(item => String(item || "")).filter(Boolean).slice(0, 16)
+            : [],
+        originalMessageCount: Number(metadata.originalMessageCount || 0) || 0,
+        keptMessageCount: Number(metadata.keptMessageCount || 0) || 0,
+        thresholdPercent: Number(metadata.thresholdPercent || 0) || 0,
+        estimatedTokens: Number(metadata.estimatedTokens || 0) || 0,
+        contextLimit: Number(metadata.contextLimit || 0) || 0,
+        reviewed: Boolean(metadata.reviewed),
+        approved: metadata.approved === undefined ? null : Boolean(metadata.approved),
+        rotations: Number(metadata.rotations || 0) || 0,
+        model: String(metadata.model || ""),
+        criticModel: String(metadata.criticModel || ""),
+        trigger: String(metadata.trigger || ""),
+        createdAt: String(metadata.createdAt || "")
+    };
+}
+
 function cloneConversationHistory(history, { includeImages = true, sanitizeContent = true } = {}) {
     if (!Array.isArray(history)) return [];
     return history
@@ -1510,6 +1543,10 @@ function cloneConversationHistory(history, { includeImages = true, sanitizeConte
             const tokenUsage = normalizeTokenUsage(message.tokenUsage);
             if (tokenUsage) {
                 cloned.tokenUsage = tokenUsage;
+            }
+            const contextCompaction = cloneContextCompactionMetadata(message.contextCompaction);
+            if (contextCompaction) {
+                cloned.contextCompaction = contextCompaction;
             }
             return cloned;
         });

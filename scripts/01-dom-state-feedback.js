@@ -27,13 +27,17 @@ const projectAgentTitle = document.getElementById("projectAgentTitle");
 const projectAgentCollapseBtn = document.getElementById("projectAgentCollapseBtn");
 const projectAgentExpandBtn = document.getElementById("projectAgentExpandBtn");
 const projectAgentResizeHandle = document.getElementById("projectAgentResizeHandle");
+const projectAgentTabs = document.getElementById("projectAgentTabs");
 const projectPanelMenuTab = document.getElementById("projectPanelMenuTab");
 const projectPanelAddTabBtn = document.getElementById("projectPanelAddTabBtn");
+const projectPanelTabMenu = document.getElementById("projectPanelTabMenu");
 const projectFilesTab = document.getElementById("projectFilesTab");
+const projectTerminalTab = document.getElementById("projectTerminalTab");
 const projectActivityTab = document.getElementById("projectActivityTab");
 const projectPageChatTab = document.getElementById("projectPageChatTab");
 const projectMenuPane = document.getElementById("projectMenuPane");
 const projectFilesPane = document.getElementById("projectFilesPane");
+const projectTerminalPane = document.getElementById("projectTerminalPane");
 const projectActivityPane = document.getElementById("projectActivityPane");
 const projectPageChatPane = document.getElementById("projectPageChatPane");
 const projectPageChatLog = document.getElementById("projectPageChatLog");
@@ -49,6 +53,19 @@ const projectExplorerUpBtn = document.getElementById("projectExplorerUpBtn");
 const projectExplorerPath = document.getElementById("projectExplorerPath");
 const projectExplorerFilterInput = document.getElementById("projectExplorerFilterInput");
 const projectExplorerList = document.getElementById("projectExplorerList");
+const projectFileBreadcrumbRoot = document.getElementById("projectFileBreadcrumbRoot");
+const projectFileBreadcrumbName = document.getElementById("projectFileBreadcrumbName");
+const projectFileEmptyState = document.getElementById("projectFileEmptyState");
+const projectFileViewer = document.getElementById("projectFileViewer");
+const projectFileRendered = document.getElementById("projectFileRendered");
+const projectFileCode = document.getElementById("projectFileCode");
+const projectFileMoreBtn = document.getElementById("projectFileMoreBtn");
+const projectFileMoreMenu = document.getElementById("projectFileMoreMenu");
+const projectFileCopyPathBtn = document.getElementById("projectFileCopyPathBtn");
+const projectFileCopyContentBtn = document.getElementById("projectFileCopyContentBtn");
+const projectFileToggleExtendedBtn = document.getElementById("projectFileToggleExtendedBtn");
+const projectFileToggleWrapBtn = document.getElementById("projectFileToggleWrapBtn");
+const projectFileRevealBtn = document.getElementById("projectFileRevealBtn");
 const projectCommandInput = document.getElementById("projectCommandInput");
 const projectCommandRunBtn = document.getElementById("projectCommandRunBtn");
 const projectCommandOutput = document.getElementById("projectCommandOutput");
@@ -121,6 +138,8 @@ const libraryPickerEmpty = document.getElementById("libraryPickerEmpty");
 const libraryPickerClose = document.getElementById("libraryPickerClose");
 const libraryPickerAttach = document.getElementById("libraryPickerAttach");
 const libraryPickerSelectionCount = document.getElementById("libraryPickerSelectionCount");
+const libraryPickerTypeGroup = document.querySelector(".library-picker-type-row");
+const libraryPickerSortGroup = document.querySelector(".library-picker-sort-row");
 const libraryPickerTypeButtons = document.querySelectorAll("[data-library-picker-type]");
 const libraryPickerSortButtons = document.querySelectorAll("[data-library-picker-sort]");
 const fileInput = document.getElementById("fileInput");
@@ -159,6 +178,12 @@ const aiOutputLimitsStatus = document.getElementById("aiOutputLimitsStatus");
 const agentMaxStepsAtATimeInput = document.getElementById("agentMaxStepsAtATimeInput");
 const agentMaxStepsPerRunInput = document.getElementById("agentMaxStepsPerRunInput");
 const agentLoopStatus = document.getElementById("agentLoopStatus");
+const contextCompactionStatus = document.getElementById("contextCompactionStatus");
+const contextCompactionThreshold = document.getElementById("contextCompactionThreshold");
+const contextCompactionThresholdValue = document.getElementById("contextCompactionThresholdValue");
+const contextCompactionReviewToggle = document.getElementById("contextCompactionReviewToggle");
+const contextCompactionReviewStatus = document.getElementById("contextCompactionReviewStatus");
+const contextCompactionRotationLimitInput = document.getElementById("contextCompactionRotationLimitInput");
 const openAiVerbosityStatus = document.getElementById("openAiVerbosityStatus");
 const openAiVerbosityButtons = document.querySelectorAll("[data-ai-verbosity]");
 const wanEndpointInput = document.getElementById("wanEndpointInput");
@@ -350,6 +375,7 @@ let completionSoundEnabled = false;
 let completionOnlyUnfocused = true;
 let completionBackgroundOnly = true;
 let completionSoundVolumeLevel = 0.55;
+let desktopNotificationClickUnsubscribe = null;
 let isOllamaAutoStartEnabled = false;
 let activeTemperature = 0.7;
 let activeMaxOutputTokens = 0;
@@ -358,6 +384,9 @@ let activeOllamaTopK = 40;
 let activeOpenAiVerbosity = "medium";
 let activeAgentMaxStepsAtATime = 4;
 let activeAgentMaxStepsPerRun = 16;
+let activeContextCompactionThresholdPercent = 70;
+let isContextCompactionReviewEnabled = false;
+let activeContextCompactionRotationLimit = 2;
 let isAiCachingEnabled = false;
 const TOKEN_COUNTER_DEBOUNCE_MS = 280;
 const TOKEN_COUNTER_TIMEOUT_MS = 2500;
@@ -382,6 +411,31 @@ const PREVIEW_HTML_LANGS = new Set(["html", "htm", "xhtml", "svg"]);
 const PREVIEW_JS_LANGS = new Set(["js", "javascript", "mjs", "jsx", "ts", "typescript"]);
 const PREVIEW_CSS_LANGS = new Set(["css"]);
 const TERMINAL_COMMAND_LANGS = new Set(["sh", "bash", "shell", "zsh", "fish", "ps1", "powershell", "pwsh", "cmd", "bat", "batch", "terminal", "console"]);
+
+async function writeTextToClipboard(value = "") {
+    const text = String(value ?? "");
+    const desktopClipboard = window.faunaDesktop?.clipboard?.writeText;
+    if (typeof desktopClipboard === "function") {
+        const result = await desktopClipboard(text);
+        if (result?.ok === false) throw new Error(result.message || "Desktop clipboard failed.");
+        return;
+    }
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const temp = document.createElement("textarea");
+    temp.value = text;
+    temp.setAttribute("readonly", "");
+    temp.style.position = "fixed";
+    temp.style.opacity = "0";
+    document.body.appendChild(temp);
+    temp.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(temp);
+    if (!ok) throw new Error("Legacy copy command failed.");
+}
+
 const CODE_DOWNLOAD_EXTENSIONS = {
     html: "html",
     htm: "html",
@@ -422,12 +476,24 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.8";
-const FAUNA_APP_BUILD_ID = "20260703-agent-workspace-release";
+const FAUNA_APP_VERSION = "0.1.9";
+const FAUNA_APP_BUILD_ID = "20260705-terminal-sidebar-composer";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.1.9",
+        date: "2026-07-05",
+        commit: "v0.1.9",
+        title: "Workspace panel and terminal polish",
+        changes: [
+            "Made workspace panel tabs duplicable for files, terminal, and side chat workflows.",
+            "Moved sidebar project and chat controls into compact text-and-chevron headers.",
+            "Added a persistent desktop terminal session inside the workspace panel.",
+            "Matched the workspace side-chat composer to the main chat composer controls."
+        ]
+    },
     {
         version: "0.1.8",
         date: "2026-07-03",
@@ -538,6 +604,9 @@ const OLLAMA_TOP_K_STORAGE_KEY = "faunaOllamaTopK";
 const OPENAI_VERBOSITY_STORAGE_KEY = "faunaOpenAiVerbosity";
 const AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY = "faunaAgentMaxStepsAtATime";
 const AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY = "faunaAgentMaxStepsPerRun";
+const CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY = "faunaContextCompactionThresholdPercent";
+const CONTEXT_COMPACTION_REVIEW_STORAGE_KEY = "faunaContextCompactionReviewEnabled";
+const CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY = "faunaContextCompactionRotationLimit";
 const LOCAL_TASK_REASONING_MODEL_STORAGE_KEY = "faunaLocalTaskReasoningModel";
 const LOCAL_TASK_VISION_MODEL_STORAGE_KEY = "faunaLocalTaskVisionModel";
 const LOCAL_TASK_CODE_MODEL_STORAGE_KEY = "faunaLocalTaskCodeModel";
@@ -545,7 +614,7 @@ const LOCAL_TASK_IMAGE_MODEL_STORAGE_KEY = "faunaLocalTaskImageModel";
 const LOCAL_TASK_VIDEO_MODEL_STORAGE_KEY = "faunaLocalTaskVideoModel";
 const OLLAMA_AUTO_START_STORAGE_KEY = "faunaOllamaAutoStart";
 const ONBOARDING_COMPLETED_STORAGE_KEY = "faunaOnboardingCompletedVersion";
-const ONBOARDING_VERSION = "20260703-onboarding-v1";
+const ONBOARDING_VERSION = "20260704-onboarding-v2";
 const MODEL_DOWNLOAD_TASKS_STORAGE_KEY = "faunaModelDownloadTasks";
 const MODEL_DOWNLOAD_MAX_PERSISTED_TASKS = 8;
 const MODEL_DOWNLOAD_MAX_LOG_LINES = 80;
@@ -559,6 +628,25 @@ const COMPLETION_SOUND_VOLUME_STORAGE_KEY = "faunaCompletionSoundVolume";
 const DESKTOP_FILE_URL_RE = /^(?:fauna-app|fauna-file|file):\/\//i;
 const STREAM_RENDER_THROTTLE_MS = 45;
 const CHAT_AUTO_SCROLL_THRESHOLD = 96;
+const CHAT_INITIAL_RENDER_COUNT = 24;
+const CHAT_HISTORY_RENDER_BATCH_SIZE = 16;
+const CHAT_HISTORY_PRELOAD_SCROLL_PX = 220;
+const CONTEXT_COMPACTION_MESSAGE_TYPE = "context_compaction";
+const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_PERCENT = 70;
+const MIN_CONTEXT_COMPACTION_THRESHOLD_PERCENT = 10;
+const MAX_CONTEXT_COMPACTION_THRESHOLD_PERCENT = 80;
+const DEFAULT_CONTEXT_COMPACTION_ROTATION_LIMIT = 2;
+const MIN_CONTEXT_COMPACTION_ROTATION_LIMIT = 1;
+const MAX_CONTEXT_COMPACTION_ROTATION_LIMIT = 6;
+const CONTEXT_COMPACTION_KEEP_RECENT_MESSAGES = 8;
+const CONTEXT_COMPACTION_AGGRESSIVE_KEEP_RECENT_MESSAGES = 4;
+const CONTEXT_COMPACTION_MIN_HISTORY_MESSAGES = 6;
+const CONTEXT_COMPACTION_LOCAL_DEFAULT_CONTEXT = 8192;
+const CONTEXT_COMPACTION_OPENAI_DEFAULT_CONTEXT = 128000;
+const PROMPT_TIMELINE_MIN_PROMPTS = 5;
+const PROMPT_TIMELINE_MAX_ITEMS = 16;
+const PROMPT_TIMELINE_PROMPT_PREVIEW_CHARS = 96;
+const PROMPT_TIMELINE_RESPONSE_PREVIEW_CHARS = 132;
 const COMPOSER_DRAFT_SAVE_DEBOUNCE_MS = 220;
 const COMPOSER_SAFE_AREA_EXTRA_PX = 36;
 const COMPOSER_SAFE_AREA_DESKTOP_MIN_PX = 172;
@@ -882,6 +970,7 @@ function renderChangelogMenu() {
         subtitle.textContent = `${entry.date} - ${entry.commit}`;
         titleWrap.append(title, subtitle);
         const badge = document.createElement("span");
+        badge.className = "changelog-entry-summary";
         badge.textContent = entry.title;
         const chevron = document.createElement("svg");
         chevron.className = "changelog-entry-chevron";
@@ -1273,6 +1362,10 @@ let activeClarifyingQuestion = null;
 let isChatTitleEditing = false;
 let settingsReturnFocus = null;
 let isChatPinnedToBottom = true;
+let chatRenderWindowStart = 0;
+let chatRenderWindowEnd = 0;
+let chatRenderWindowSessionId = "";
+let isChatHistoryPrepending = false;
 let composerDraftSaveTimer = null;
 let composerDraftRestoreToken = 0;
 let isRestoringComposerDraft = false;
@@ -1313,10 +1406,19 @@ function updateComposerAttachmentLayoutState() {
     return hasAttachments;
 }
 
+function updateComposerChatContentLayoutState() {
+    const hasChatContent = Boolean(chat?.children.length);
+    inputWrapper?.classList.toggle("has-chat-content", hasChatContent);
+    composerPanel?.classList.toggle("has-chat-content", hasChatContent);
+    return hasChatContent;
+}
+
 function scheduleComposerSafeAreaUpdate({ scroll = false, force = false } = {}) {
     updateComposerAttachmentLayoutState();
+    updateComposerChatContentLayoutState();
     window.requestAnimationFrame(() => {
         updateComposerAttachmentLayoutState();
+        updateComposerChatContentLayoutState();
         updateComposerSafeArea();
         if (scroll) {
             scrollChatToBottom({ force, behavior: "auto" });
@@ -1415,6 +1517,8 @@ function setAnimatedSegmentIndicator(group, activeElement) {
 function updateAnimatedSegmentIndicators() {
     setAnimatedSegmentIndicator(libraryFilterGroup, libraryFilterGroup?.querySelector(".library-filter.active"));
     setAnimatedSegmentIndicator(libraryLayoutGroup, libraryLayoutGroup?.querySelector(".library-layout-toggle.active"));
+    setAnimatedSegmentIndicator(libraryPickerTypeGroup, libraryPickerTypeGroup?.querySelector(".library-picker-chip.active"));
+    setAnimatedSegmentIndicator(libraryPickerSortGroup, libraryPickerSortGroup?.querySelector(".library-picker-chip.active"));
     setAnimatedSegmentIndicator(openAiCatalogSortGroup, openAiCatalogSortGroup?.querySelector(".model-catalog-sort-btn.active"));
     setAnimatedSegmentIndicator(providerSegment, providerSegment?.querySelector('.provider-choice[aria-checked="true"]'));
 }
@@ -1429,12 +1533,17 @@ function scheduleAnimatedSegmentIndicators() {
 
 if ("ResizeObserver" in window) {
     const segmentResizeObserver = new ResizeObserver(() => scheduleAnimatedSegmentIndicators());
-    [libraryFilterGroup, libraryLayoutGroup, openAiCatalogSortGroup, providerSegment].forEach(group => {
+    [libraryFilterGroup, libraryLayoutGroup, libraryPickerTypeGroup, libraryPickerSortGroup, openAiCatalogSortGroup, providerSegment].forEach(group => {
         if (group) segmentResizeObserver.observe(group);
     });
 }
 
-chat?.addEventListener("scroll", updateChatAutoScrollState, { passive: true });
+chat?.addEventListener("scroll", () => {
+    updateChatAutoScrollState();
+    if (typeof loadOlderChatMessagesIfNeeded === "function") {
+        loadOlderChatMessagesIfNeeded();
+    }
+}, { passive: true });
 window.addEventListener("resize", () => {
     scheduleAnimatedSegmentIndicators();
     positionVoiceQuickPanel();
@@ -2518,7 +2627,7 @@ function renderErrorCard(target, error, options = {}) {
 
         copyButton.addEventListener("click", async () => {
             try {
-                await navigator.clipboard.writeText(detailText);
+                await writeTextToClipboard(detailText);
                 copyButton.textContent = "Copied";
                 window.setTimeout(() => {
                     copyButton.textContent = "Copy";

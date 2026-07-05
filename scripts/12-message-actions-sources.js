@@ -65,6 +65,8 @@ function createVoiceRecordingPlayer(recording) {
 }
 
 function addRenderNode(text, type, fileArray = [], options = {}) {
+    const target = options.container instanceof Element ? options.container : chat;
+    if (!target) return null;
     const node = document.createElement("div");
     node.className = `message-node ${type}-node`;
     if (Number.isInteger(options.historyIndex) && options.historyIndex >= 0) {
@@ -177,30 +179,24 @@ function addRenderNode(text, type, fileArray = [], options = {}) {
     }
 
     node.appendChild(block);
-    if (options.beforeNode instanceof Node && options.beforeNode.parentElement === chat) {
-        chat.insertBefore(node, options.beforeNode);
+    if (options.beforeNode instanceof Node && options.beforeNode.parentElement === target) {
+        target.insertBefore(node, options.beforeNode);
     } else {
-        chat.appendChild(node);
+        target.appendChild(node);
     }
-    scrollChatToBottom({ force: options.forceScroll === true });
+    if (target === chat) {
+        updateComposerChatContentLayoutState();
+        renderPromptTimeline();
+    }
+    if (options.skipScroll !== true) {
+        scrollChatToBottom({ force: options.forceScroll === true });
+    }
     return bubble;
 }
 
 async function handleCopyButton(copyBtn, rawTextToCopy) {
     try {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(rawTextToCopy);
-        } else {
-            const temp = document.createElement("textarea");
-            temp.value = rawTextToCopy;
-            temp.setAttribute("readonly", "");
-            temp.style.position = "fixed";
-            temp.style.opacity = "0";
-            document.body.appendChild(temp);
-            temp.select();
-            document.execCommand("copy");
-            document.body.removeChild(temp);
-        }
+        await writeTextToClipboard(rawTextToCopy);
         copyBtn.classList.add("copied");
         setTimeout(() => copyBtn.classList.remove("copied"), 1800);
         showToast("Copied.", "success");
@@ -886,6 +882,8 @@ function setupAssistantActions(parentBubbleBlock, rawTextToCopy, {
     if (historyIndex !== null && canFork) {
         actions.appendChild(createAssistantActionButton("fork", "Fork", "Fork chat here"));
     }
+
+    appendTurnDurationAction(actions, historyIndex, parentBubbleBlock);
 
     const completedTime = createMessageActionTime(timestamp, "Response completed at");
     if (completedTime) actions.appendChild(completedTime);

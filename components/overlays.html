@@ -36,7 +36,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
                 <input id="libraryPickerSearch" class="library-picker-search" type="search" autocomplete="off" placeholder="Search Library">
             </label>
-            <div class="library-picker-filter-row" aria-label="Library item type">
+            <div class="library-picker-filter-row library-picker-type-row" aria-label="Library item type">
                 <button class="library-picker-chip active" type="button" data-library-picker-type="all" aria-pressed="true">All</button>
                 <button class="library-picker-chip" type="button" data-library-picker-type="images" aria-pressed="false">Images</button>
                 <button class="library-picker-chip" type="button" data-library-picker-type="videos" aria-pressed="false">Videos</button>
@@ -219,6 +219,30 @@
                                 <input id="agentMaxStepsPerRunInput" class="settings-input settings-number-input ai-call-number-input" type="number" min="1" max="64" step="1" value="16" aria-label="Maximum agent steps per run">
                             </label>
                         </div>
+                    </div>
+                    <div class="settings-control-card settings-control-card-stacked ai-call-settings-card context-compaction-card">
+                        <div class="setting-info">
+                            <span class="setting-title">Context compaction</span>
+                            <span id="contextCompactionStatus" class="setting-desc">Automatically compact long chats before the model runs out of context.</span>
+                        </div>
+                        <div class="settings-range-wrap context-compaction-threshold-wrap">
+                            <span id="contextCompactionThresholdValue" class="setting-value">70%</span>
+                            <input type="range" id="contextCompactionThreshold" min="10" max="80" step="5" value="70" class="param-slider" aria-label="Context compaction threshold">
+                        </div>
+                        <div class="context-compaction-review-row">
+                            <div class="setting-info">
+                                <span class="setting-title">Critical review</span>
+                                <span id="contextCompactionReviewStatus" class="setting-desc">Off. The first summary is used directly.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="contextCompactionReviewToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <label class="settings-field-label context-compaction-rotation-field">
+                            <span>Review rotation limit</span>
+                            <input id="contextCompactionRotationLimitInput" class="settings-input settings-number-input ai-call-number-input" type="number" min="1" max="6" step="1" value="2" aria-label="Context compaction review rotation limit">
+                        </label>
                     </div>
                     <div class="settings-control-card settings-control-card-stacked ai-call-settings-card">
                         <div class="setting-info">
@@ -899,19 +923,23 @@
         <div id="onboardingBody" class="onboarding-body">
             <article class="onboarding-slide active" data-onboarding-slide="0">
                 <div class="onboarding-visual onboarding-visual-workspace" aria-hidden="true">
-                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="44" y="34" width="432" height="232" rx="24" fill="#181818" stroke="#3a3a3a"/>
-                        <rect x="70" y="62" width="116" height="176" rx="14" fill="#242424"/>
-                        <rect x="208" y="64" width="238" height="38" rx="14" fill="#262626"/>
-                        <rect class="onboarding-chat-bubble onboarding-chat-bubble-primary" x="226" y="122" width="172" height="30" rx="13" fill="currentColor" opacity=".78"/>
-                        <rect class="onboarding-chat-bubble onboarding-chat-bubble-secondary" x="226" y="166" width="198" height="42" rx="14" fill="#2f2f2f"/>
-                        <rect x="248" y="221" width="160" height="18" rx="9" fill="#3a3a3a"/>
-                        <circle class="onboarding-pulse" cx="94" cy="88" r="10" fill="currentColor"/>
-                        <rect x="112" y="80" width="50" height="14" rx="7" fill="#4a4a4a"/>
-                        <rect x="84" y="125" width="82" height="14" rx="7" fill="#4a4a4a"/>
-                        <rect x="84" y="154" width="68" height="14" rx="7" fill="#343434"/>
-                        <rect x="84" y="183" width="92" height="14" rx="7" fill="#343434"/>
-                    </svg>
+                    <div class="onboarding-demo-card onboarding-demo-setup">
+                        <div class="onboarding-demo-sidebar">
+                            <span class="onboarding-demo-brand-dot"></span>
+                            <span class="onboarding-demo-line wide"></span>
+                            <span class="onboarding-demo-line"></span>
+                            <span class="onboarding-demo-line short"></span>
+                        </div>
+                        <div class="onboarding-demo-chat">
+                            <div class="onboarding-demo-message primary"></div>
+                            <div class="onboarding-demo-message secondary"></div>
+                            <div class="onboarding-demo-composer">
+                                <span class="onboarding-demo-pill onboarding-demo-pill-local">Ollama local</span>
+                                <span class="onboarding-demo-pill onboarding-demo-pill-openai">OpenAI</span>
+                            </div>
+                        </div>
+                        <span class="onboarding-demo-token">Provider</span>
+                    </div>
                 </div>
                 <div class="onboarding-copy">
                     <h3>Set up the workspace once.</h3>
@@ -931,30 +959,49 @@
 
             <article class="onboarding-slide" data-onboarding-slide="1" hidden>
                 <div class="onboarding-visual onboarding-visual-ollama" data-onboarding-provider-visual="local" aria-hidden="true">
-                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="64" y="48" width="392" height="204" rx="24" fill="#181818" stroke="#3a3a3a"/>
-                        <circle class="onboarding-ollama-mark onboarding-pulse" cx="132" cy="112" r="34" fill="currentColor" opacity=".82"/>
-                        <path d="M116 116c14-30 31-30 45 0" stroke="#101010" stroke-width="12" stroke-linecap="round"/>
-                        <rect x="198" y="86" width="196" height="18" rx="9" fill="#f1f1f1" opacity=".82"/>
-                        <rect x="198" y="119" width="238" height="14" rx="7" fill="#777"/>
-                        <rect x="198" y="154" width="254" height="16" rx="8" fill="#2f2f2f"/>
-                        <rect class="onboarding-progress-fill" x="198" y="154" width="168" height="16" rx="8" fill="currentColor"/>
-                        <rect class="onboarding-action-chip" x="198" y="190" width="102" height="30" rx="15" fill="#2f2f2f"/>
-                        <rect class="onboarding-action-chip onboarding-action-chip-delayed" x="314" y="190" width="102" height="30" rx="15" fill="#2f2f2f"/>
-                    </svg>
+                    <div class="onboarding-demo-card onboarding-demo-service">
+                        <div class="onboarding-demo-service-head">
+                            <span class="onboarding-demo-status-dot"></span>
+                            <strong>Ollama service</strong>
+                            <small>Local</small>
+                        </div>
+                        <div class="onboarding-demo-terminal">
+                            <span>ollama serve</span>
+                            <span class="onboarding-demo-caret"></span>
+                        </div>
+                        <div class="onboarding-demo-model-list">
+                            <div class="onboarding-demo-model-row ready">
+                                <span>qwen3:8b</span>
+                                <small>Ready</small>
+                            </div>
+                            <div class="onboarding-demo-model-row pulling">
+                                <span>moondream</span>
+                                <div class="onboarding-demo-progress"><span></span></div>
+                            </div>
+                            <div class="onboarding-demo-model-row queued">
+                                <span>qwen3-code</span>
+                                <small>Queued</small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="onboarding-visual onboarding-visual-openai" data-onboarding-provider-visual="openai" aria-hidden="true" hidden>
-                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="70" y="48" width="380" height="204" rx="24" fill="#181818" stroke="#3a3a3a"/>
-                        <circle class="onboarding-openai-orbit" cx="142" cy="116" r="44" fill="#262626"/>
-                        <path class="onboarding-openai-knot" d="M142 82c18 9 30 25 30 45s-12 36-30 45c-18-9-30-25-30-45s12-36 30-45Z" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/>
-                        <path class="onboarding-openai-knot onboarding-openai-knot-delayed" d="M107 134c16-12 37-16 56-8 19 7 31 24 35 43-16 12-37 16-56 8-19-7-31-24-35-43Z" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/>
-                        <rect x="218" y="82" width="174" height="18" rx="9" fill="#f1f1f1" opacity=".82"/>
-                        <rect x="218" y="118" width="218" height="14" rx="7" fill="#777"/>
-                        <rect x="218" y="154" width="196" height="40" rx="14" fill="#2b2b2b"/>
-                        <rect class="onboarding-key-cursor" x="238" y="168" width="44" height="12" rx="6" fill="currentColor"/>
-                        <rect x="218" y="212" width="108" height="30" rx="15" fill="#2f2f2f"/>
-                    </svg>
+                    <div class="onboarding-demo-card onboarding-demo-key">
+                        <div class="onboarding-demo-service-head">
+                            <span class="onboarding-demo-status-dot cloud"></span>
+                            <strong>OpenAI key</strong>
+                            <small>Cloud</small>
+                        </div>
+                        <div class="onboarding-demo-key-field">
+                            <span>sk-...</span>
+                            <span class="onboarding-demo-caret"></span>
+                        </div>
+                        <div class="onboarding-demo-key-flow">
+                            <span>Save key</span>
+                            <span>Test API</span>
+                            <span>Ready</span>
+                        </div>
+                    </div>
                 </div>
                 <div class="onboarding-copy" data-onboarding-provider-setup="local">
                     <h3>Make local AI reachable.</h3>
@@ -988,17 +1035,18 @@
 
             <article class="onboarding-slide" data-onboarding-slide="2" hidden>
                 <div class="onboarding-visual onboarding-visual-tools" aria-hidden="true">
-                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="58" y="42" width="404" height="216" rx="26" fill="#181818" stroke="#3a3a3a"/>
-                        <rect class="onboarding-tool-card onboarding-tool-card-1" x="92" y="78" width="104" height="70" rx="18" fill="#262626"/>
-                        <rect class="onboarding-tool-card onboarding-tool-card-2" x="212" y="78" width="104" height="70" rx="18" fill="#262626"/>
-                        <rect class="onboarding-tool-card onboarding-tool-card-3" x="332" y="78" width="104" height="70" rx="18" fill="#262626"/>
-                        <path class="onboarding-tool-icon" d="M122 113h44M144 91v44" stroke="currentColor" stroke-width="12" stroke-linecap="round"/>
-                        <path class="onboarding-tool-icon" d="M248 98h32l14 16-14 16h-32z" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/>
-                        <path class="onboarding-tool-icon" d="M382 92v42M365 113h34" stroke="currentColor" stroke-width="11" stroke-linecap="round"/>
-                        <rect x="96" y="176" width="324" height="14" rx="7" fill="#333"/>
-                        <rect x="96" y="206" width="236" height="14" rx="7" fill="currentColor" opacity=".78"/>
-                    </svg>
+                    <div class="onboarding-demo-card onboarding-demo-routing">
+                        <div class="onboarding-demo-request">Image prompt</div>
+                        <div class="onboarding-demo-route">
+                            <span class="onboarding-demo-route-card vision">Vision</span>
+                            <span class="onboarding-demo-route-card reasoning">Reasoning</span>
+                            <span class="onboarding-demo-route-card code">Code</span>
+                        </div>
+                        <div class="onboarding-demo-notify">
+                            <span class="onboarding-demo-status-dot"></span>
+                            <span>Notify when finished</span>
+                        </div>
+                    </div>
                 </div>
                 <div class="onboarding-copy">
                     <h3>Tune the agent for tasks.</h3>
@@ -1012,14 +1060,18 @@
 
             <article class="onboarding-slide" data-onboarding-slide="3" hidden>
                 <div class="onboarding-visual onboarding-visual-ready" aria-hidden="true">
-                    <svg viewBox="0 0 520 300" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="70" y="44" width="380" height="212" rx="28" fill="#181818" stroke="#3a3a3a"/>
-                        <rect class="onboarding-ready-row" x="108" y="84" width="184" height="34" rx="17" fill="currentColor" opacity=".84"/>
-                        <rect class="onboarding-ready-row onboarding-ready-row-delayed" x="108" y="136" width="260" height="46" rx="18" fill="#2b2b2b"/>
-                        <rect x="152" y="202" width="220" height="32" rx="16" fill="#343434"/>
-                        <circle class="onboarding-pulse" cx="396" cy="218" r="18" fill="currentColor"/>
-                        <path class="onboarding-ready-plus" d="M386 218h20m-10-10v20" stroke="#111" stroke-width="5" stroke-linecap="round"/>
-                    </svg>
+                    <div class="onboarding-demo-card onboarding-demo-ready">
+                        <div class="onboarding-demo-ready-check">Done</div>
+                        <div class="onboarding-demo-final-chat">
+                            <div class="onboarding-demo-message primary"></div>
+                            <div class="onboarding-demo-message secondary"></div>
+                            <div class="onboarding-demo-composer">
+                                <span class="onboarding-demo-pill selected">Ollama local</span>
+                                <span class="onboarding-demo-pill">Library</span>
+                                <span class="onboarding-demo-send">Send</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="onboarding-copy">
                     <h3>You are ready.</h3>

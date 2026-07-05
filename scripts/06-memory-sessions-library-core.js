@@ -208,10 +208,133 @@ function getAgentTaskModeOption(mode = activeAgentTaskMode) {
     return AGENT_TASK_MODES.find(option => option.id === mode) || AGENT_TASK_MODES[2];
 }
 
-function normalizeProjectAgentTab(value) {
+const PROJECT_AGENT_TAB_DEFINITIONS = [
+    {
+        id: "menu",
+        label: "Fauna",
+        paneId: "projectMenuPane",
+        tabId: "projectPanelMenuTab",
+        closeable: false,
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18"></path><path d="M12 3a14 14 0 0 0 0 18"></path></svg>`
+    },
+    {
+        id: "files",
+        label: "Files",
+        paneId: "projectFilesPane",
+        tabId: "projectFilesTab",
+        closeable: true,
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg>`
+    },
+    {
+        id: "terminal",
+        label: "Terminal",
+        paneId: "projectTerminalPane",
+        tabId: "projectTerminalTab",
+        closeable: true,
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 8 4 4-4 4"></path><path d="M13 16h4"></path><rect x="3" y="4" width="18" height="16" rx="2"></rect></svg>`
+    },
+    {
+        id: "activity",
+        label: "Inspect",
+        paneId: "projectActivityPane",
+        tabId: "projectActivityTab",
+        closeable: true,
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path><path d="M8 12h8"></path><path d="M8 16h5"></path></svg>`
+    },
+    {
+        id: "chat",
+        label: "Side chat",
+        paneId: "projectPageChatPane",
+        tabId: "projectPageChatTab",
+        closeable: true,
+        icon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"></path><path d="M8 10h8"></path><path d="M8 14h5"></path></svg>`
+    }
+];
+const PROJECT_AGENT_TAB_DEFINITION_BY_ID = new Map(PROJECT_AGENT_TAB_DEFINITIONS.map(definition => [definition.id, definition]));
+const PROJECT_AGENT_DUPLICABLE_TABS = new Set(["files", "terminal", "chat"]);
+let projectAgentTabInstanceCounter = 0;
+
+function getProjectAgentTabType(value) {
     const clean = String(value || "").trim().toLowerCase();
-    if (clean === "files" || clean === "activity" || clean === "chat") return clean;
+    const type = clean.split(":")[0];
+    return PROJECT_AGENT_TAB_DEFINITION_BY_ID.has(type) ? type : "";
+}
+
+function normalizeProjectAgentTab(value) {
+    const type = getProjectAgentTabType(value);
+    if (type) return type;
     return "menu";
+}
+
+function normalizeProjectAgentTabKey(value) {
+    const text = String(value || "").trim().toLowerCase();
+    const type = getProjectAgentTabType(text);
+    if (!type) return "";
+    if (type === "menu") return "menu";
+    const suffix = text.startsWith(`${type}:`)
+        ? text.slice(type.length + 1).replace(/[^a-z0-9_-]/g, "").slice(0, 40)
+        : "";
+    return suffix ? `${type}:${suffix}` : type;
+}
+
+function createProjectAgentTabKey(tab) {
+    const type = normalizeProjectAgentTab(tab);
+    if (type === "menu") return "menu";
+    projectAgentTabInstanceCounter += 1;
+    return `${type}:${Date.now().toString(36)}-${projectAgentTabInstanceCounter.toString(36)}`;
+}
+
+function getProjectAgentTabDomId(tabKey, definition = getProjectAgentTabDefinition(tabKey)) {
+    const key = normalizeProjectAgentTabKey(tabKey);
+    if (!key || key === definition.id) return definition.tabId;
+    return `${definition.tabId}-${key.replace(/[^a-z0-9_-]/gi, "-")}`;
+}
+
+function getProjectAgentTabDefinition(tab) {
+    return PROJECT_AGENT_TAB_DEFINITION_BY_ID.get(normalizeProjectAgentTab(tab)) || PROJECT_AGENT_TAB_DEFINITIONS[0];
+}
+
+function getProjectAgentTabLabel(definition = {}, tabKey = definition.id) {
+    let label = definition.id === "files" && activeProjectFile?.name
+        ? activeProjectFile.name
+        : (definition.label || "Tab");
+    const key = normalizeProjectAgentTabKey(tabKey);
+    const sameTypeTabs = activeProjectAgentTabs.filter(tab => normalizeProjectAgentTab(tab) === definition.id);
+    if (definition.id !== "menu" && sameTypeTabs.length > 1) {
+        const index = sameTypeTabs.indexOf(key);
+        if (index >= 0) label = `${label} ${index + 1}`;
+    }
+    return label;
+}
+
+function getVisibleProjectAgentTabs() {
+    return normalizeProjectAgentTabs(activeProjectAgentTabs).filter(tab => normalizeProjectAgentTab(tab) !== "menu");
+}
+
+function normalizeProjectAgentTabs(raw) {
+    let values = [];
+    if (Array.isArray(raw)) {
+        values = raw;
+    } else {
+        const text = String(raw || "").trim();
+        if (text) {
+            try {
+                const parsed = JSON.parse(text);
+                values = Array.isArray(parsed) ? parsed : [];
+            } catch {
+                values = text.split(",");
+            }
+        }
+    }
+    const tabs = [];
+    values.forEach(value => {
+        const key = normalizeProjectAgentTabKey(value);
+        if (!key || tabs.includes(key)) return;
+        if (key === "menu" && tabs.includes("menu")) return;
+        tabs.push(key);
+    });
+    if (!tabs.includes("menu")) tabs.unshift("menu");
+    return tabs;
 }
 
 function normalizeProjectExplorerPath(path = ".") {
@@ -230,9 +353,28 @@ function normalizeProjectExplorerPath(path = ".") {
     return parts.join("/") || ".";
 }
 
+function normalizeProjectExplorerExpandedPaths(raw) {
+    let values = [];
+    if (Array.isArray(raw)) {
+        values = raw;
+    } else if (raw) {
+        try {
+            const parsed = JSON.parse(raw);
+            values = Array.isArray(parsed) ? parsed : [];
+        } catch {
+            values = [];
+        }
+    }
+    return new Set(values
+        .map(value => normalizeProjectExplorerPath(value))
+        .filter(value => value && value !== "."));
+}
+
 const PROJECT_AGENT_DEFAULT_WIDTH = 320;
 const PROJECT_AGENT_MIN_WIDTH = 268;
 const PROJECT_AGENT_MAX_WIDTH = 520;
+const PROJECT_CHAT_PREVIEW_LIMIT = 5;
+const PROJECT_CHAT_LIST_STATE_STORAGE_KEY = "faunaProjectChatListState";
 
 function normalizeProjectAgentWidth(value) {
     const width = Number(value);
@@ -240,19 +382,59 @@ function normalizeProjectAgentWidth(value) {
     return Math.min(PROJECT_AGENT_MAX_WIDTH, Math.max(PROJECT_AGENT_MIN_WIDTH, Math.round(width)));
 }
 
+function normalizeProjectChatListState(raw) {
+    let parsed = {};
+    if (raw && typeof raw === "object") {
+        parsed = raw;
+    } else if (raw) {
+        try {
+            parsed = JSON.parse(String(raw));
+        } catch {
+            parsed = {};
+        }
+    }
+    return {
+        collapsed: new Set(Array.isArray(parsed.collapsed) ? parsed.collapsed.map(value => String(value || "").trim()).filter(Boolean) : []),
+        expanded: new Set(Array.isArray(parsed.expanded) ? parsed.expanded.map(value => String(value || "").trim()).filter(Boolean) : [])
+    };
+}
+
 let activeProjectSortMode = normalizeProjectSortMode(safeLocalStorageGet(WORKSPACE_PROJECT_SORT_STORAGE_KEY));
 let activeAgentTaskMode = normalizeAgentTaskMode(safeLocalStorageGet(AGENT_TASK_MODE_STORAGE_KEY));
-let activeProjectAgentTab = normalizeProjectAgentTab(safeLocalStorageGet(PROJECT_AGENT_TAB_STORAGE_KEY));
-let activeProjectExplorerPath = normalizeProjectExplorerPath(safeLocalStorageGet(PROJECT_EXPLORER_PATH_STORAGE_KEY));
+let activeProjectAgentTab = normalizeProjectAgentTabKey(safeLocalStorageGet(PROJECT_AGENT_TAB_STORAGE_KEY)) || "menu";
+let activeProjectAgentTabs = normalizeProjectAgentTabs(safeLocalStorageGet(PROJECT_AGENT_TABS_STORAGE_KEY));
+if (!activeProjectAgentTabs.includes(activeProjectAgentTab)) activeProjectAgentTab = activeProjectAgentTabs[0] || "menu";
+let activeProjectExplorerPath = ".";
+let activeProjectExplorerExpandedPaths = normalizeProjectExplorerExpandedPaths(safeLocalStorageGet(PROJECT_EXPLORER_EXPANDED_PATHS_STORAGE_KEY));
+let activeProjectFile = null;
+let activeProjectFileExtendedView = safeLocalStorageGet(PROJECT_FILE_EXTENDED_VIEW_STORAGE_KEY) !== "false";
+let activeProjectFileLineWrap = safeLocalStorageGet(PROJECT_FILE_LINE_WRAP_STORAGE_KEY) === "true";
 let activeProjectAgentWidth = normalizeProjectAgentWidth(safeLocalStorageGet(PROJECT_AGENT_WIDTH_STORAGE_KEY));
 const storedProjectAgentCollapsed = safeLocalStorageGet(PROJECT_AGENT_COLLAPSED_STORAGE_KEY);
 let isProjectAgentCollapsed = storedProjectAgentCollapsed ? storedProjectAgentCollapsed === "true" : true;
 let isProjectAgentMaximized = safeLocalStorageGet(PROJECT_AGENT_MAXIMIZED_STORAGE_KEY) === "true";
+let projectTerminalLines = [];
+let projectTerminalSessionId = "";
+let projectTerminalSessionRootId = "";
+let projectTerminalSessionNewline = "\n";
+let projectTerminalSessionStarting = false;
+let projectTerminalSessionBuffer = "";
+let projectTerminalSessionDraft = "";
+let projectTerminalDataUnsubscribe = null;
+let projectChatListState = normalizeProjectChatListState(safeLocalStorageGet(PROJECT_CHAT_LIST_STATE_STORAGE_KEY));
 let projectExplorerRootId = "";
 let currentProjectExplorerResult = { entries: [], truncated: false };
+let projectExplorerLoadingPath = "";
 let agentActivityEvents = [];
 let projectPageChatRootId = "";
 let projectPageChatHistory = [];
+const projectPageChatStates = new Map();
+let activeProjectGitInfo = null;
+let activeProjectGitInfoRootId = "";
+let activeProjectGitRequestId = 0;
+let composerBranchMenu = null;
+let composerBranchSearchInput = null;
+let composerBranchSearchQuery = "";
 
 function getProjectSortOption(mode = activeProjectSortMode) {
     return PROJECT_SORT_OPTIONS.find(option => option.id === mode) || PROJECT_SORT_OPTIONS[0];
@@ -451,7 +633,7 @@ function getActiveWorkspaceProjectSystemPrompt(sessionId = activeSessionId) {
     const branch = root.type === "worktree" && root.branch ? ` Branch: ${root.branch}.` : "";
     const instructions = getProjectInstructionsForRoot(root);
     return [
-        `Active project: ${root.name}. Root path: ${root.path}.${branch} Local file tools and terminal commands are scoped to this selected ${root.type === "worktree" ? "worktree" : "project folder"}. Use relative paths from the project root by default. Create, edit, read, search, and run commands inside this root unless the user explicitly chooses another project.`,
+        `Active project: ${root.name}. Root path: ${root.path}.${branch} Local file tools and terminal commands are scoped to this selected ${root.type === "worktree" ? "worktree" : "project folder"}. Use relative paths from the project root by default. Create, edit, read, search, and run commands inside this root unless the user explicitly chooses another project. If the user asks for a local system terminal task, such as checking processes or closing a specific app, use terminal commands when the current desktop access policy allows it; prefer targeted, graceful commands and do not close unrelated apps unless explicitly requested.`,
         instructions ? `Persistent project instructions:\n${instructions}` : ""
     ].filter(Boolean).join("\n\n");
 }
@@ -470,17 +652,90 @@ function getActiveProjectLabel() {
     return getSessionProjectRoot()?.name || "No project";
 }
 
+function getActiveProjectGitInfo(root = getSessionProjectRoot()) {
+    return root && activeProjectGitInfoRootId === root.id ? activeProjectGitInfo : null;
+}
+
+function normalizeProjectGitInfo(info = {}, root = getSessionProjectRoot()) {
+    const dirtyCount = Number(info.dirtyCount);
+    return {
+        rootId: root?.id || "",
+        isRepo: info.isRepo === true,
+        unavailable: info.unavailable === true,
+        branch: String(info.branch || "").trim(),
+        detached: info.detached === true,
+        head: String(info.head || "").trim(),
+        upstream: String(info.upstream || "").trim(),
+        ahead: Number.isFinite(Number(info.ahead)) ? Number(info.ahead) : 0,
+        behind: Number.isFinite(Number(info.behind)) ? Number(info.behind) : 0,
+        dirtyCount: Number.isFinite(dirtyCount) ? dirtyCount : 0,
+        error: String(info.error || "").trim(),
+        branches: Array.isArray(info.branches)
+            ? info.branches
+                .map(branch => ({
+                    name: String(branch?.name || "").trim(),
+                    type: String(branch?.type || "local").trim() === "remote" ? "remote" : "local",
+                    current: branch?.current === true,
+                    upstream: String(branch?.upstream || "").trim()
+                }))
+                .filter(branch => branch.name)
+            : []
+    };
+}
+
+function setActiveProjectGitInfo(root, info = {}) {
+    activeProjectGitInfoRootId = root?.id || "";
+    activeProjectGitInfo = root ? normalizeProjectGitInfo(info, root) : null;
+    return activeProjectGitInfo;
+}
+
+function formatGitDirtyText(count = 0) {
+    const value = Math.max(0, Number(count) || 0);
+    if (!value) return "clean";
+    return `${value} changed`;
+}
+
+function formatGitUncommittedText(count = 0) {
+    const value = Math.max(0, Number(count) || 0);
+    if (!value) return "Clean working tree";
+    return `Uncommitted: ${value} ${value === 1 ? "file" : "files"}`;
+}
+
+function getGitBranchDisplayLabel(info = null) {
+    if (!info?.isRepo) return "";
+    if (info.branch) return info.branch;
+    if (info.detached) return info.head ? `detached ${info.head}` : "Detached HEAD";
+    return "Git repo";
+}
+
+function getComposerBranchTooltip(root = getSessionProjectRoot(), info = getActiveProjectGitInfo(root)) {
+    if (!root) return "Choose a project first";
+    if (!hasWorkspaceBridgeAccess()) return "Connect the Local Workspace Bridge to read Git branches";
+    if (!info) return "Checking Git connection";
+    if (info.unavailable) return info.error ? `Git unavailable: ${info.error}` : "Git unavailable";
+    if (!info.isRepo) return "No .git repository found for this project";
+    const branchLabel = getGitBranchDisplayLabel(info);
+    const sync = [
+        info.upstream ? `upstream ${info.upstream}` : "",
+        info.ahead ? `${info.ahead} ahead` : "",
+        info.behind ? `${info.behind} behind` : ""
+    ].filter(Boolean).join(", ");
+    return [`Git connected: ${branchLabel}`, formatGitDirtyText(info.dirtyCount), sync].filter(Boolean).join(" / ");
+}
+
 function getComposerBranchLabel(root = getSessionProjectRoot()) {
     if (!root) return "No branch";
-    if (root.branch) return root.branch;
-    const summaryBranch = String(projectBranchSummary?.textContent || "").split("/")[0]?.trim();
-    return summaryBranch && !/no project selected|git status unavailable/i.test(summaryBranch)
-        ? summaryBranch
-        : "main";
+    if (!hasWorkspaceBridgeAccess()) return "Git offline";
+    const info = getActiveProjectGitInfo(root);
+    if (!info) return root.branch || "Checking Git";
+    if (info.unavailable) return "Git unavailable";
+    if (!info.isRepo) return "No Git repo";
+    return getGitBranchDisplayLabel(info);
 }
 
 function updateComposerProjectContextBar() {
     const root = getSessionProjectRoot();
+    const gitInfo = getActiveProjectGitInfo(root);
     if (composerLocalWorkBtn) {
         const localActive = Boolean(root || isWorkspaceBridgeEnabled);
         composerLocalWorkBtn.classList.toggle("active", localActive);
@@ -491,12 +746,414 @@ function updateComposerProjectContextBar() {
     }
     if (composerBranchBtn) {
         composerBranchBtn.disabled = !root;
-        composerBranchBtn.classList.toggle("active", Boolean(root));
-        composerBranchBtn.dataset.tooltip = root
-            ? "Change project or worktree"
-            : "Choose a project first";
+        composerBranchBtn.classList.toggle("active", Boolean(root && gitInfo?.isRepo));
+        composerBranchBtn.dataset.gitState = !root
+            ? "none"
+            : !hasWorkspaceBridgeAccess()
+                ? "offline"
+                : !gitInfo
+                    ? "loading"
+                    : gitInfo.unavailable
+                        ? "unavailable"
+                        : gitInfo.isRepo
+                            ? "connected"
+                            : "missing";
+        composerBranchBtn.dataset.tooltip = getComposerBranchTooltip(root, gitInfo);
+        composerBranchBtn.setAttribute("aria-label", getComposerBranchTooltip(root, gitInfo));
     }
     if (composerBranchLabel) composerBranchLabel.textContent = getComposerBranchLabel(root);
+}
+
+function getComposerBranchMenu() {
+    if (composerBranchMenu) return composerBranchMenu;
+    composerBranchMenu = document.createElement("div");
+    composerBranchMenu.id = "composerBranchMenu";
+    composerBranchMenu.className = "composer-branch-menu";
+    composerBranchMenu.setAttribute("role", "dialog");
+    composerBranchMenu.setAttribute("aria-label", "Git branches");
+    composerBranchMenu.hidden = true;
+    composerBranchMenu.addEventListener("click", event => event.stopPropagation());
+    document.body.appendChild(composerBranchMenu);
+    return composerBranchMenu;
+}
+
+function closeComposerBranchMenu() {
+    if (!composerBranchMenu || !composerBranchBtn) return;
+    composerBranchMenu.hidden = true;
+    composerBranchBtn.setAttribute("aria-expanded", "false");
+}
+
+function positionComposerBranchMenu() {
+    if (!composerBranchMenu || !composerBranchBtn || composerBranchMenu.hidden) return;
+    const viewportWidth = document.documentElement.clientWidth || window.innerWidth || 0;
+    const viewportHeight = document.documentElement.clientHeight || window.innerHeight || 0;
+    const viewportMargin = 10;
+    const anchorRect = composerBranchBtn.getBoundingClientRect();
+    const maxAvailableWidth = Math.max(236, viewportWidth - (viewportMargin * 2));
+    const menuWidth = Math.min(340, maxAvailableWidth);
+    const maxMenuHeight = Math.max(220, Math.min(430, viewportHeight - (viewportMargin * 2)));
+
+    composerBranchMenu.style.position = "fixed";
+    composerBranchMenu.style.width = `${menuWidth}px`;
+    composerBranchMenu.style.maxHeight = `${maxMenuHeight}px`;
+    composerBranchMenu.style.right = "auto";
+    composerBranchMenu.style.bottom = "auto";
+    composerBranchMenu.style.left = `${Math.min(Math.max(viewportMargin, anchorRect.left), viewportWidth - menuWidth - viewportMargin)}px`;
+    composerBranchMenu.style.top = "0px";
+
+    const measuredHeight = Math.min(composerBranchMenu.getBoundingClientRect().height || maxMenuHeight, maxMenuHeight);
+    const preferredTop = anchorRect.top - measuredHeight - 9;
+    const fallbackTop = anchorRect.bottom + 9;
+    const top = preferredTop >= viewportMargin
+        ? preferredTop
+        : Math.min(fallbackTop, viewportHeight - measuredHeight - viewportMargin);
+
+    composerBranchMenu.style.top = `${Math.min(Math.max(viewportMargin, top), viewportHeight - measuredHeight - viewportMargin)}px`;
+}
+
+function getSortedGitBranches(info = null) {
+    return [...(info?.branches || [])].sort((a, b) => {
+        if (a.current !== b.current) return a.current ? -1 : 1;
+        if (a.type !== b.type) return a.type === "local" ? -1 : 1;
+        return a.name.localeCompare(b.name);
+    });
+}
+
+function getFilteredGitBranches(info = null, query = "") {
+    const cleanQuery = String(query || "").trim().toLowerCase();
+    const branches = getSortedGitBranches(info);
+    if (!cleanQuery) return branches;
+    return branches.filter(branch => branch.name.toLowerCase().includes(cleanQuery));
+}
+
+function createComposerBranchMessage(message, state = "muted") {
+    const node = document.createElement("div");
+    node.className = `composer-branch-message composer-branch-message-${state}`;
+    node.textContent = message;
+    return node;
+}
+
+function getComposerBranchOptionMeta(branch = {}, info = null) {
+    if (branch.current) return formatGitUncommittedText(info?.dirtyCount || 0);
+    if (branch.type === "remote") return "Remote branch";
+    if (branch.upstream) return `Tracks ${branch.upstream}`;
+    return "Local branch";
+}
+
+function createComposerBranchOption(branch = {}, info = null) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `composer-branch-option${branch.current ? " active" : ""}`;
+    button.setAttribute("aria-current", branch.current ? "true" : "false");
+    button.innerHTML = `
+        <span class="composer-branch-option-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 3v6a6 6 0 0 0 6 6h2"></path>
+                <path d="M18 21v-6a6 6 0 0 0-6-6h-2"></path>
+                <circle cx="6" cy="3" r="2"></circle>
+                <circle cx="18" cy="21" r="2"></circle>
+            </svg>
+        </span>
+        <span class="composer-branch-option-copy">
+            <span class="composer-branch-option-label"></span>
+            <span class="composer-branch-option-meta"></span>
+        </span>
+        <span class="composer-branch-option-check" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"></path></svg>
+        </span>
+    `;
+    button.querySelector(".composer-branch-option-label").textContent = branch.name;
+    button.querySelector(".composer-branch-option-meta").textContent = getComposerBranchOptionMeta(branch, info);
+    button.addEventListener("click", () => {
+        if (branch.current) {
+            closeComposerBranchMenu();
+            return;
+        }
+        void checkoutComposerBranch(branch);
+    });
+    return button;
+}
+
+function canCreateGitBranchFromQuery(query = "", info = null) {
+    const clean = String(query || "").trim();
+    if (!clean || clean.length > 120 || clean.startsWith("-") || /[\s~^:?*[\\\r\n]/.test(clean) || clean.endsWith("/") || clean.includes("..")) {
+        return false;
+    }
+    return !(info?.branches || []).some(branch => branch.name === clean || branch.name.endsWith(`/${clean}`));
+}
+
+function renderComposerBranchList() {
+    const menu = getComposerBranchMenu();
+    const list = menu.querySelector(".composer-branch-list");
+    const footer = menu.querySelector(".composer-branch-footer");
+    if (!list || !footer) return;
+    const root = getSessionProjectRoot();
+    const info = getActiveProjectGitInfo(root);
+    const query = composerBranchSearchQuery;
+    list.replaceChildren();
+    footer.replaceChildren();
+
+    if (!root) {
+        list.appendChild(createComposerBranchMessage("Choose a project first.", "muted"));
+        return;
+    }
+    if (!hasWorkspaceBridgeAccess()) {
+        list.appendChild(createComposerBranchMessage("Connect the Local Workspace Bridge to inspect Git.", "warning"));
+        return;
+    }
+    if (!info) {
+        list.appendChild(createComposerBranchMessage("Checking Git connection...", "muted"));
+        return;
+    }
+    if (info.unavailable) {
+        list.appendChild(createComposerBranchMessage(info.error || "Git is unavailable for this project.", "warning"));
+        return;
+    }
+    if (!info.isRepo) {
+        list.appendChild(createComposerBranchMessage("No .git repository found for this project.", "warning"));
+        return;
+    }
+
+    const branches = getFilteredGitBranches(info, query);
+    if (!branches.length) {
+        list.appendChild(createComposerBranchMessage(query ? "No matching branches." : "No branches found.", "muted"));
+    } else {
+        branches.forEach(branch => list.appendChild(createComposerBranchOption(branch, info)));
+    }
+
+    const createButton = document.createElement("button");
+    createButton.type = "button";
+    createButton.className = "composer-branch-create";
+    createButton.disabled = Boolean(query) && !canCreateGitBranchFromQuery(query, info);
+    createButton.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 3v5a4 4 0 0 0 4 4h4"></path>
+            <path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path>
+            <path d="M12 5v6"></path>
+            <path d="M9 8h6"></path>
+        </svg>
+        <span></span>
+    `;
+    createButton.querySelector("span").textContent = query
+        ? `Create "${query}" and check out`
+        : "Create new branch and check out...";
+    createButton.addEventListener("click", () => {
+        if (query && canCreateGitBranchFromQuery(query, info)) {
+            void createComposerBranch(query);
+            return;
+        }
+        openCreateGitBranchDialog(query);
+    });
+    footer.appendChild(createButton);
+}
+
+function renderComposerBranchMenu() {
+    const menu = getComposerBranchMenu();
+    const root = getSessionProjectRoot();
+    const info = getActiveProjectGitInfo(root);
+    menu.dataset.gitState = !root
+        ? "none"
+        : !hasWorkspaceBridgeAccess()
+            ? "offline"
+            : !info
+                ? "loading"
+                : info.unavailable
+                    ? "unavailable"
+                    : info.isRepo
+                        ? "connected"
+                        : "missing";
+    menu.replaceChildren();
+
+    const header = document.createElement("div");
+    header.className = "composer-branch-header";
+    header.innerHTML = `
+        <span class="composer-branch-title">Branches</span>
+        <span class="composer-branch-status"></span>
+    `;
+    header.querySelector(".composer-branch-status").textContent = getComposerBranchTooltip(root, info);
+
+    const search = document.createElement("label");
+    search.className = "composer-branch-search";
+    search.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m16.5 16.5 4 4"></path>
+        </svg>
+        <input type="search" autocomplete="off" spellcheck="false" placeholder="Search branches" aria-label="Search branches">
+    `;
+    composerBranchSearchInput = search.querySelector("input");
+    composerBranchSearchInput.value = composerBranchSearchQuery;
+    composerBranchSearchInput.addEventListener("input", () => {
+        composerBranchSearchQuery = composerBranchSearchInput.value;
+        renderComposerBranchList();
+    });
+
+    const list = document.createElement("div");
+    list.className = "composer-branch-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", "Repository branches");
+    const footer = document.createElement("div");
+    footer.className = "composer-branch-footer";
+
+    menu.append(header, search, list, footer);
+    renderComposerBranchList();
+}
+
+function openComposerBranchMenu({ focusSearch = false } = {}) {
+    const root = getSessionProjectRoot();
+    if (!root) {
+        showToast("Select a project first.", "warning");
+        return;
+    }
+    closeComposerProjectMenu();
+    closeNewChatProjectMenu();
+    closeProjectMenus();
+    closeProjectSortMenu();
+    getComposerBranchMenu();
+    renderComposerBranchMenu();
+    composerBranchMenu.hidden = false;
+    composerBranchBtn?.setAttribute("aria-expanded", "true");
+    positionComposerBranchMenu();
+    if (focusSearch) {
+        window.requestAnimationFrame(() => {
+            composerBranchSearchInput?.focus?.();
+            composerBranchSearchInput?.select?.();
+            positionComposerBranchMenu();
+        });
+    } else {
+        window.requestAnimationFrame(positionComposerBranchMenu);
+    }
+    if (hasWorkspaceBridgeAccess() && (!getActiveProjectGitInfo(root) || getActiveProjectGitInfo(root)?.unavailable)) {
+        void refreshProjectBranchSummary(root, { silent: true }).then(() => {
+            if (!composerBranchMenu?.hidden) {
+                renderComposerBranchMenu();
+                positionComposerBranchMenu();
+                if (focusSearch) composerBranchSearchInput?.focus?.();
+            }
+        });
+    }
+}
+
+function toggleComposerBranchMenu({ focusSearch = false } = {}) {
+    const menu = getComposerBranchMenu();
+    if (menu.hidden) {
+        openComposerBranchMenu({ focusSearch });
+        return;
+    }
+    closeComposerBranchMenu();
+}
+
+async function checkoutComposerBranch(branch = {}) {
+    const root = getSessionProjectRoot();
+    if (!root || !branch.name) return;
+    const menu = getComposerBranchMenu();
+    menu.dataset.busy = "true";
+    try {
+        const result = await checkoutProjectGitBranch(
+            root,
+            branch.name,
+            { remote: branch.type === "remote" },
+            null
+        );
+        updateProjectGitUi(root, result);
+        renderComposerBranchMenu();
+        closeComposerBranchMenu();
+        showToast(`Checked out ${getComposerBranchLabel(root)}.`, "success");
+    } catch (err) {
+        showToast(`Could not check out branch: ${err.message}`, "error");
+    } finally {
+        menu.dataset.busy = "false";
+    }
+}
+
+async function createComposerBranch(branchName = "") {
+    const root = getSessionProjectRoot();
+    const branch = String(branchName || "").trim();
+    if (!root || !branch) return;
+    const menu = getComposerBranchMenu();
+    menu.dataset.busy = "true";
+    try {
+        const result = await checkoutProjectGitBranch(
+            root,
+            branch,
+            { create: true },
+            null
+        );
+        composerBranchSearchQuery = "";
+        updateProjectGitUi(root, result);
+        renderComposerBranchMenu();
+        closeComposerBranchMenu();
+        showToast(`Created and checked out ${branch}.`, "success");
+    } catch (err) {
+        showToast(`Could not create branch: ${err.message}`, "error");
+    } finally {
+        menu.dataset.busy = "false";
+    }
+}
+
+function openCreateGitBranchDialog(defaultBranch = "") {
+    const root = getSessionProjectRoot();
+    if (!root) return;
+    const overlay = document.createElement("div");
+    overlay.className = "approval-modal";
+    overlay.setAttribute("role", "presentation");
+    const dialog = document.createElement("section");
+    dialog.className = "approval-dialog project-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "projectGitBranchTitle");
+    const titleNode = document.createElement("h2");
+    titleNode.id = "projectGitBranchTitle";
+    titleNode.textContent = "Create branch";
+    const inputLabel = document.createElement("label");
+    inputLabel.className = "chat-rename-field";
+    inputLabel.innerHTML = '<span>Branch name</span>';
+    const branchInput = document.createElement("input");
+    branchInput.className = "settings-input chat-rename-input";
+    branchInput.type = "text";
+    branchInput.value = defaultBranch || getDefaultWorktreeBranch(root.project || root).replace(/^codex\//, "");
+    inputLabel.appendChild(branchInput);
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "provider-btn provider-btn-secondary";
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel";
+    const createButton = document.createElement("button");
+    createButton.className = "provider-btn provider-btn-primary";
+    createButton.type = "button";
+    createButton.textContent = "Create";
+    const close = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        overlay.remove();
+    };
+    const create = () => {
+        const branch = String(branchInput.value || "").trim();
+        if (!canCreateGitBranchFromQuery(branch, getActiveProjectGitInfo(root))) {
+            showToast("Enter a valid new branch name.", "warning");
+            return;
+        }
+        close();
+        void createComposerBranch(branch);
+    };
+    const onKeyDown = event => {
+        if (event.key === "Escape") close();
+        if (event.key === "Enter" && document.activeElement === branchInput) create();
+    };
+    cancelButton.addEventListener("click", close);
+    createButton.addEventListener("click", create);
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+    actions.append(cancelButton, createButton);
+    dialog.append(titleNode, inputLabel, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    window.setTimeout(() => {
+        branchInput.focus();
+        branchInput.select();
+    }, 0);
 }
 
 function enableWorkspaceBridgeForProject() {
@@ -627,30 +1284,264 @@ function toggleAgentTaskModeMenu() {
     agentTaskModeBtn.setAttribute("aria-expanded", String(willOpen));
 }
 
-function setProjectAgentTab(tab, { persist = true } = {}) {
-    activeProjectAgentTab = normalizeProjectAgentTab(tab);
+function persistProjectAgentTabs() {
+    safeLocalStorageSet(PROJECT_AGENT_TABS_STORAGE_KEY, JSON.stringify(activeProjectAgentTabs));
+}
+
+function closeProjectPanelTabMenu() {
+    if (!projectPanelTabMenu || !projectPanelAddTabBtn) return;
+    projectPanelTabMenu.hidden = true;
+    projectPanelAddTabBtn.setAttribute("aria-expanded", "false");
+}
+
+function toggleProjectPanelTabMenu() {
+    if (!projectPanelTabMenu || !projectPanelAddTabBtn) return;
+    const willOpen = projectPanelTabMenu.hidden;
+    projectPanelTabMenu.hidden = !willOpen;
+    projectPanelAddTabBtn.setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) {
+        window.requestAnimationFrame(() => {
+            projectPanelTabMenu.querySelector("button")?.focus?.();
+        });
+    }
+}
+
+function getProjectAgentPane(tab) {
+    switch (normalizeProjectAgentTab(tab)) {
+        case "files":
+            return projectFilesPane;
+        case "terminal":
+            return projectTerminalPane;
+        case "activity":
+            return projectActivityPane;
+        case "chat":
+            return projectPageChatPane;
+        default:
+            return projectMenuPane;
+    }
+}
+
+function ensureProjectAgentTabOpen(tab, { persist = true, forceNew = false } = {}) {
+    const tabType = normalizeProjectAgentTab(tab);
+    const existingKey = normalizeProjectAgentTabKey(tab);
+    const hasTypeOpen = activeProjectAgentTabs.some(openTab => normalizeProjectAgentTab(openTab) === tabType);
+    const tabId = forceNew && hasTypeOpen && PROJECT_AGENT_DUPLICABLE_TABS.has(tabType)
+        ? createProjectAgentTabKey(tabType)
+        : (existingKey || tabType);
+    activeProjectAgentTabs = normalizeProjectAgentTabs(activeProjectAgentTabs);
+    if (!activeProjectAgentTabs.includes(tabId)) {
+        activeProjectAgentTabs.push(tabId);
+        if (persist) persistProjectAgentTabs();
+    }
+    return tabId;
+}
+
+function clearProjectAgentTabDragMarkers() {
+    projectAgentTabs?.querySelectorAll(".drag-over-left, .drag-over-right, .dragging").forEach(tab => {
+        tab.classList.remove("drag-over-left", "drag-over-right", "dragging");
+    });
+}
+
+function moveProjectAgentTab(sourceTab, targetTab, { after = false } = {}) {
+    const source = normalizeProjectAgentTabKey(sourceTab);
+    const target = normalizeProjectAgentTabKey(targetTab);
+    if (source === target || !activeProjectAgentTabs.includes(source) || !activeProjectAgentTabs.includes(target)) return;
+    const reordered = activeProjectAgentTabs.filter(tab => tab !== source);
+    const targetIndex = reordered.indexOf(target);
+    reordered.splice(targetIndex + (after ? 1 : 0), 0, source);
+    activeProjectAgentTabs = normalizeProjectAgentTabs(reordered);
+    persistProjectAgentTabs();
+    renderProjectAgentTabs();
+}
+
+function closeProjectAgentTab(tab) {
+    const tabId = normalizeProjectAgentTabKey(tab);
+    const definition = getProjectAgentTabDefinition(tabId);
+    if (!definition.closeable || !activeProjectAgentTabs.includes(tabId)) return;
+    const closingIndex = activeProjectAgentTabs.indexOf(tabId);
+    activeProjectAgentTabs = activeProjectAgentTabs.filter(openTab => openTab !== tabId);
+    if (normalizeProjectAgentTab(tabId) === "chat") {
+        projectPageChatStates.delete(tabId);
+    }
+    if (!activeProjectAgentTabs.length) activeProjectAgentTabs = ["menu"];
+    persistProjectAgentTabs();
+    if (activeProjectAgentTab === tabId) {
+        const nextIndex = Math.min(closingIndex, activeProjectAgentTabs.length - 1);
+        activeProjectAgentTab = activeProjectAgentTabs[Math.max(0, nextIndex)] || "menu";
+    }
+    setProjectAgentTab(activeProjectAgentTab);
+}
+
+function focusAdjacentProjectAgentTab(currentTab, direction) {
+    if (!projectAgentTabs) return;
+    const tabs = Array.from(projectAgentTabs.querySelectorAll("[data-project-agent-tab]"));
+    const current = tabs.findIndex(tab => tab.dataset.projectAgentTab === currentTab);
+    if (current === -1 || tabs.length < 2) return;
+    const next = (current + direction + tabs.length) % tabs.length;
+    tabs[next]?.focus?.();
+}
+
+function createProjectAgentTabNode(tabKey) {
+    const definition = getProjectAgentTabDefinition(tabKey);
+    const active = activeProjectAgentTab === tabKey;
+    const displayLabel = getProjectAgentTabLabel(definition, tabKey);
+    const tab = document.createElement("div");
+    tab.id = getProjectAgentTabDomId(tabKey, definition);
+    tab.className = `project-agent-tab${active ? " active" : ""}${definition.closeable ? " project-agent-tab-closeable" : ""}`;
+    tab.dataset.projectAgentTab = tabKey;
+    tab.dataset.projectAgentTabType = definition.id;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(active));
+    tab.setAttribute("aria-controls", definition.paneId);
+    tab.setAttribute("aria-label", `${displayLabel} tab`);
+    tab.setAttribute("tabindex", active ? "0" : "-1");
+    tab.draggable = getVisibleProjectAgentTabs().length > 1;
+    tab.innerHTML = "";
+    const main = document.createElement("span");
+    main.className = "project-agent-tab-main";
+    main.innerHTML = `
+        <span class="project-agent-tab-icon" aria-hidden="true">${definition.icon}</span>
+        <span class="project-agent-tab-label"></span>
+    `;
+    tab.appendChild(main);
+    const label = tab.querySelector(".project-agent-tab-label");
+    if (label) label.textContent = displayLabel;
+    if (definition.closeable) {
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.className = "project-agent-tab-close";
+        closeButton.setAttribute("aria-label", `Close ${displayLabel} tab`);
+        closeButton.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
+        closeButton.addEventListener("click", event => {
+            event.stopPropagation();
+            closeProjectAgentTab(tabKey);
+        });
+        tab.appendChild(closeButton);
+    }
+    tab.addEventListener("click", event => {
+        if (event.target.closest(".project-agent-tab-close")) return;
+        openProjectWorkspacePanel(tabKey, { refresh: definition.id === "files" });
+    });
+    tab.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openProjectWorkspacePanel(tabKey, { refresh: definition.id === "files" });
+            return;
+        }
+        if ((event.key === "Backspace" || event.key === "Delete") && definition.closeable) {
+            event.preventDefault();
+            closeProjectAgentTab(tabKey);
+            return;
+        }
+        if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            focusAdjacentProjectAgentTab(tabKey, -1);
+            return;
+        }
+        if (event.key === "ArrowRight") {
+            event.preventDefault();
+            focusAdjacentProjectAgentTab(tabKey, 1);
+        }
+    });
+    tab.addEventListener("dragstart", event => {
+        if (getVisibleProjectAgentTabs().length < 2 || !event.dataTransfer) {
+            event.preventDefault();
+            return;
+        }
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", tabKey);
+        window.requestAnimationFrame(() => tab.classList.add("dragging"));
+    });
+    tab.addEventListener("dragover", event => {
+        if (getVisibleProjectAgentTabs().length < 2) return;
+        event.preventDefault();
+        clearProjectAgentTabDragMarkers();
+        const rect = tab.getBoundingClientRect();
+        const after = event.clientX > rect.left + (rect.width / 2);
+        tab.classList.add(after ? "drag-over-right" : "drag-over-left");
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    });
+    tab.addEventListener("dragleave", event => {
+        if (event.relatedTarget && tab.contains(event.relatedTarget)) return;
+        tab.classList.remove("drag-over-left", "drag-over-right");
+    });
+    tab.addEventListener("dragend", clearProjectAgentTabDragMarkers);
+    tab.addEventListener("drop", event => {
+        event.preventDefault();
+        const sourceTab = event.dataTransfer?.getData("text/plain");
+        const rect = tab.getBoundingClientRect();
+        moveProjectAgentTab(sourceTab, tabKey, { after: event.clientX > rect.left + (rect.width / 2) });
+        clearProjectAgentTabDragMarkers();
+    });
+    return tab;
+}
+
+function renderProjectAgentTabs() {
+    if (!projectAgentTabs) return;
+    activeProjectAgentTabs = normalizeProjectAgentTabs(activeProjectAgentTabs);
+    if (!activeProjectAgentTabs.includes(activeProjectAgentTab)) {
+        activeProjectAgentTab = activeProjectAgentTabs[0] || "menu";
+    }
+    projectAgentTabs.replaceChildren(...getVisibleProjectAgentTabs().map(createProjectAgentTabNode));
+}
+
+function setProjectAgentTab(tab, { persist = true, open = true, closeMenu = true, forceNew = false } = {}) {
+    const tabKey = open
+        ? ensureProjectAgentTabOpen(tab, { persist, forceNew })
+        : (normalizeProjectAgentTabKey(tab) || "menu");
+    activeProjectAgentTab = activeProjectAgentTabs.includes(tabKey) ? tabKey : (activeProjectAgentTabs[0] || "menu");
     if (persist) safeLocalStorageSet(PROJECT_AGENT_TAB_STORAGE_KEY, activeProjectAgentTab);
-    const menuActive = activeProjectAgentTab === "menu";
-    const filesActive = activeProjectAgentTab === "files";
-    const activityActive = activeProjectAgentTab === "activity";
-    const chatActive = activeProjectAgentTab === "chat";
-    projectPanelMenuTab?.classList.toggle("active", menuActive);
-    projectFilesTab?.classList.toggle("active", filesActive);
-    projectActivityTab?.classList.toggle("active", activityActive);
-    projectPageChatTab?.classList.toggle("active", chatActive);
-    projectPanelMenuTab?.setAttribute("aria-selected", String(menuActive));
-    projectFilesTab?.setAttribute("aria-selected", String(filesActive));
-    projectActivityTab?.setAttribute("aria-selected", String(activityActive));
-    projectPageChatTab?.setAttribute("aria-selected", String(chatActive));
-    if (projectMenuPane) projectMenuPane.hidden = !menuActive;
-    if (projectFilesPane) projectFilesPane.hidden = !filesActive;
-    if (projectActivityPane) projectActivityPane.hidden = !activityActive;
-    if (projectPageChatPane) projectPageChatPane.hidden = !chatActive;
+    if (closeMenu) closeProjectPanelTabMenu();
+    renderProjectAgentTabs();
+    const activeTabType = normalizeProjectAgentTab(activeProjectAgentTab);
+    PROJECT_AGENT_TAB_DEFINITIONS.forEach(definition => {
+        const pane = getProjectAgentPane(definition.id);
+        if (pane) pane.hidden = definition.id !== activeTabType;
+    });
+    if (activeTabType === "chat") {
+        ensureProjectPageChatRoot();
+    } else if (activeTabType === "terminal") {
+        void ensureProjectTerminalSession();
+    }
 }
 
 function getActiveProjectBridgeOptions() {
     const root = getSessionProjectRoot();
     return root?.id ? { scope: `project:${root.id}` } : null;
+}
+
+function getProjectGitBridgeOptions(root = getSessionProjectRoot(), { pathOnly = false } = {}) {
+    const path = String(root?.path || "").trim();
+    if (pathOnly) return path ? { path } : {};
+    const options = {};
+    if (root?.id) options.scope = `project:${root.id}`;
+    if (path) options.path = path;
+    return options;
+}
+
+function shouldRetryGitWithProjectPath(error, root = getSessionProjectRoot()) {
+    return Boolean(
+        root?.path
+        && /Project scope is not registered with this bridge/i.test(error?.message || String(error || ""))
+    );
+}
+
+async function getProjectGitInfoFromBridge(root = getSessionProjectRoot(), signal = null) {
+    try {
+        return await getWorkspaceGitInfo(signal, getProjectGitBridgeOptions(root));
+    } catch (err) {
+        if (!shouldRetryGitWithProjectPath(err, root)) throw err;
+        return getWorkspaceGitInfo(signal, getProjectGitBridgeOptions(root, { pathOnly: true }));
+    }
+}
+
+async function checkoutProjectGitBranch(root, branch, options = {}, signal = null) {
+    try {
+        return await checkoutWorkspaceGitBranch(branch, options, signal, getProjectGitBridgeOptions(root));
+    } catch (err) {
+        if (!shouldRetryGitWithProjectPath(err, root)) throw err;
+        return checkoutWorkspaceGitBranch(branch, options, signal, getProjectGitBridgeOptions(root, { pathOnly: true }));
+    }
 }
 
 function getProjectParentPath(path = ".") {
@@ -687,7 +1578,7 @@ function updateProjectAgentDockState(root = getSessionProjectRoot()) {
     applyProjectAgentWidth();
     if (projectAgentPanel) projectAgentPanel.hidden = !isOpen;
     if (projectAgentExpandBtn) {
-        projectAgentExpandBtn.hidden = true;
+        projectAgentExpandBtn.hidden = isOpen;
         projectAgentExpandBtn.setAttribute("aria-expanded", String(isOpen));
     }
     projectAgentCollapseBtn?.setAttribute("aria-expanded", String(isOpen));
@@ -726,9 +1617,13 @@ function setProjectAgentMaximized(maximized, { persist = true } = {}) {
     updateProjectAgentDockState();
 }
 
-function openProjectWorkspacePanel(tab = "menu", { refresh = false } = {}) {
-    setProjectAgentTab(tab);
-    setProjectAgentCollapsed(false, { refresh: refresh || tab === "files" });
+function openProjectWorkspacePanel(tab = "menu", { refresh = false, forceNew = false } = {}) {
+    setProjectAgentTab(tab, { forceNew });
+    const tabType = normalizeProjectAgentTab(activeProjectAgentTab);
+    setProjectAgentCollapsed(false, { refresh: refresh || tabType === "files" });
+    if (tabType === "terminal") {
+        window.requestAnimationFrame(focusProjectTerminalInput);
+    }
 }
 
 async function openProjectTerminalFromPanel() {
@@ -771,22 +1666,24 @@ function toggleProjectWorkspacePanel() {
 }
 
 function handleWorkspacePanelAction(action = "") {
+    closeProjectPanelTabMenu();
     switch (action) {
         case "files":
-            openProjectWorkspacePanel("files", { refresh: true });
+            openProjectWorkspacePanel("files", { refresh: true, forceNew: true });
             return;
         case "terminal":
-            void openProjectTerminalFromPanel();
+            openProjectWorkspacePanel("terminal", { forceNew: true });
+            window.requestAnimationFrame(focusProjectTerminalInput);
             return;
         case "inspect":
             openProjectWorkspacePanel("activity");
             void openProjectDiffReview();
             return;
         case "browser":
-            showToast("Browser panel is not connected yet.", "info");
+            openProjectWorkspacePanel("menu");
             return;
         case "page-chat":
-            openProjectWorkspacePanel("chat");
+            openProjectWorkspacePanel("chat", { forceNew: true });
             window.requestAnimationFrame(() => projectPageChatInput?.focus?.());
             return;
         default:
@@ -822,16 +1719,22 @@ function startProjectAgentResize(event) {
 function updateProjectAgentPanel() {
     const root = getSessionProjectRoot();
     updateProjectAgentDockState(root);
-    setProjectAgentTab(activeProjectAgentTab, { persist: false });
+    setProjectAgentTab(activeProjectAgentTab, { persist: false, closeMenu: false });
     if (projectAgentTitle) projectAgentTitle.textContent = root?.name || "Workspace";
+    renderProjectFileViewer();
     if (projectBranchSummary) {
         projectBranchSummary.textContent = root
             ? `${root.type === "worktree" ? "Worktree" : "Project"}: ${root.name}`
             : "No project selected";
     }
     if (!root) {
+        setActiveProjectGitInfo(null);
+        updateComposerProjectContextBar();
         projectExplorerRootId = "";
         currentProjectExplorerResult = { entries: [], truncated: false };
+        activeProjectExplorerExpandedPaths = new Set();
+        activeProjectFile = null;
+        renderProjectFileViewer();
         if (projectExplorerPath) projectExplorerPath.textContent = ".";
         if (projectExplorerFilterInput) projectExplorerFilterInput.value = "";
         renderProjectExplorerMessage("Select a project to browse files.", "muted");
@@ -842,12 +1745,23 @@ function updateProjectAgentPanel() {
         projectExplorerRootId = root.id;
         activeProjectExplorerPath = ".";
         currentProjectExplorerResult = { entries: [], truncated: false };
+        activeProjectExplorerExpandedPaths = new Set();
+        persistProjectExplorerExpandedPaths();
+        activeProjectFile = null;
+        renderProjectFileViewer();
         if (projectExplorerFilterInput) projectExplorerFilterInput.value = "";
         safeLocalStorageSet(PROJECT_EXPLORER_PATH_STORAGE_KEY, activeProjectExplorerPath);
     }
     if (projectExplorerPath) projectExplorerPath.textContent = activeProjectExplorerPath;
     ensureProjectPageChatRoot();
     renderAgentActivityList();
+    if (hasWorkspaceBridgeAccess() && activeProjectGitInfoRootId !== root.id) {
+        void refreshProjectBranchSummary(root);
+    } else if (activeProjectGitInfoRootId === root.id && activeProjectGitInfo) {
+        updateProjectGitUi(root, activeProjectGitInfo);
+    } else {
+        updateComposerProjectContextBar();
+    }
 }
 
 function recordAgentActivity(activity = {}) {
@@ -915,6 +1829,284 @@ function formatProjectFileSize(size) {
     return `${Math.round(size / 1024 / 102.4) / 10} MB`;
 }
 
+function getProjectEntryName(entry = {}) {
+    return String(entry.name || entry.path || "")
+        .split(/[\\/]/)
+        .filter(Boolean)
+        .pop() || "";
+}
+
+function getProjectFileExtension(entry = {}) {
+    const name = getProjectEntryName(entry);
+    if (!name || !name.includes(".") || name.startsWith(".") && name.indexOf(".", 1) === -1) return "";
+    return name.split(".").pop().toLowerCase();
+}
+
+function getProjectFileKind(entry = {}, { parent = false } = {}) {
+    if (parent) return "parent";
+    if (entry.type === "directory") return "folder";
+
+    const name = getProjectEntryName(entry).toLowerCase();
+    const extension = getProjectFileExtension(entry);
+    if (name === ".gitignore" || name === ".gitattributes" || name === ".gitmodules") return "git";
+    if (name === "license" || name.startsWith("license.")) return "license";
+    if (name === "package.json" || name === "package-lock.json" || name === "pnpm-lock.yaml" || name === "yarn.lock") return "package";
+    if (["md", "mdx"].includes(extension)) return "markdown";
+    if (["js", "mjs", "cjs"].includes(extension)) return "javascript";
+    if (["ts", "tsx"].includes(extension)) return "typescript";
+    if (extension === "jsx") return "react";
+    if (extension === "css") return "css";
+    if (["html", "htm"].includes(extension)) return "html";
+    if (extension === "json") return "json";
+    if (["py", "pyw"].includes(extension)) return "python";
+    if (["png", "jpg", "jpeg", "gif", "webp", "avif", "ico"].includes(extension)) return "image";
+    if (extension === "svg") return "svg";
+    if (["mp4", "webm", "mov", "mkv"].includes(extension)) return "video";
+    if (["mp3", "wav", "ogg", "flac"].includes(extension)) return "audio";
+    if (["sh", "bash", "zsh", "ps1", "bat", "cmd"].includes(extension)) return "terminal";
+    if (["yml", "yaml", "toml", "ini", "env"].includes(extension) || name.startsWith(".env")) return "config";
+    if (["txt", "csv", "log"].includes(extension)) return "text";
+    return "file";
+}
+
+function getProjectFileIconMarkup(kind = "file", extension = "") {
+    const labels = {
+        config: "CFG",
+        css: "CSS",
+        file: extension ? extension.slice(0, 3).toUpperCase() : "FILE",
+        html: "#",
+        javascript: "JS",
+        json: "{}",
+        license: "TXT",
+        markdown: "M",
+        package: "{}",
+        react: "JSX",
+        svg: "SVG",
+        terminal: "$",
+        text: "TXT",
+        typescript: "TS"
+    };
+    const svgIcons = {
+        audio: '<path d="M9 18V6l10-2v12"></path><circle cx="7" cy="18" r="3"></circle><circle cx="17" cy="16" r="3"></circle>',
+        folder: '<path d="m9 18 6-6-6-6"></path>',
+        git: '<path d="M12 3 3 12l9 9 9-9-9-9Z"></path><path d="M9 9h6v6"></path><path d="M15 9 9 15"></path>',
+        image: '<rect x="3.5" y="5" width="17" height="14" rx="2.5"></rect><circle cx="8.5" cy="10" r="1.6"></circle><path d="m20 15-4-4-7 8"></path>',
+        parent: '<path d="m6 15 6-6 6 6"></path>',
+        python: '<path d="M12 3h3.5A3.5 3.5 0 0 1 19 6.5V10h-7"></path><path d="M12 21H8.5A3.5 3.5 0 0 1 5 17.5V14h7"></path><path d="M9 7h.01"></path><path d="M15 17h.01"></path>',
+        video: '<rect x="3.5" y="6" width="12.5" height="12" rx="2.3"></rect><path d="m16 10 4-2.5v9L16 14"></path>'
+    };
+    if (svgIcons[kind]) {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${svgIcons[kind]}</svg>`;
+    }
+    const label = labels[kind] || labels.file;
+    return `<span class="project-explorer-row-icon-label">${label}</span>`;
+}
+
+function getProjectFileDisplayName(path = "") {
+    return String(path || "")
+        .split(/[\\/]/)
+        .filter(Boolean)
+        .pop() || "Open file";
+}
+
+function isProjectMarkdownFile(path = "") {
+    return /\.(md|mdx)$/i.test(String(path || ""));
+}
+
+function parseProjectMarkdownFrontmatter(content = "") {
+    const text = String(content || "");
+    if (!text.startsWith("---")) return { metadata: [], body: text };
+    const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/);
+    if (!match) return { metadata: [], body: text };
+    const metadata = match[1]
+        .split(/\r?\n/)
+        .map(line => line.match(/^([A-Za-z0-9_.-]+)\s*:\s*(.+?)\s*$/))
+        .filter(Boolean)
+        .map(matchLine => ({
+            key: matchLine[1],
+            value: matchLine[2].replace(/^["']|["']$/g, "")
+        }))
+        .filter(item => item.value && item.value.length <= 180)
+        .slice(0, 8);
+    return { metadata, body: match[2] || "" };
+}
+
+function closeProjectFileMoreMenu() {
+    if (!projectFileMoreMenu || !projectFileMoreBtn) return;
+    projectFileMoreMenu.hidden = true;
+    projectFileMoreBtn.setAttribute("aria-expanded", "false");
+}
+
+function renderProjectFileMenuState() {
+    if (projectFileToggleExtendedBtn) {
+        const label = activeProjectFileExtendedView ? "Disable extended view" : "Enable extended view";
+        projectFileToggleExtendedBtn.querySelector("span:last-child").textContent = label;
+    }
+    if (projectFileToggleWrapBtn) {
+        const label = activeProjectFileLineWrap ? "Disable line wrap" : "Enable line wrap";
+        projectFileToggleWrapBtn.querySelector("span:last-child").textContent = label;
+    }
+}
+
+function toggleProjectFileMoreMenu() {
+    if (!projectFileMoreMenu || !projectFileMoreBtn) return;
+    const willOpen = projectFileMoreMenu.hidden;
+    renderProjectFileMenuState();
+    projectFileMoreMenu.hidden = !willOpen;
+    projectFileMoreBtn.setAttribute("aria-expanded", String(willOpen));
+}
+
+async function copyProjectFileText(value = "", button = null) {
+    if (!value) {
+        showToast("Nothing to copy.", "info");
+        return;
+    }
+    if (typeof handleCopyButton === "function" && button) {
+        await handleCopyButton(button, value);
+        return;
+    }
+    try {
+        await writeTextToClipboard(value);
+        showToast("Copied.", "success");
+    } catch {
+        showToast("Copy failed. Select the text manually.", "error");
+    }
+}
+
+function clearProjectLineCommentPanels() {
+    projectFileCode?.querySelectorAll(".project-file-line-comment").forEach(panel => panel.remove());
+    projectFileCode?.querySelectorAll(".project-file-code-line.comment-open").forEach(row => {
+        row.classList.remove("comment-open");
+    });
+}
+
+function openProjectLineComment(lineRow, lineNumber, lineText = "") {
+    if (!lineRow || !projectFileCode) return;
+    clearProjectLineCommentPanels();
+    lineRow.classList.add("comment-open");
+    const panel = document.createElement("div");
+    panel.className = "project-file-line-comment";
+    panel.innerHTML = `
+        <div class="project-file-line-comment-head">
+            <span class="project-file-line-comment-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"></path><path d="M8 10h8"></path></svg>
+            </span>
+            <strong>Local comment</strong>
+            <span>Comment on line ${lineNumber}</span>
+        </div>
+        <textarea class="project-file-line-comment-input" rows="2" placeholder="Request a change" aria-label="Comment text"></textarea>
+        <div class="project-file-line-comment-actions">
+            <button class="project-file-comment-cancel" type="button">Cancel</button>
+            <button class="project-file-comment-submit" type="button">Comment</button>
+        </div>
+    `;
+    const textarea = panel.querySelector("textarea");
+    panel.querySelector(".project-file-comment-cancel")?.addEventListener("click", clearProjectLineCommentPanels);
+    panel.querySelector(".project-file-comment-submit")?.addEventListener("click", () => {
+        const comment = textarea?.value.trim() || "";
+        if (!comment) {
+            textarea?.focus();
+            return;
+        }
+        const fileRef = activeProjectFile?.path ? `\`${activeProjectFile.path}:${lineNumber}\`` : `line ${lineNumber}`;
+        const note = `${fileRef}: ${comment}`;
+        const targetInput = projectPageChatInput || input;
+        if (targetInput) {
+            targetInput.value = [targetInput.value.trim(), note].filter(Boolean).join("\n");
+            targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        showToast("Comment added to the workspace chat.", "success");
+        clearProjectLineCommentPanels();
+    });
+    lineRow.after(panel);
+    window.requestAnimationFrame(() => textarea?.focus());
+}
+
+function renderProjectFileCode(content = "") {
+    if (!projectFileCode) return;
+    clearProjectLineCommentPanels();
+    projectFileCode.replaceChildren();
+    const lines = String(content || "").split(/\r?\n/);
+    if (!lines.length) lines.push("");
+    lines.forEach((line, index) => {
+        const lineNumber = index + 1;
+        const row = document.createElement("div");
+        row.className = "project-file-code-line";
+        row.dataset.line = String(lineNumber);
+        const addButton = document.createElement("button");
+        addButton.className = "project-file-line-add";
+        addButton.type = "button";
+        addButton.setAttribute("aria-label", `Comment on line ${lineNumber}`);
+        addButton.textContent = "+";
+        addButton.addEventListener("click", event => {
+            event.stopPropagation();
+            openProjectLineComment(row, lineNumber, line);
+        });
+        const number = document.createElement("span");
+        number.className = "project-file-line-number";
+        number.textContent = String(lineNumber);
+        const code = document.createElement("code");
+        code.className = "project-file-line-text";
+        code.textContent = line || " ";
+        row.append(addButton, number, code);
+        projectFileCode.appendChild(row);
+    });
+}
+
+function renderProjectFileExtended(content = "") {
+    if (!projectFileRendered) return;
+    const { metadata, body } = parseProjectMarkdownFrontmatter(content);
+    const metadataHtml = metadata.length
+        ? `<section class="project-file-metadata"><strong>Metadata</strong>${metadata.map(item => `<div><code>${escapeHtml(item.key)}</code><span>${escapeHtml(item.value)}</span></div>`).join("")}</section>`
+        : "";
+    const bodyHtml = typeof renderMarkdown === "function"
+        ? renderMarkdown(body || content)
+        : `<pre>${escapeHtml(body || content)}</pre>`;
+    projectFileRendered.innerHTML = `${metadataHtml}<div class="project-file-rendered-body">${bodyHtml}</div>`;
+}
+
+function renderProjectFileViewer() {
+    const root = getSessionProjectRoot();
+    if (projectFileBreadcrumbRoot) projectFileBreadcrumbRoot.textContent = root?.name || "Workspace";
+    if (projectFileBreadcrumbName) projectFileBreadcrumbName.textContent = activeProjectFile?.name || "Open file";
+    if (projectFileMoreBtn) projectFileMoreBtn.disabled = !activeProjectFile;
+    if (projectFileRevealBtn) projectFileRevealBtn.disabled = !projectExplorerList;
+    renderProjectFileMenuState();
+    renderProjectAgentTabs();
+
+    if (!projectFileEmptyState || !projectFileViewer || !projectFileRendered || !projectFileCode) return;
+    const hasFile = Boolean(activeProjectFile?.path);
+    projectFileEmptyState.hidden = hasFile;
+    projectFileViewer.hidden = !hasFile;
+    projectFileViewer.classList.toggle("line-wrap", activeProjectFileLineWrap);
+    projectFileViewer.classList.toggle("extended-view", hasFile && activeProjectFileExtendedView && isProjectMarkdownFile(activeProjectFile.path));
+    projectFileViewer.classList.toggle("source-view", hasFile && (!activeProjectFileExtendedView || !isProjectMarkdownFile(activeProjectFile.path)));
+    if (!hasFile) {
+        projectFileRendered.replaceChildren();
+        projectFileCode.replaceChildren();
+        return;
+    }
+
+    const content = String(activeProjectFile.content || "");
+    const showRendered = activeProjectFileExtendedView && isProjectMarkdownFile(activeProjectFile.path);
+    projectFileRendered.hidden = !showRendered;
+    projectFileCode.hidden = showRendered;
+    if (showRendered) {
+        renderProjectFileExtended(content);
+    } else {
+        renderProjectFileCode(content);
+    }
+}
+
+function getProjectExplorerEntryDepth(entryPath = "") {
+    const base = normalizeProjectExplorerPath(activeProjectExplorerPath);
+    const clean = normalizeProjectExplorerPath(entryPath);
+    const relative = base !== "." && clean.startsWith(`${base}/`)
+        ? clean.slice(base.length + 1)
+        : clean;
+    return Math.max(0, relative.split("/").filter(Boolean).length - 1);
+}
+
 function getProjectExplorerFilterText() {
     return String(projectExplorerFilterInput?.value || "").trim().toLowerCase();
 }
@@ -926,27 +2118,140 @@ function matchesProjectExplorerFilter(entry = {}, filterText = "") {
         .some(value => String(value).toLowerCase().includes(filterText));
 }
 
+function persistProjectExplorerExpandedPaths() {
+    safeLocalStorageSet(PROJECT_EXPLORER_EXPANDED_PATHS_STORAGE_KEY, JSON.stringify([...activeProjectExplorerExpandedPaths]));
+}
+
+function isProjectExplorerDirectoryExpanded(path = "") {
+    return activeProjectExplorerExpandedPaths.has(normalizeProjectExplorerPath(path));
+}
+
+function setProjectExplorerDirectoryExpanded(path = "", expanded = false, { persist = true } = {}) {
+    const cleanPath = normalizeProjectExplorerPath(path);
+    if (!cleanPath || cleanPath === ".") return;
+    if (expanded) {
+        activeProjectExplorerExpandedPaths.add(cleanPath);
+    } else {
+        activeProjectExplorerExpandedPaths.delete(cleanPath);
+    }
+    if (persist) persistProjectExplorerExpandedPaths();
+}
+
+function expandProjectExplorerAncestors(path = "", { persist = true } = {}) {
+    let parentPath = getProjectParentPath(path);
+    while (parentPath && parentPath !== ".") {
+        activeProjectExplorerExpandedPaths.add(parentPath);
+        parentPath = getProjectParentPath(parentPath);
+    }
+    if (persist) persistProjectExplorerExpandedPaths();
+}
+
+function compareProjectExplorerEntryOrder(a = {}, b = {}) {
+    const aDirectory = a.type === "directory";
+    const bDirectory = b.type === "directory";
+    if (aDirectory !== bDirectory) return aDirectory ? -1 : 1;
+    return String(a.name || a.path || "").localeCompare(String(b.name || b.path || ""), undefined, {
+        sensitivity: "base",
+        numeric: true
+    });
+}
+
+function getProjectExplorerChildEntries(entries = [], parentPath = ".") {
+    const cleanParent = normalizeProjectExplorerPath(parentPath);
+    return entries
+        .filter(entry => {
+            const cleanPath = normalizeProjectExplorerPath(entry.path || ".");
+            if (!cleanPath || cleanPath === "." || cleanPath === cleanParent) return false;
+            return getProjectParentPath(cleanPath) === cleanParent;
+        })
+        .sort(compareProjectExplorerEntryOrder);
+}
+
+function projectExplorerHasLoadedChildren(path = "", entries = currentProjectExplorerResult.entries || []) {
+    return getProjectExplorerChildEntries(entries, path).length > 0;
+}
+
+function getProjectExplorerFilterSets(entries = [], filterText = "") {
+    const visiblePaths = new Set();
+    const autoExpandedPaths = new Set();
+    if (!filterText) return { visiblePaths, autoExpandedPaths };
+    entries.forEach(entry => {
+        if (!matchesProjectExplorerFilter(entry, filterText)) return;
+        let cleanPath = normalizeProjectExplorerPath(entry.path || ".");
+        while (cleanPath && cleanPath !== ".") {
+            visiblePaths.add(cleanPath);
+            const parentPath = getProjectParentPath(cleanPath);
+            if (parentPath && parentPath !== ".") {
+                visiblePaths.add(parentPath);
+                autoExpandedPaths.add(parentPath);
+            }
+            cleanPath = parentPath;
+        }
+    });
+    return { visiblePaths, autoExpandedPaths };
+}
+
+function mergeProjectExplorerEntries(entries = []) {
+    const currentEntries = Array.isArray(currentProjectExplorerResult.entries) ? currentProjectExplorerResult.entries : [];
+    const byPath = new Map(currentEntries.map(entry => [normalizeProjectExplorerPath(entry.path || "."), entry]));
+    entries.forEach(entry => {
+        const cleanPath = normalizeProjectExplorerPath(entry.path || ".");
+        if (cleanPath && cleanPath !== ".") byPath.set(cleanPath, entry);
+    });
+    currentProjectExplorerResult = {
+        ...currentProjectExplorerResult,
+        entries: [...byPath.values()]
+    };
+}
+
+function appendProjectExplorerRows(parentPath, depth, options = {}) {
+    const {
+        entries = [],
+        filterText = "",
+        visiblePaths = new Set(),
+        autoExpandedPaths = new Set()
+    } = options;
+    const children = getProjectExplorerChildEntries(entries, parentPath);
+    children.forEach(entry => {
+        const cleanPath = normalizeProjectExplorerPath(entry.path || ".");
+        if (filterText && !visiblePaths.has(cleanPath)) return;
+        const isDirectory = entry.type === "directory";
+        const hasChildren = projectExplorerHasLoadedChildren(cleanPath, entries);
+        const expanded = isDirectory && (autoExpandedPaths.has(cleanPath) || isProjectExplorerDirectoryExpanded(cleanPath));
+        projectExplorerList.appendChild(createProjectExplorerRow(entry, {
+            depth,
+            expanded,
+            hasChildren
+        }));
+        if (isDirectory && expanded) {
+            if (projectExplorerLoadingPath === cleanPath && !hasChildren) {
+                const loading = document.createElement("div");
+                loading.className = "project-explorer-message project-explorer-message-muted project-explorer-loading-row";
+                loading.style.setProperty("--project-entry-indent", `${(depth + 1) * 18}px`);
+                loading.textContent = "Loading folder...";
+                projectExplorerList.appendChild(loading);
+            }
+            appendProjectExplorerRows(cleanPath, depth + 1, options);
+        }
+    });
+}
+
 function renderProjectExplorerCurrentEntries() {
     if (!projectExplorerList) return;
     const result = currentProjectExplorerResult || {};
     const entries = Array.isArray(result.entries) ? result.entries : [];
     const filterText = getProjectExplorerFilterText();
-    const visibleEntries = filterText
-        ? entries.filter(entry => matchesProjectExplorerFilter(entry, filterText))
-        : entries;
     if (projectExplorerPath) projectExplorerPath.textContent = activeProjectExplorerPath;
     if (projectExplorerUpBtn) projectExplorerUpBtn.disabled = activeProjectExplorerPath === ".";
     projectExplorerList.replaceChildren();
-    if (activeProjectExplorerPath !== ".") {
-        const up = createProjectExplorerRow({
-            name: "..",
-            path: getProjectParentPath(activeProjectExplorerPath),
-            type: "directory"
-        }, { parent: true });
-        projectExplorerList.appendChild(up);
-    }
-    visibleEntries.forEach(entry => projectExplorerList.appendChild(createProjectExplorerRow(entry)));
-    if (!visibleEntries.length) {
+    const filterSets = getProjectExplorerFilterSets(entries, filterText);
+    appendProjectExplorerRows(activeProjectExplorerPath, 0, {
+        entries,
+        filterText,
+        visiblePaths: filterSets.visiblePaths,
+        autoExpandedPaths: filterSets.autoExpandedPaths
+    });
+    if (!projectExplorerList.children.length) {
         const message = filterText
             ? "No matching files."
             : (result.truncated ? "Tree was truncated." : "No files found.");
@@ -971,25 +2276,58 @@ function renderProjectExplorerEntries(result = {}) {
     renderProjectExplorerCurrentEntries();
 }
 
-function createProjectExplorerRow(entry = {}, { parent = false } = {}) {
+async function toggleProjectExplorerDirectory(entry = {}) {
+    const cleanPath = normalizeProjectExplorerPath(entry.path || ".");
+    if (!cleanPath || cleanPath === ".") return;
+    const nextExpanded = !isProjectExplorerDirectoryExpanded(cleanPath);
+    setProjectExplorerDirectoryExpanded(cleanPath, nextExpanded);
+    renderProjectExplorerCurrentEntries();
+    if (!nextExpanded || projectExplorerHasLoadedChildren(cleanPath)) return;
+    if (!hasWorkspaceBridgeAccess()) return;
+    projectExplorerLoadingPath = cleanPath;
+    renderProjectExplorerCurrentEntries();
+    try {
+        const result = await listWorkspaceTree(cleanPath, 1, null, 160, getActiveProjectBridgeOptions());
+        mergeProjectExplorerEntries(result.entries || []);
+    } catch (err) {
+        showToast(`Could not expand folder: ${err.message}`, "error");
+    } finally {
+        projectExplorerLoadingPath = "";
+        renderProjectExplorerCurrentEntries();
+    }
+}
+
+function createProjectExplorerRow(entry = {}, { parent = false, depth = 0, expanded = false, hasChildren = false } = {}) {
     const isDirectory = entry.type === "directory";
+    const extension = getProjectFileExtension(entry);
+    const fileKind = getProjectFileKind(entry, { parent });
     const button = document.createElement("button");
     button.type = "button";
     button.className = `project-explorer-row${isDirectory ? " project-explorer-row-dir" : " project-explorer-row-file"}`;
+    button.dataset.fileKind = fileKind;
+    button.dataset.depth = String(depth);
+    button.dataset.path = normalizeProjectExplorerPath(entry.path || ".");
+    if (expanded) button.dataset.expanded = "true";
+    if (isDirectory) {
+        button.setAttribute("aria-expanded", String(expanded));
+        button.dataset.hasChildren = String(hasChildren);
+    }
+    if (!isDirectory && normalizeProjectExplorerPath(entry.path || "") === activeProjectFile?.path) {
+        button.classList.add("active");
+        button.setAttribute("aria-current", "true");
+    }
+    button.style.setProperty("--project-entry-indent", `${Math.max(0, depth) * 18}px`);
     button.innerHTML = `
-        <svg class="project-explorer-row-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            ${isDirectory
-                ? '<path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>'
-                : '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>'}
-        </svg>
+        <span class="project-explorer-row-icon" aria-hidden="true">${getProjectFileIconMarkup(fileKind, extension)}</span>
         <span class="project-explorer-row-name"></span>
         <span class="project-explorer-row-meta"></span>
     `;
     button.querySelector(".project-explorer-row-name").textContent = parent ? "Parent folder" : (entry.name || entry.path || "Untitled");
     button.querySelector(".project-explorer-row-meta").textContent = isDirectory ? "Folder" : formatProjectFileSize(entry.size);
+    button.setAttribute("aria-label", `${parent ? "Go to parent folder" : isDirectory ? (expanded ? "Collapse folder" : "Expand folder") : "Open file"} ${entry.name || entry.path || ""}`.trim());
     button.addEventListener("click", () => {
         if (isDirectory) {
-            void refreshProjectExplorer({ path: entry.path || "." });
+            void toggleProjectExplorerDirectory(entry);
         } else {
             void openProjectFilePreview(entry.path || "");
         }
@@ -997,19 +2335,42 @@ function createProjectExplorerRow(entry = {}, { parent = false } = {}) {
     return button;
 }
 
-async function refreshProjectBranchSummary(root = getSessionProjectRoot()) {
-    if (!root || !projectBranchSummary || !hasWorkspaceBridgeAccess()) return;
+function updateProjectGitUi(root = getSessionProjectRoot(), info = null) {
+    const gitInfo = root ? setActiveProjectGitInfo(root, info || {}) : setActiveProjectGitInfo(null);
+    if (projectBranchSummary) {
+        projectBranchSummary.textContent = !root
+            ? "No project selected"
+            : gitInfo?.unavailable
+                ? "Git unavailable"
+                : !gitInfo?.isRepo
+                    ? "No Git repository"
+                    : `${getGitBranchDisplayLabel(gitInfo)} / ${formatGitDirtyText(gitInfo.dirtyCount)}`;
+    }
+    updateComposerProjectContextBar();
+    if (composerBranchMenu && !composerBranchMenu.hidden) {
+        renderComposerBranchMenu();
+        positionComposerBranchMenu();
+    }
+    return gitInfo;
+}
+
+async function refreshProjectBranchSummary(root = getSessionProjectRoot(), { silent = true } = {}) {
+    if (!root || !projectBranchSummary) return null;
+    if (!hasWorkspaceBridgeAccess()) {
+        updateProjectGitUi(root, { unavailable: true, error: "Local Workspace Bridge is not connected." });
+        return null;
+    }
+    const requestId = activeProjectGitRequestId + 1;
+    activeProjectGitRequestId = requestId;
     try {
-        const bridgeOptions = getActiveProjectBridgeOptions();
-        const branchResult = await runWorkspaceCommand("git branch --show-current", ".", 10, null, bridgeOptions);
-        const statusResult = await runWorkspaceCommand("git status --short", ".", 10, null, bridgeOptions);
-        const branch = String(branchResult.stdout || "").trim() || root.branch || "detached";
-        const dirtyLines = String(statusResult.stdout || "").trim().split(/\r?\n/).filter(Boolean).length;
-        projectBranchSummary.textContent = `${branch} / ${dirtyLines ? `${dirtyLines} changed` : "clean"}`;
-        updateComposerProjectContextBar();
+        const result = await getProjectGitInfoFromBridge(root);
+        if (requestId !== activeProjectGitRequestId || getSessionProjectRoot()?.id !== root.id) return null;
+        return updateProjectGitUi(root, result);
     } catch (err) {
-        projectBranchSummary.textContent = `${root.name} / git status unavailable`;
-        updateComposerProjectContextBar();
+        if (requestId !== activeProjectGitRequestId || getSessionProjectRoot()?.id !== root.id) return null;
+        updateProjectGitUi(root, { unavailable: true, error: err.message });
+        if (!silent) showToast(`Could not inspect Git: ${err.message}`, "error");
+        return null;
     }
 }
 
@@ -1036,7 +2397,7 @@ async function refreshProjectExplorer({ path = activeProjectExplorerPath, silent
         status: "running"
     });
     try {
-        const result = await listWorkspaceTree(activeProjectExplorerPath, 0, null, 160, getActiveProjectBridgeOptions());
+        const result = await listWorkspaceTree(activeProjectExplorerPath, 2, null, 320, getActiveProjectBridgeOptions());
         renderProjectExplorerEntries(result);
         if (activityId) updateAgentActivityEvent(activityId, { status: "done" });
         if (refreshBranch) void refreshProjectBranchSummary(root);
@@ -1127,19 +2488,17 @@ async function openProjectFilePreview(path = "") {
     try {
         const result = await readWorkspaceFile(cleanPath, null, getActiveProjectBridgeOptions());
         updateAgentActivityEvent(activityId, { status: "done" });
-        openProjectContentDialog({
-            title: result.path || cleanPath,
-            subtitle: `${Number(result.size || 0).toLocaleString()} bytes${result.truncated ? " / truncated" : ""}`,
+        activeProjectFile = {
+            path: normalizeProjectExplorerPath(result.path || cleanPath),
+            name: getProjectFileDisplayName(result.path || cleanPath),
             content: result.content || "",
-            primaryLabel: "Add path",
-            onPrimary: () => {
-                if (!input) return;
-                const insertion = `\`${result.path || cleanPath}\``;
-                input.value = [input.value.trim(), insertion].filter(Boolean).join(" ");
-                input.dispatchEvent(new Event("input", { bubbles: true }));
-                input.focus();
-            }
-        });
+            size: Number(result.size || 0),
+            truncated: Boolean(result.truncated)
+        };
+        expandProjectExplorerAncestors(activeProjectFile.path);
+        openProjectWorkspacePanel("files", { refresh: false });
+        renderProjectExplorerCurrentEntries();
+        renderProjectFileViewer();
     } catch (err) {
         updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
         showToast(`Could not read file: ${err.message}`, "error");
@@ -1163,13 +2522,203 @@ function formatProjectCommandOutput(result = {}) {
     const status = getProjectCommandStatus(result);
     const stdout = trimLocalToolText ? trimLocalToolText(result.stdout || "") : String(result.stdout || "");
     const stderr = trimLocalToolText ? trimLocalToolText(result.stderr || "") : String(result.stderr || "");
+    const exitCode = Number(result.exitCode ?? 0);
+    const needsStatus = result.timedOut || exitCode !== 0 || result.signal;
+    const output = [stdout, stderr].filter(Boolean).join("\n");
     return [
-        `${status}: ${result.command || ""}`,
-        `Exit code: ${result.exitCode ?? "timeout"} / Duration: ${result.durationMs ?? 0}ms`,
-        `Signal: ${getProjectCommandSignalLine(result)}`,
-        stdout ? `\nStdout:\n${stdout}` : "",
-        stderr ? `\nStderr:\n${stderr}` : ""
+        output || "(no output)",
+        needsStatus ? `[${status} / exit ${result.exitCode ?? "timeout"} / ${getProjectCommandSignalLine(result)}]` : ""
     ].filter(Boolean).join("\n");
+}
+
+function getProjectTerminalPrompt() {
+    const root = getSessionProjectRoot();
+    const rootLabel = (root?.name || "workspace").replace(/\s+/g, "-");
+    const pathLabel = activeProjectExplorerPath && activeProjectExplorerPath !== "." ? ` ${activeProjectExplorerPath}` : "";
+    return `PS ${rootLabel}${pathLabel}>`;
+}
+
+function getProjectTerminalApi() {
+    const projectsApi = getFaunaDesktopApi()?.projects;
+    if (
+        typeof projectsApi?.startTerminalSession === "function"
+        && typeof projectsApi?.writeTerminalSession === "function"
+        && typeof projectsApi?.onTerminalData === "function"
+    ) {
+        return projectsApi;
+    }
+    return null;
+}
+
+function appendProjectTerminalSessionText(text = "") {
+    projectTerminalSessionBuffer = `${projectTerminalSessionBuffer}${String(text || "")}`.slice(-120000);
+}
+
+function ensureProjectTerminalDataListener(api = getProjectTerminalApi()) {
+    if (projectTerminalDataUnsubscribe || !api) return;
+    projectTerminalDataUnsubscribe = api.onTerminalData(payload => {
+        if (!payload || payload.sessionId !== projectTerminalSessionId) return;
+        if (payload.data) appendProjectTerminalSessionText(payload.data);
+        if (payload.type === "exit" || payload.type === "error") {
+            projectTerminalSessionId = "";
+            projectTerminalSessionRootId = "";
+            projectTerminalSessionStarting = false;
+            projectTerminalSessionDraft = "";
+        }
+        renderProjectTerminal({ includeDraft: true });
+    });
+}
+
+async function stopProjectTerminalSession() {
+    if (!projectTerminalSessionId) return;
+    const sessionId = projectTerminalSessionId;
+    projectTerminalSessionId = "";
+    projectTerminalSessionRootId = "";
+    projectTerminalSessionDraft = "";
+    try {
+        await getProjectTerminalApi()?.stopTerminalSession?.({ sessionId });
+    } catch {
+        // The shell may already have exited.
+    }
+}
+
+async function ensureProjectTerminalSession() {
+    const root = getSessionProjectRoot();
+    const api = getProjectTerminalApi();
+    if (!root || !api) {
+        renderProjectTerminal();
+        return;
+    }
+    ensureProjectTerminalDataListener(api);
+    if (projectTerminalSessionId && projectTerminalSessionRootId === root.id) {
+        renderProjectTerminal();
+        return;
+    }
+    await stopProjectTerminalSession();
+    projectTerminalSessionRootId = root.id;
+    projectTerminalSessionStarting = true;
+    projectTerminalSessionBuffer = `Starting terminal in ${root.path}...\n`;
+    projectTerminalSessionDraft = "";
+    renderProjectTerminal({ includeDraft: false });
+    try {
+        const result = await api.startTerminalSession({ projectPath: root.path });
+        if (result?.ok === false) throw new Error(result.message || "Terminal could not be started.");
+        projectTerminalSessionId = String(result.sessionId || "");
+        projectTerminalSessionRootId = root.id;
+        projectTerminalSessionNewline = String(result.newline || "\n");
+        projectTerminalSessionStarting = false;
+        projectTerminalSessionBuffer = `Started ${result.command || "terminal"} in ${root.path}\n`;
+        renderProjectTerminal();
+    } catch (err) {
+        projectTerminalSessionId = "";
+        projectTerminalSessionRootId = "";
+        projectTerminalSessionStarting = false;
+        projectTerminalSessionDraft = "";
+        projectTerminalSessionBuffer = `Could not start terminal session: ${err.message}\n\n${getProjectTerminalPrompt()} `;
+        renderProjectTerminal({ includeDraft: false });
+        showToast(`Could not start terminal: ${err.message}`, "error");
+    }
+}
+
+function renderProjectTerminal({ includeDraft = true } = {}) {
+    if (!projectCommandOutput) return;
+    if (projectTerminalSessionId || projectTerminalSessionStarting || projectTerminalSessionBuffer) {
+        const draft = includeDraft && projectTerminalSessionDraft ? projectTerminalSessionDraft : "";
+        projectCommandOutput.hidden = false;
+        projectCommandOutput.textContent = `${projectTerminalSessionBuffer}${draft}` || "Starting terminal...";
+        projectCommandOutput.scrollTop = projectCommandOutput.scrollHeight;
+        return;
+    }
+    projectTerminalLines = projectTerminalLines.slice(-260);
+    const lines = projectTerminalLines.slice();
+    if (includeDraft) {
+        lines.push(`${getProjectTerminalPrompt()} ${projectCommandInput?.value || ""}`);
+    }
+    projectCommandOutput.hidden = false;
+    projectCommandOutput.textContent = lines.join("\n") || `${getProjectTerminalPrompt()} `;
+    projectCommandOutput.scrollTop = projectCommandOutput.scrollHeight;
+}
+
+function focusProjectTerminalInput() {
+    if (getProjectTerminalApi()) {
+        if (document.activeElement !== projectCommandOutput) projectCommandOutput?.focus?.();
+        void ensureProjectTerminalSession();
+        return;
+    }
+    projectCommandInput?.focus?.();
+    renderProjectTerminal();
+}
+
+function handleProjectTerminalKeydown(event) {
+    const terminalApi = getProjectTerminalApi();
+    if (terminalApi) {
+        if (!projectTerminalSessionId) {
+            event.preventDefault();
+            void ensureProjectTerminalSession();
+            return;
+        }
+        if (event.ctrlKey && event.key.toLowerCase() === "c") {
+            event.preventDefault();
+            projectTerminalSessionDraft = "";
+            void terminalApi.writeTerminalSession({ sessionId: projectTerminalSessionId, data: "\x03" });
+            renderProjectTerminal();
+            return;
+        }
+        if (event.metaKey || event.altKey || (event.ctrlKey && event.key.toLowerCase() !== "v")) return;
+        if (event.key === "Enter") {
+            event.preventDefault();
+            const data = `${projectTerminalSessionDraft}${projectTerminalSessionNewline}`;
+            projectTerminalSessionDraft = "";
+            void terminalApi.writeTerminalSession({ sessionId: projectTerminalSessionId, data });
+            renderProjectTerminal();
+            return;
+        }
+        if (event.key === "Backspace") {
+            event.preventDefault();
+            projectTerminalSessionDraft = projectTerminalSessionDraft.slice(0, -1);
+            renderProjectTerminal();
+            return;
+        }
+        if (event.key === "Tab") {
+            event.preventDefault();
+            projectTerminalSessionDraft += "    ";
+            renderProjectTerminal();
+            return;
+        }
+        if (event.key.length === 1) {
+            event.preventDefault();
+            projectTerminalSessionDraft += event.key;
+            renderProjectTerminal();
+        }
+        return;
+    }
+    if (!projectCommandInput || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === "Enter") {
+        event.preventDefault();
+        void runProjectCommandFromPanel();
+        return;
+    }
+    if (event.key === "Backspace") {
+        event.preventDefault();
+        projectCommandInput.value = projectCommandInput.value.slice(0, -1);
+        focusProjectTerminalInput();
+        return;
+    }
+    if (event.key.length === 1) {
+        event.preventDefault();
+        projectCommandInput.value += event.key;
+        focusProjectTerminalInput();
+    }
+}
+
+function handleProjectTerminalPaste(event) {
+    const api = getProjectTerminalApi();
+    if (!api) return;
+    const text = event.clipboardData?.getData("text") || "";
+    if (!text) return;
+    event.preventDefault();
+    projectTerminalSessionDraft += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    renderProjectTerminal();
 }
 
 async function runProjectCommandFromPanel() {
@@ -1193,21 +2742,22 @@ async function runProjectCommandFromPanel() {
         status: "running"
     });
     if (projectCommandRunBtn) projectCommandRunBtn.disabled = true;
-    if (projectCommandOutput) {
-        projectCommandOutput.hidden = false;
-        projectCommandOutput.textContent = `Running: ${command}`;
-    }
+    const runningIndex = projectTerminalLines.push(`${getProjectTerminalPrompt()} ${command}`, "Running...") - 1;
+    if (projectCommandInput) projectCommandInput.value = "";
+    renderProjectTerminal({ includeDraft: false });
     try {
         const result = await runWorkspaceCommand(command, activeProjectExplorerPath || ".", 60, null, getActiveProjectBridgeOptions());
         const output = formatProjectCommandOutput(result);
-        if (projectCommandOutput) projectCommandOutput.textContent = output;
+        projectTerminalLines[runningIndex] = output;
+        renderProjectTerminal();
         updateAgentActivityEvent(activityId, {
             status: Number(result.exitCode || 0) === 0 && !result.timedOut ? "done" : "failed",
             detail: `${command} / ${getProjectCommandStatus(result)}`
         });
         void refreshProjectBranchSummary();
     } catch (err) {
-        if (projectCommandOutput) projectCommandOutput.textContent = `Command failed: ${err.message}`;
+        projectTerminalLines[runningIndex] = `Command failed: ${err.message}`;
+        renderProjectTerminal();
         updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
         showToast(`Command failed: ${err.message}`, "error");
     } finally {
@@ -1215,23 +2765,64 @@ async function runProjectCommandFromPanel() {
     }
 }
 
+function getActiveProjectPageChatKey(tabKey = activeProjectAgentTab) {
+    const key = normalizeProjectAgentTabKey(tabKey);
+    return normalizeProjectAgentTab(key) === "chat" ? key : "chat";
+}
+
+function renderProjectPageChatHistory(root = getSessionProjectRoot(), history = projectPageChatHistory) {
+    if (!projectPageChatLog) return;
+    if (!Array.isArray(history) || history.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "project-page-chat-empty";
+        empty.textContent = root
+            ? `Ask about ${root.name}. The AI can use this project's files and terminal tools.`
+            : "Select a project chat first to use workspace side chat.";
+        projectPageChatLog.replaceChildren(empty);
+        return;
+    }
+    projectPageChatLog.replaceChildren();
+    history.forEach(message => {
+        appendProjectPageChatMessage(message?.role || "assistant", message?.content || "");
+    });
+}
+
+function syncProjectPageChatStateForActiveTab({ render = true } = {}) {
+    const root = getSessionProjectRoot();
+    const rootId = root?.id || "";
+    const tabKey = getActiveProjectPageChatKey();
+    let state = projectPageChatStates.get(tabKey);
+    if (!state || state.rootId !== rootId) {
+        state = { rootId, history: [] };
+        projectPageChatStates.set(tabKey, state);
+    }
+    projectPageChatRootId = rootId;
+    projectPageChatHistory = state.history;
+    if (render) renderProjectPageChatHistory(root, projectPageChatHistory);
+    return root;
+}
+
 function resetProjectPageChat(root = getSessionProjectRoot()) {
+    const tabKey = getActiveProjectPageChatKey();
     projectPageChatRootId = root?.id || "";
     projectPageChatHistory = [];
+    projectPageChatStates.set(tabKey, { rootId: projectPageChatRootId, history: projectPageChatHistory });
     if (!projectPageChatLog) return;
     const empty = document.createElement("div");
     empty.className = "project-page-chat-empty";
     empty.textContent = root
         ? `Ask about ${root.name}. The AI can use this project's files and terminal tools.`
-        : "Select a project chat first to use workspace page chat.";
+        : "Select a project chat first to use workspace side chat.";
     projectPageChatLog.replaceChildren(empty);
 }
 
 function ensureProjectPageChatRoot() {
     const root = getSessionProjectRoot();
     const rootId = root?.id || "";
-    if (rootId !== projectPageChatRootId) {
-        resetProjectPageChat(root);
+    const tabKey = getActiveProjectPageChatKey();
+    const state = projectPageChatStates.get(tabKey);
+    if (!state || state.rootId !== rootId || state.history !== projectPageChatHistory) {
+        syncProjectPageChatStateForActiveTab();
     }
     return root;
 }
@@ -1265,7 +2856,7 @@ function setProjectPageChatBusy(busy) {
 async function sendProjectPageChatMessage() {
     const prompt = String(projectPageChatInput?.value || "").trim();
     if (!prompt) return;
-    const root = ensureProjectPageChatRoot();
+    const root = syncProjectPageChatStateForActiveTab({ render: false });
     if (!root) {
         showToast("Start or select a project chat first.", "warning");
         return;
@@ -1297,7 +2888,7 @@ async function sendProjectPageChatMessage() {
     const routedModel = chooseModelForRequest(prompt, [], null, null);
     const activityId = recordAgentActivity({
         kind: "chat",
-        label: "Page chat",
+        label: "Side chat",
         detail: prompt,
         status: "running"
     });
@@ -1328,9 +2919,9 @@ async function sendProjectPageChatMessage() {
         if (typeof setupCodeSandbox === "function") setupCodeSandbox(assistantBody);
         updateAgentActivityEvent(activityId, { status: "done", detail: prompt });
     } catch (err) {
-        assistantBody.textContent = `Page chat failed: ${err.message}`;
+        assistantBody.textContent = `Side chat failed: ${err.message}`;
         updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
-        showToast(`Page chat failed: ${err.message}`, "error");
+        showToast(`Side chat failed: ${err.message}`, "error");
     } finally {
         setProjectPageChatBusy(false);
         projectPageChatInput?.focus?.();
@@ -1573,14 +3164,94 @@ function createProjectMenuItem(action, label, iconMarkup, onSelect) {
     return button;
 }
 
+function resetAnchoredSidebarMenu(menu) {
+    if (!menu) return;
+    menu.classList.remove("sidebar-floating-menu", "sidebar-floating-menu-up");
+    menu.style.removeProperty("left");
+    menu.style.removeProperty("top");
+    menu.style.removeProperty("right");
+    menu.style.removeProperty("bottom");
+}
+
+function mountAnchoredSidebarMenu(menu, menuWrap) {
+    if (!menu) return;
+    if (menuWrap) {
+        menu._faunaAnchorWrap = menuWrap;
+        menuWrap._faunaAnchoredMenu = menu;
+    }
+    if (menu.parentElement !== document.body) {
+        document.body.appendChild(menu);
+    }
+}
+
+function hideAnchoredSidebarMenu(menu) {
+    if (!menu) return;
+    menu.hidden = true;
+    resetAnchoredSidebarMenu(menu);
+    const menuWrap = menu._faunaAnchorWrap;
+    if (menuWrap && menu.parentElement !== menuWrap) {
+        menuWrap.appendChild(menu);
+    }
+}
+
+function positionAnchoredSidebarMenu(menu, trigger) {
+    if (!menu || !trigger || menu.hidden) return;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const gap = 8;
+    const triggerGap = 6;
+
+    menu.classList.add("sidebar-floating-menu");
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    menu.style.right = "auto";
+    menu.style.bottom = "auto";
+    menu.classList.remove("sidebar-floating-menu-up");
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const listBoundary = trigger.closest(".project-list, .chat-history-list, .archived-chat-list");
+    const sectionBoundary = trigger.closest(".projects-section, .history");
+    const listRect = listBoundary?.getBoundingClientRect?.();
+    const sectionRect = sectionBoundary?.getBoundingClientRect?.();
+    const boundaryTop = listRect ? Math.max(gap, listRect.top + 4) : gap;
+    const boundaryBottom = Math.min(
+        viewportHeight - gap,
+        listRect ? listRect.bottom - 4 : viewportHeight - gap,
+        sectionRect ? sectionRect.bottom - 4 : viewportHeight - gap
+    );
+    const maxLeft = Math.max(gap, viewportWidth - menuRect.width - gap);
+    const left = Math.min(maxLeft, Math.max(gap, triggerRect.right - menuRect.width));
+    let top = triggerRect.bottom + triggerGap;
+    let flipped = false;
+
+    if (top + menuRect.height > boundaryBottom) {
+        top = Math.max(gap, triggerRect.top - menuRect.height - triggerGap);
+        flipped = true;
+    }
+    if (top < boundaryTop && boundaryBottom - boundaryTop >= menuRect.height) {
+        top = boundaryTop;
+    }
+    if (top + menuRect.height > viewportHeight - gap) {
+        top = Math.max(gap, viewportHeight - menuRect.height - gap);
+    }
+    if (top + menuRect.height > boundaryBottom) {
+        top = Math.max(gap, boundaryBottom - menuRect.height);
+    }
+
+    menu.classList.toggle("sidebar-floating-menu-up", flipped);
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+}
+
 function closeProjectMenus(except = null) {
     document.querySelectorAll(".project-menu-wrap.open").forEach(menuWrap => {
         if (except && menuWrap === except) return;
         menuWrap.classList.remove("open");
         const trigger = menuWrap.querySelector(".project-menu-trigger");
-        const menu = menuWrap.querySelector(".project-menu");
+        const menu = menuWrap._faunaAnchoredMenu || menuWrap.querySelector(".project-menu");
         trigger?.setAttribute("aria-expanded", "false");
-        if (menu) menu.hidden = true;
+        hideAnchoredSidebarMenu(menu);
     });
 }
 
@@ -1606,22 +3277,85 @@ function activateOrCreateProjectChat(rootId = "") {
     });
 }
 
-function renderProjectRow(root, { nested = false } = {}) {
+function persistProjectChatListState() {
+    safeLocalStorageSet(PROJECT_CHAT_LIST_STATE_STORAGE_KEY, JSON.stringify({
+        collapsed: [...projectChatListState.collapsed],
+        expanded: [...projectChatListState.expanded]
+    }));
+}
+
+function isProjectChatListCollapsed(rootId = "") {
+    return projectChatListState.collapsed.has(String(rootId || ""));
+}
+
+function isProjectChatListExpanded(rootId = "") {
+    return projectChatListState.expanded.has(String(rootId || ""));
+}
+
+function setProjectChatListCollapsed(rootId = "", collapsed = false) {
+    const cleanRootId = String(rootId || "").trim();
+    if (!cleanRootId) return;
+    if (collapsed) {
+        projectChatListState.collapsed.add(cleanRootId);
+    } else {
+        projectChatListState.collapsed.delete(cleanRootId);
+    }
+    persistProjectChatListState();
+    renderProjectList();
+}
+
+function setProjectChatListExpanded(rootId = "", expanded = false) {
+    const cleanRootId = String(rootId || "").trim();
+    if (!cleanRootId) return;
+    if (expanded) {
+        projectChatListState.expanded.add(cleanRootId);
+    } else {
+        projectChatListState.expanded.delete(cleanRootId);
+    }
+    persistProjectChatListState();
+    renderProjectList();
+}
+
+function renderProjectRow(root, { nested = false, chatCount = 0 } = {}) {
     const activeRoot = getSessionProjectRoot();
+    const hasProjectChats = chatCount > 0;
+    const chatsCollapsed = isProjectChatListCollapsed(root.id);
     const row = document.createElement("div");
     row.className = `project-row${nested ? " project-row-worktree" : ""}`;
     row.classList.toggle("active", activeRoot?.id === root.id);
+    row.classList.toggle("project-row-chats-collapsed", chatsCollapsed);
+
+    const collapseButton = document.createElement("button");
+    collapseButton.type = "button";
+    collapseButton.className = "project-row-collapse-btn";
+    collapseButton.disabled = !hasProjectChats;
+    collapseButton.setAttribute("aria-label", hasProjectChats
+        ? `${chatsCollapsed ? "Expand" : "Collapse"} chats for ${root.name}`
+        : `No chats for ${root.name}`);
+    collapseButton.setAttribute("aria-expanded", String(hasProjectChats && !chatsCollapsed));
+    collapseButton.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg>';
+    collapseButton.addEventListener("click", event => {
+        event.stopPropagation();
+        if (!hasProjectChats) return;
+        setProjectChatListCollapsed(root.id, !chatsCollapsed);
+    });
+
+    const projectIcon = document.createElement("span");
+    projectIcon.className = "project-row-icon";
+    projectIcon.setAttribute("aria-hidden", "true");
+    projectIcon.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            ${root.type === "worktree"
+                ? '<path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><circle cx="6" cy="3" r="2"></circle><circle cx="18" cy="21" r="2"></circle><circle cx="18" cy="12" r="2"></circle>'
+                : '<path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>'}
+        </svg>
+    `;
 
     const mainButton = document.createElement("button");
     mainButton.type = "button";
     mainButton.className = "project-main-btn";
     mainButton.setAttribute("aria-current", activeRoot?.id === root.id ? "page" : "false");
     mainButton.innerHTML = `
-        <svg class="project-row-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            ${root.type === "worktree"
-                ? '<path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><circle cx="6" cy="3" r="2"></circle><circle cx="18" cy="21" r="2"></circle><circle cx="18" cy="12" r="2"></circle>'
-                : '<path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>'}
-        </svg>
         <span class="project-row-copy">
             <span class="project-row-name"></span>
             <span class="project-row-path"></span>
@@ -1661,21 +3395,40 @@ function renderProjectRow(root, { nested = false } = {}) {
         closeProjectMenus(menuWrap);
         menuWrap.classList.toggle("open", willOpen);
         menuButton.setAttribute("aria-expanded", String(willOpen));
-        menu.hidden = !willOpen;
+        if (willOpen) {
+            mountAnchoredSidebarMenu(menu, menuWrap);
+            menu.hidden = false;
+            positionAnchoredSidebarMenu(menu, menuButton);
+        } else {
+            hideAnchoredSidebarMenu(menu);
+        }
     });
 
     menuWrap.append(menuButton, menu);
-    row.append(mainButton, menuWrap);
+    row.append(projectIcon, mainButton, collapseButton, menuWrap);
     return row;
 }
 
-function appendProjectChatRows(container, root) {
-    getProjectChatSessions(root.id).forEach(session => {
+function appendProjectChatRows(container, root, { sessions = getProjectChatSessions(root.id) } = {}) {
+    if (isProjectChatListCollapsed(root.id)) return;
+    const isExpanded = isProjectChatListExpanded(root.id);
+    const visibleSessions = isExpanded ? sessions : sessions.slice(0, PROJECT_CHAT_PREVIEW_LIMIT);
+    visibleSessions.forEach(session => {
         container.appendChild(createChatSessionRow(session, {
             variant: "project-chat-session-row",
             hideProjectBadge: true
         }));
     });
+    if (sessions.length <= PROJECT_CHAT_PREVIEW_LIMIT) return;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "project-chat-list-toggle";
+    toggle.textContent = isExpanded ? "Show less" : "Load more";
+    toggle.setAttribute("aria-expanded", String(isExpanded));
+    toggle.addEventListener("click", () => {
+        setProjectChatListExpanded(root.id, !isExpanded);
+    });
+    container.appendChild(toggle);
 }
 
 function renderProjectList() {
@@ -1693,8 +3446,9 @@ function renderProjectList() {
             type: "project",
             project
         };
-        projectList.appendChild(renderProjectRow(projectRoot));
-        appendProjectChatRows(projectList, projectRoot);
+        const projectChatSessions = getProjectChatSessions(projectRoot.id);
+        projectList.appendChild(renderProjectRow(projectRoot, { chatCount: projectChatSessions.length }));
+        appendProjectChatRows(projectList, projectRoot, { sessions: projectChatSessions });
         project.worktrees.forEach(worktree => {
             const worktreeRoot = {
                 ...worktree,
@@ -1702,8 +3456,9 @@ function renderProjectList() {
                 type: "worktree",
                 project
             };
-            projectList.appendChild(renderProjectRow(worktreeRoot, { nested: true }));
-            appendProjectChatRows(projectList, worktreeRoot);
+            const worktreeChatSessions = getProjectChatSessions(worktreeRoot.id);
+            projectList.appendChild(renderProjectRow(worktreeRoot, { nested: true, chatCount: worktreeChatSessions.length }));
+            appendProjectChatRows(projectList, worktreeRoot, { sessions: worktreeChatSessions });
         });
     });
     if (workspaceProjects.length === 0) {
@@ -1983,6 +3738,7 @@ function positionComposerProjectMenu() {
 
 function openComposerProjectMenu({ focusFirst = false } = {}) {
     if (!composerProjectMenu || !composerProjectBtn) return;
+    closeComposerBranchMenu();
     ensureComposerProjectMenuPortal();
     renderComposerProjectPicker();
     composerProjectMenu.hidden = false;
@@ -2265,6 +4021,7 @@ agentTaskModeBtn?.addEventListener("click", event => {
 });
 composerProjectBtn?.addEventListener("click", event => {
     event.stopPropagation();
+    closeComposerBranchMenu();
     toggleComposerProjectMenu();
 });
 composerLocalWorkBtn?.addEventListener("click", event => {
@@ -2275,11 +4032,12 @@ composerLocalWorkBtn?.addEventListener("click", event => {
     updateWorkspaceBridgeSettingsUi?.();
     updateProviderSettingsUi?.();
     updateComposerProjectContextBar();
+    if (isWorkspaceBridgeEnabled && getSessionProjectRoot()) void refreshProjectBranchSummary(getSessionProjectRoot());
     showToast(isWorkspaceBridgeEnabled ? "Local workspace access enabled." : "Local workspace access disabled.", isWorkspaceBridgeEnabled ? "success" : "info");
 });
 composerBranchBtn?.addEventListener("click", event => {
     event.stopPropagation();
-    openComposerProjectMenu({ focusFirst: true });
+    toggleComposerBranchMenu({ focusSearch: true });
 });
 windowWorkspacePanelToggleBtn?.addEventListener("click", event => {
     event.stopPropagation();
@@ -2291,7 +4049,10 @@ windowWorkspacePanelMaximizeBtn?.addEventListener("click", event => {
     setProjectAgentMaximized(!isProjectAgentMaximized);
 });
 projectPanelMenuTab?.addEventListener("click", () => openProjectWorkspacePanel("menu"));
-projectPanelAddTabBtn?.addEventListener("click", () => openProjectWorkspacePanel("menu"));
+projectPanelAddTabBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    toggleProjectPanelTabMenu();
+});
 projectFilesTab?.addEventListener("click", () => openProjectWorkspacePanel("files", { refresh: true }));
 projectActivityTab?.addEventListener("click", () => openProjectWorkspacePanel("activity"));
 projectPageChatTab?.addEventListener("click", () => openProjectWorkspacePanel("chat"));
@@ -2318,6 +4079,39 @@ projectExplorerRefreshBtn?.addEventListener("click", () => {
 projectExplorerUpBtn?.addEventListener("click", () => {
     void refreshProjectExplorer({ path: getProjectParentPath(activeProjectExplorerPath) });
 });
+projectFileMoreBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    toggleProjectFileMoreMenu();
+});
+projectFileRevealBtn?.addEventListener("click", () => {
+    if (activeProjectFile?.path) {
+        expandProjectExplorerAncestors(activeProjectFile.path);
+        renderProjectExplorerCurrentEntries();
+        projectExplorerList?.querySelector(`[data-path="${CSS.escape(activeProjectFile.path)}"]`)?.focus?.();
+        return;
+    }
+    projectExplorerFilterInput?.focus?.();
+});
+projectFileCopyPathBtn?.addEventListener("click", () => {
+    void copyProjectFileText(activeProjectFile?.path || "", projectFileCopyPathBtn);
+    closeProjectFileMoreMenu();
+});
+projectFileCopyContentBtn?.addEventListener("click", () => {
+    void copyProjectFileText(activeProjectFile?.content || "", projectFileCopyContentBtn);
+    closeProjectFileMoreMenu();
+});
+projectFileToggleExtendedBtn?.addEventListener("click", () => {
+    activeProjectFileExtendedView = !activeProjectFileExtendedView;
+    safeLocalStorageSet(PROJECT_FILE_EXTENDED_VIEW_STORAGE_KEY, activeProjectFileExtendedView ? "true" : "false");
+    closeProjectFileMoreMenu();
+    renderProjectFileViewer();
+});
+projectFileToggleWrapBtn?.addEventListener("click", () => {
+    activeProjectFileLineWrap = !activeProjectFileLineWrap;
+    safeLocalStorageSet(PROJECT_FILE_LINE_WRAP_STORAGE_KEY, activeProjectFileLineWrap ? "true" : "false");
+    closeProjectFileMoreMenu();
+    renderProjectFileViewer();
+});
 projectInstructionsBtn?.addEventListener("click", () => openProjectInstructionsDialog());
 projectDiffReviewBtn?.addEventListener("click", () => {
     void openProjectDiffReview();
@@ -2333,6 +4127,13 @@ projectWorktreeActionBtn?.addEventListener("click", () => {
 });
 projectCommandRunBtn?.addEventListener("click", () => {
     void runProjectCommandFromPanel();
+});
+projectCommandOutput?.addEventListener("click", focusProjectTerminalInput);
+projectCommandOutput?.addEventListener("focus", focusProjectTerminalInput);
+projectCommandOutput?.addEventListener("keydown", handleProjectTerminalKeydown);
+projectCommandOutput?.addEventListener("paste", handleProjectTerminalPaste);
+projectCommandInput?.addEventListener("input", () => {
+    renderProjectTerminal();
 });
 projectCommandInput?.addEventListener("keydown", event => {
     if (event.key !== "Enter") return;
@@ -2354,19 +4155,39 @@ projectPageChatInput?.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
     if (!event.target?.closest?.(".agent-task-mode-wrap")) closeAgentTaskModeMenu();
     if (!event.target?.closest?.(".composer-project-wrap")) closeComposerProjectMenu();
+    if (!event.target?.closest?.(".composer-branch-menu") && !event.target?.closest?.("#composerBranchBtn")) closeComposerBranchMenu();
     if (!event.target?.closest?.(".new-chat-picker-wrap")) closeNewChatProjectMenu();
     if (!event.target?.closest?.(".project-menu-wrap")) closeProjectMenus();
     if (!event.target?.closest?.(".project-sort-wrap")) closeProjectSortMenu();
+    if (!event.target?.closest?.(".project-agent-tabbar")) closeProjectPanelTabMenu();
+    if (!event.target?.closest?.(".project-file-header-actions")) closeProjectFileMoreMenu();
 });
 window.addEventListener("resize", positionComposerProjectMenu);
 window.addEventListener("scroll", positionComposerProjectMenu, true);
+window.addEventListener("resize", positionComposerBranchMenu);
+window.addEventListener("scroll", positionComposerBranchMenu, true);
+window.addEventListener("resize", () => {
+    closeProjectMenus();
+    closeChatSessionMenus();
+});
+projectList?.addEventListener("scroll", () => {
+    closeProjectMenus();
+    closeChatSessionMenus();
+}, { passive: true });
+chatHistoryList?.addEventListener("scroll", closeChatSessionMenus, { passive: true });
+archivedChatList?.addEventListener("scroll", closeChatSessionMenus, { passive: true });
 document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
     closeAgentTaskModeMenu();
     closeComposerProjectMenu();
+    closeComposerBranchMenu();
     closeNewChatProjectMenu();
     closeProjectMenus();
+    closeChatSessionMenus();
     closeProjectSortMenu();
+    closeProjectPanelTabMenu();
+    closeProjectFileMoreMenu();
+    clearProjectLineCommentPanels();
 });
 setProjectAgentWidth(activeProjectAgentWidth, { persist: false });
 setProjectListCollapsed(isProjectListCollapsed, { persist: false });
@@ -2558,6 +4379,495 @@ function activeChatHasPersistableContent() {
     return Boolean(chat?.children.length || conversationHistory.length);
 }
 
+let promptTimelineElement = null;
+
+function getPromptTimelineDate(value) {
+    const date = new Date(value || "");
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function trimPromptTimelineText(value = "", maxLength = PROMPT_TIMELINE_PROMPT_PREVIEW_CHARS) {
+    const text = String(value || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    if (!text) return "";
+    return text.length > maxLength ? `${text.slice(0, Math.max(1, maxLength - 3)).trim()}...` : text;
+}
+
+function cleanPromptTimelineText(content = "", maxLength = PROMPT_TIMELINE_PROMPT_PREVIEW_CHARS) {
+    let text = String(content || "");
+    if (typeof stripAssistantControlBlocks === "function") {
+        text = stripAssistantControlBlocks(text);
+    }
+    text = text
+        .split(/\n\n--- Attached File Content:/i)[0]
+        .replace(/\n+\[Voice chat settings\][\s\S]*$/i, "")
+        .replace(/\n+--- Web Search Context ---[\s\S]*?--- End Web Search Context ---/gi, "")
+        .replace(/\n+--- Local Workspace Bridge Context ---[\s\S]*?--- End Local Workspace Bridge Context ---/gi, "")
+        .replace(/\n+--- Approx Location Weather Context ---[\s\S]*?--- End Approx Location Weather Context ---/gi, "")
+        .replace(/\n+--- Image Analysis Context[^\n]*---[\s\S]*?--- End Image Analysis Context ---/gi, "")
+        .replace(/\n+\[Local workspace bridge was requested[\s\S]*$/i, "");
+    return trimPromptTimelineText(text, maxLength);
+}
+
+function getAssistantTurnDurationMs(messageIndex, history = conversationHistory) {
+    const index = Number(messageIndex);
+    if (!Number.isInteger(index) || index < 0 || !Array.isArray(history)) return null;
+    const assistant = history[index];
+    if (!assistant || assistant.role !== "assistant") return null;
+    const completedAt = getPromptTimelineDate(assistant.createdAt);
+    if (!completedAt) return null;
+
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+        const message = history[cursor];
+        if (message?.role !== "user") continue;
+        const startedAt = getPromptTimelineDate(message.createdAt);
+        if (!startedAt) return null;
+        const duration = completedAt.getTime() - startedAt.getTime();
+        return duration >= 0 ? duration : null;
+    }
+    return null;
+}
+
+function formatTurnDurationLabel(durationMs) {
+    const duration = Number(durationMs);
+    if (!Number.isFinite(duration) || duration < 0) return "";
+    if (duration < 1000) return "<1s";
+    return formatDuration(duration);
+}
+
+function collectPromptTimelineTurns(history = conversationHistory) {
+    const source = Array.isArray(history) ? history : [];
+    const turns = [];
+    let currentTurn = null;
+
+    source.forEach((message, index) => {
+        if (message?.role === "user") {
+            if (currentTurn) turns.push(currentTurn);
+            currentTurn = {
+                userIndex: index,
+                assistantIndex: null,
+                prompt: cleanPromptTimelineText(message.content),
+                response: "",
+                startedAt: message.createdAt || ""
+            };
+            return;
+        }
+
+        if (message?.role === "assistant" && currentTurn && currentTurn.assistantIndex === null) {
+            currentTurn.assistantIndex = index;
+            currentTurn.response = cleanPromptTimelineText(message.content, PROMPT_TIMELINE_RESPONSE_PREVIEW_CHARS);
+            currentTurn.completedAt = message.createdAt || "";
+            currentTurn.durationMs = getAssistantTurnDurationMs(index, source);
+        }
+    });
+
+    if (currentTurn) turns.push(currentTurn);
+    return turns.filter(turn => turn.prompt);
+}
+
+function getPromptTimelineToolLabels(assistantIndex) {
+    if (!chat || !Number.isInteger(assistantIndex)) return [];
+    const messageNode = chat.querySelector(`.message-node.output-node[data-history-index="${assistantIndex}"]`);
+    if (!messageNode) return [];
+    const labels = [];
+    messageNode.querySelectorAll(".tool-activity-row:not(.tool-activity-row-preview):not(.tool-activity-row-done)").forEach(row => {
+        const label = row.querySelector(".tool-activity-label")?.textContent?.trim();
+        if (label && !labels.includes(label)) labels.push(label);
+    });
+    return labels.slice(0, 3);
+}
+
+function ensurePromptTimelineElement() {
+    if (promptTimelineElement?.isConnected) return promptTimelineElement;
+    const mainContent = document.querySelector(".main-content");
+    if (!mainContent) return null;
+
+    promptTimelineElement = document.createElement("nav");
+    promptTimelineElement.id = "promptTimeline";
+    promptTimelineElement.className = "prompt-timeline";
+    promptTimelineElement.setAttribute("aria-label", "Prompt timeline");
+    promptTimelineElement.hidden = true;
+    promptTimelineElement.addEventListener("click", event => {
+        const item = event.target.closest("[data-prompt-timeline-index]");
+        if (!item) return;
+        scrollToPromptTimelineTurn(Number(item.dataset.promptTimelineIndex));
+    });
+    mainContent.appendChild(promptTimelineElement);
+    return promptTimelineElement;
+}
+
+function renderPromptTimeline(history = conversationHistory) {
+    const timeline = ensurePromptTimelineElement();
+    if (!timeline) return;
+    const turns = collectPromptTimelineTurns(history);
+    const shouldShow = activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND
+        && turns.length >= PROMPT_TIMELINE_MIN_PROMPTS
+        && activeChatHasContent();
+
+    timeline.hidden = !shouldShow;
+    document.body?.classList.toggle("prompt-timeline-visible", shouldShow);
+    if (!shouldShow) {
+        timeline.replaceChildren();
+        return;
+    }
+
+    const visibleTurns = turns.slice(-PROMPT_TIMELINE_MAX_ITEMS);
+    const latestAssistantIndex = [...visibleTurns].reverse().find(turn => turn.assistantIndex !== null)?.assistantIndex;
+    const track = document.createElement("div");
+    track.className = "prompt-timeline-track";
+
+    visibleTurns.forEach((turn, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "prompt-timeline-item";
+        button.dataset.promptTimelineIndex = String(turn.userIndex);
+        button.style.setProperty("--timeline-bar-scale", String(0.46 + ((index % 5) * 0.12)));
+        if (turn.assistantIndex === latestAssistantIndex) {
+            button.classList.add("active");
+            button.setAttribute("aria-current", "step");
+        }
+        button.setAttribute("aria-label", `Jump to prompt: ${turn.prompt}`);
+
+        const bar = document.createElement("span");
+        bar.className = "prompt-timeline-bar";
+        bar.setAttribute("aria-hidden", "true");
+
+        const card = document.createElement("span");
+        card.className = "prompt-timeline-card";
+        const title = document.createElement("strong");
+        title.textContent = turn.prompt;
+        const response = document.createElement("span");
+        response.className = "prompt-timeline-response";
+        response.textContent = turn.response || "Waiting for the next response.";
+        card.append(title, response);
+
+        const metaParts = [];
+        const duration = formatTurnDurationLabel(turn.durationMs);
+        if (duration) metaParts.push(`Worked ${duration}`);
+        const toolLabels = getPromptTimelineToolLabels(turn.assistantIndex);
+        if (toolLabels.length > 0) metaParts.push(...toolLabels);
+        if (metaParts.length > 0) {
+            const meta = document.createElement("span");
+            meta.className = "prompt-timeline-meta";
+            meta.textContent = metaParts.join("  /  ");
+            card.appendChild(meta);
+        }
+
+        button.append(bar, card);
+        track.appendChild(button);
+    });
+
+    timeline.replaceChildren(track);
+}
+
+function ensurePromptTimelineTurnRendered(userIndex) {
+    if (!chat || !Number.isInteger(userIndex)) return null;
+    let node = chat.querySelector(`.message-node.user-node[data-history-index="${userIndex}"]`);
+    if (node) return node;
+    if (!Array.isArray(conversationHistory) || userIndex < 0 || userIndex >= conversationHistory.length) return null;
+
+    renderChatHistoryWindow(conversationHistory, {
+        start: Math.max(0, userIndex - 2),
+        end: Math.min(conversationHistory.length, userIndex + 8),
+        replace: true,
+        sessionId: activeSessionId
+    });
+    node = chat.querySelector(`.message-node.user-node[data-history-index="${userIndex}"]`);
+    return node;
+}
+
+function scrollToPromptTimelineTurn(userIndex) {
+    const node = ensurePromptTimelineTurnRendered(userIndex);
+    if (!node) return;
+    document.querySelectorAll(".prompt-timeline-item.active").forEach(item => item.classList.remove("active"));
+    document.querySelector(`.prompt-timeline-item[data-prompt-timeline-index="${userIndex}"]`)?.classList.add("active");
+    node.classList.add("timeline-highlight");
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => node.classList.remove("timeline-highlight"), 1200);
+}
+
+function hasTurnToolActivity(parentBubbleBlock) {
+    return Boolean(parentBubbleBlock?.querySelector?.(".tool-activity-card"));
+}
+
+function appendTurnDurationAction(actions, messageIndex, parentBubbleBlock = null) {
+    if (!actions) return null;
+    actions.querySelector(".turn-duration-pill")?.remove();
+    const durationMs = getAssistantTurnDurationMs(messageIndex);
+    const durationLabel = formatTurnDurationLabel(durationMs);
+    if (!durationLabel) return null;
+
+    const hasTools = hasTurnToolActivity(parentBubbleBlock || actions.closest(".bubble-block"));
+    const node = document.createElement(hasTools ? "button" : "span");
+    node.className = `turn-duration-pill${hasTools ? "" : " turn-duration-static"}`;
+    node.textContent = `Worked ${durationLabel}`;
+    if (hasTools) {
+        node.type = "button";
+        node.dataset.turnDurationToggle = "true";
+        node.dataset.tooltip = "Show tool activity";
+        node.setAttribute("aria-label", `Show tool activity for this response. Worked ${durationLabel}.`);
+        node.setAttribute("aria-expanded", "false");
+    } else {
+        node.setAttribute("aria-label", `Response worked ${durationLabel}.`);
+    }
+
+    const time = actions.querySelector(".message-action-time");
+    if (time) {
+        actions.insertBefore(node, time);
+    } else {
+        actions.appendChild(node);
+    }
+    return node;
+}
+
+function setToolActivityCardCollapsed(card, collapsed) {
+    if (!card) return;
+    const isCollapsed = Boolean(collapsed);
+    const toggle = card.querySelector("[data-tool-activity-toggle]");
+    const list = card.querySelector(".tool-activity-list");
+    toggle?.setAttribute("aria-expanded", String(!isCollapsed));
+    card.classList.toggle("collapsed", isCollapsed);
+    card.classList.toggle("expanded", !isCollapsed);
+    card.classList.toggle("turn-activity-expanded", !isCollapsed);
+    card.classList.add("turn-activity-animating");
+    if (list) list.hidden = isCollapsed;
+    window.setTimeout(() => card.classList.remove("turn-activity-animating"), 260);
+}
+
+function setToolActivityBubbleCollapsed(bubble, collapsed) {
+    if (!bubble) return;
+    const state = bubble._faunaToolActivityState;
+    if (state) {
+        state.collapsed = Boolean(collapsed);
+    }
+    bubble.querySelectorAll(".tool-activity-card").forEach(card => setToolActivityCardCollapsed(card, collapsed));
+}
+
+function toggleTurnToolActivityDetails(control) {
+    const messageNode = control?.closest?.(".message-node.output-node");
+    if (!messageNode) return;
+    const cards = Array.from(messageNode.querySelectorAll(".tool-activity-card"));
+    if (cards.length === 0) return;
+    const shouldExpand = !cards.some(card => card.classList.contains("expanded") && !card.querySelector(".tool-activity-list")?.hidden);
+    const bubbles = Array.from(messageNode.querySelectorAll(".tool-activity-bubble"));
+    if (bubbles.length > 0) {
+        bubbles.forEach(bubble => setToolActivityBubbleCollapsed(bubble, !shouldExpand));
+    } else {
+        cards.forEach(card => setToolActivityCardCollapsed(card, !shouldExpand));
+    }
+    control.setAttribute("aria-expanded", String(shouldExpand));
+    control.dataset.tooltip = shouldExpand ? "Hide tool activity" : "Show tool activity";
+    control.setAttribute("aria-label", shouldExpand ? "Hide tool activity for this response." : "Show tool activity for this response.");
+    messageNode.classList.toggle("turn-tools-expanded", shouldExpand);
+}
+
+function updateChatRenderWindowState(start = 0, end = 0, sessionId = activeSessionId) {
+    chatRenderWindowStart = Math.max(0, Number(start) || 0);
+    chatRenderWindowEnd = Math.max(chatRenderWindowStart, Number(end) || 0);
+    chatRenderWindowSessionId = sessionId || "";
+    if (!chat) return;
+    chat.dataset.renderWindowStart = String(chatRenderWindowStart);
+    chat.dataset.renderWindowEnd = String(chatRenderWindowEnd);
+    chat.classList.toggle("chat-windowed", chatRenderWindowStart > 0);
+}
+
+function resetChatRenderWindowState(sessionId = activeSessionId) {
+    updateChatRenderWindowState(0, 0, sessionId);
+    if (chat) {
+        delete chat.dataset.renderWindowStart;
+        delete chat.dataset.renderWindowEnd;
+        chat.classList.remove("chat-windowed");
+    }
+}
+
+function isChatDomFullyRendered(history = conversationHistory) {
+    const total = Array.isArray(history) ? history.length : 0;
+    if (total <= 0) return Boolean(chat);
+    if (chatRenderWindowSessionId !== activeSessionId || chatRenderWindowEnd <= 0) return true;
+    return chatRenderWindowStart <= 0 && chatRenderWindowEnd >= total;
+}
+
+function extendChatRenderWindowToHistory(history = conversationHistory) {
+    const total = Array.isArray(history) ? history.length : 0;
+    if (!total || chatRenderWindowSessionId !== activeSessionId || chatRenderWindowEnd <= 0) return;
+    updateChatRenderWindowState(chatRenderWindowStart, Math.max(chatRenderWindowEnd, total), activeSessionId);
+}
+
+function renderContextCompactionDivider(message, { beforeNode = null, index = null } = {}) {
+    if (!chat) return null;
+    const node = document.createElement("div");
+    node.className = "message-node context-compaction-node";
+    if (Number.isInteger(index) && index >= 0) {
+        node.dataset.historyIndex = String(index);
+    }
+    if (message?.createdAt) {
+        node.dataset.createdAt = String(message.createdAt);
+    }
+
+    const divider = document.createElement("div");
+    divider.className = "context-compaction-divider";
+    divider.setAttribute("role", "note");
+    divider.setAttribute("aria-label", "Context automatically compacted");
+    divider.dataset.tooltip = "Older chat context was summarized and carried forward.";
+
+    const lineBefore = document.createElement("span");
+    lineBefore.className = "context-compaction-line";
+    lineBefore.setAttribute("aria-hidden", "true");
+
+    const content = document.createElement("span");
+    content.className = "context-compaction-content";
+
+    const icon = document.createElement("span");
+    icon.className = "context-compaction-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 7h10"></path>
+            <path d="M4 12h16"></path>
+            <path d="M4 17h8"></path>
+            <path d="m16 15 2 2 3-4"></path>
+        </svg>
+    `;
+
+    const label = document.createElement("span");
+    label.textContent = "Context automatically compacted";
+    content.append(icon, label);
+
+    const lineAfter = document.createElement("span");
+    lineAfter.className = "context-compaction-line";
+    lineAfter.setAttribute("aria-hidden", "true");
+
+    divider.append(lineBefore, content, lineAfter);
+    node.appendChild(divider);
+
+    if (beforeNode instanceof Node && beforeNode.parentElement === chat) {
+        chat.insertBefore(node, beforeNode);
+    } else {
+        chat.appendChild(node);
+    }
+    return node;
+}
+
+function renderHistoryMessageIntoChat(history, index, { beforeNode = null } = {}) {
+    if (!chat || !Array.isArray(history)) return null;
+    const message = history[index];
+    if (isContextCompactionMessage(message)) {
+        return renderContextCompactionDivider(message, { beforeNode, index });
+    }
+    const role = message?.role === "user" ? "user" : "output";
+    const rawContent = String(message?.content || "").trim();
+    if (!rawContent) return null;
+
+    const toolRequest = parseFaunaToolCall(rawContent);
+    const visibleContent = role === "output"
+        ? stripAssistantControlBlocks(rawContent) || (toolRequest ? getAssistantToolPlaceholder(toolRequest) : rawContent)
+        : rawContent;
+    const bubble = addRenderNode(visibleContent, role, [], {
+        historyIndex: index,
+        createdAt: message.createdAt,
+        voiceRecording: message.voiceRecording,
+        beforeNode,
+        forceScroll: false,
+        skipScroll: true
+    });
+    if (!bubble) return null;
+
+    if (role === "output") {
+        renderAssistantContentHtml(bubble, renderMarkdown(visibleContent), { final: true, busy: false });
+        setupAssistantActions(bubble.parentElement, visibleContent, {
+            messageIndex: index,
+            canRegenerate: true,
+            canFork: true,
+            canSpeak: true,
+            speakText: visibleContent,
+            completedAt: message.createdAt
+        });
+    }
+    return bubble.closest(".message-node");
+}
+
+function renderChatHistoryWindow(history = conversationHistory, {
+    start = 0,
+    end = history?.length || 0,
+    replace = true,
+    beforeNode = null,
+    sessionId = activeSessionId
+} = {}) {
+    if (!chat) return { start: 0, end: 0 };
+    const source = Array.isArray(history) ? history : [];
+    const safeEnd = Math.min(source.length, Math.max(0, Number(end) || 0));
+    const safeStart = Math.min(safeEnd, Math.max(0, Number(start) || 0));
+    const anchor = beforeNode instanceof Node && beforeNode.parentElement === chat ? beforeNode : null;
+
+    if (replace) chat.replaceChildren();
+    for (let index = safeStart; index < safeEnd; index += 1) {
+        renderHistoryMessageIntoChat(source, index, { beforeNode: anchor });
+    }
+
+    if (replace) {
+        updateChatRenderWindowState(safeStart, safeEnd, sessionId);
+    }
+    rehydrateRenderedChat(chat);
+    return { start: safeStart, end: safeEnd };
+}
+
+function scheduleChatHistoryBackfillIfNeeded() {
+    if (!chat || chatRenderWindowStart <= 0) return;
+    window.requestAnimationFrame(() => {
+        if (!chat || chatRenderWindowStart <= 0) return;
+        if (chat.scrollHeight <= chat.clientHeight + CHAT_HISTORY_PRELOAD_SCROLL_PX) {
+            loadOlderChatMessagesIfNeeded({ force: true });
+        }
+    });
+}
+
+function renderInitialChatHistoryWindow(history = conversationHistory, sessionId = activeSessionId) {
+    if (!chat) return;
+    const source = Array.isArray(history) ? history : [];
+    const end = source.length;
+    const start = Math.max(0, end - CHAT_INITIAL_RENDER_COUNT);
+    renderChatHistoryWindow(source, {
+        start,
+        end,
+        replace: true,
+        sessionId
+    });
+    scheduleChatHistoryBackfillIfNeeded();
+}
+
+function loadOlderChatMessagesIfNeeded({ force = false } = {}) {
+    if (!chat || isChatHistoryPrepending) return;
+    if (activeWorkspaceView !== WORKSPACE_VIEW_PLAYGROUND) return;
+    if (!Array.isArray(conversationHistory) || conversationHistory.length === 0) return;
+    if (chatRenderWindowSessionId !== activeSessionId || chatRenderWindowStart <= 0) return;
+    if (!force && chat.scrollTop > CHAT_HISTORY_PRELOAD_SCROLL_PX) return;
+
+    isChatHistoryPrepending = true;
+    const previousScrollHeight = chat.scrollHeight;
+    const previousScrollTop = chat.scrollTop;
+    const beforeNode = chat.firstChild;
+    const nextStart = Math.max(0, chatRenderWindowStart - CHAT_HISTORY_RENDER_BATCH_SIZE);
+    const currentEnd = chatRenderWindowEnd;
+
+    renderChatHistoryWindow(conversationHistory, {
+        start: nextStart,
+        end: chatRenderWindowStart,
+        replace: false,
+        beforeNode,
+        sessionId: activeSessionId
+    });
+    updateChatRenderWindowState(nextStart, currentEnd, activeSessionId);
+
+    window.requestAnimationFrame(() => {
+        const heightDelta = chat.scrollHeight - previousScrollHeight;
+        chat.scrollTop = Math.max(0, previousScrollTop + heightDelta);
+        isChatPinnedToBottom = false;
+        isChatHistoryPrepending = false;
+        scheduleChatHistoryBackfillIfNeeded();
+    });
+}
+
 function serializeComposerDraftAttachment(file) {
     if (!(file instanceof File)) return null;
     const desktopPath = String(file.__faunaDesktopFilePath || "").trim();
@@ -2693,8 +5003,14 @@ function snapshotVisibleChatIntoSession(session, {
     tokenTotal = sessionTotalTokens
 } = {}) {
     if (!session) return null;
-    session.chatHtml = sanitizeChatHtmlMediaSources(chat?.innerHTML || "");
-    session.domNodes = chat ? Array.from(chat.childNodes) : [];
+    const hasFullRenderedDom = isChatDomFullyRendered(history);
+    const visibleChatHtml = sanitizeChatHtmlMediaSources(chat?.innerHTML || "");
+    if (hasFullRenderedDom) {
+        session.chatHtml = visibleChatHtml;
+        session.domNodes = chat ? Array.from(chat.childNodes) : [];
+    } else {
+        session.domNodes = [];
+    }
     session.conversationHistory = cloneConversationHistory(history);
     session.composerDraft = captureComposerDraft();
     session.sessionTotalTokens = tokenTotal;
@@ -2703,7 +5019,7 @@ function snapshotVisibleChatIntoSession(session, {
         session.title = deriveSessionTitle(session);
     }
     session.updatedAt = new Date().toISOString();
-    syncUsageToolEventsFromSession(session, { html: session.chatHtml });
+    syncUsageToolEventsFromSession(session, { html: hasFullRenderedDom ? session.chatHtml : visibleChatHtml || session.chatHtml });
     return session;
 }
 
@@ -2718,6 +5034,7 @@ function updateStoredSessionFromGeneration(sessionId, {
     if (isChatSessionVisible(sessionId)) {
         conversationHistory = cloneConversationHistory(history);
         sessionTotalTokens = tokenTotal;
+        extendChatRenderWindowToHistory(history);
         snapshotVisibleChatIntoSession(session, { history, tokenTotal });
         updateTokenDisplay();
         updateActiveChatTitle();
@@ -2739,6 +5056,7 @@ function updateStoredSessionFromGeneration(sessionId, {
     if (render) renderChatHistory();
     refreshUsageSettingsPaneIfVisible();
     refreshLibraryViewIfActive();
+    renderPromptTimeline(history);
     return session;
 }
 
@@ -2993,9 +5311,9 @@ function closeChatSessionMenus(except = null) {
         menuWrap.classList.remove("open");
         menuWrap.closest(".chat-session-row")?.classList.remove("menu-open");
         const trigger = menuWrap.querySelector(".chat-session-menu-trigger");
-        const menu = menuWrap.querySelector(".chat-session-menu");
+        const menu = menuWrap._faunaAnchoredMenu || menuWrap.querySelector(".chat-session-menu");
         trigger?.setAttribute("aria-expanded", "false");
-        if (menu) menu.hidden = true;
+        hideAnchoredSidebarMenu(menu);
     });
     updateArchivedMenuOverflow();
 }
@@ -3325,7 +5643,13 @@ function createChatSessionRow(session, { variant = "", hideProjectBadge = false 
         menuWrap.classList.toggle("open", willOpen);
         row.classList.toggle("menu-open", willOpen);
         menuButton.setAttribute("aria-expanded", String(willOpen));
-        menu.hidden = !willOpen;
+        if (willOpen) {
+            mountAnchoredSidebarMenu(menu, menuWrap);
+            menu.hidden = false;
+            positionAnchoredSidebarMenu(menu, menuButton);
+        } else {
+            hideAnchoredSidebarMenu(menu);
+        }
         updateArchivedMenuOverflow();
     });
 
@@ -3436,6 +5760,7 @@ function rehydrateAssistantActions(container) {
         const timestamp = message?.createdAt || messageNode?.dataset.createdAt;
         const existingActions = block.querySelector(".assistant-message-actions:not(.user-message-actions)");
         if (existingActions) {
+            appendTurnDurationAction(existingActions, messageIndex, block);
             appendMessageActionTime(existingActions, timestamp, "Response completed at");
             if (messageNode && timestamp) messageNode.dataset.createdAt = String(timestamp);
             return;
@@ -3491,38 +5816,18 @@ function rehydrateRenderedChat(container) {
             delete wrapper.dataset.previewEnhanced;
         });
         setupCodeSandbox(container);
+        renderPromptTimeline();
     });
 }
 
 function renderChatFromConversationHistoryFallback(history = conversationHistory) {
     if (!chat) return;
-    chat.replaceChildren();
-    history.forEach((message, index) => {
-        const role = message?.role === "user" ? "user" : "output";
-        const rawContent = String(message?.content || "").trim();
-        if (!rawContent) return;
-
-        const toolRequest = parseFaunaToolCall(rawContent);
-        const visibleContent = role === "output"
-            ? stripAssistantControlBlocks(rawContent) || (toolRequest ? getAssistantToolPlaceholder(toolRequest) : rawContent)
-            : rawContent;
-        const bubble = addRenderNode(visibleContent, role, [], {
-            historyIndex: index,
-            createdAt: message.createdAt,
-            voiceRecording: message.voiceRecording,
-            forceScroll: false
-        });
-
-        if (role === "output") {
-            renderAssistantContentHtml(bubble, renderMarkdown(visibleContent), { final: true, busy: false });
-            setupAssistantActions(bubble.parentElement, visibleContent, {
-                messageIndex: index,
-                canRegenerate: true,
-                canFork: true,
-                canSpeak: true,
-                speakText: visibleContent
-            });
-        }
+    const source = Array.isArray(history) ? history : [];
+    renderChatHistoryWindow(source, {
+        start: 0,
+        end: source.length,
+        replace: true,
+        sessionId: activeSessionId
     });
 }
 
@@ -3605,13 +5910,16 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
     restoreComposerDraft(session.composerDraft);
 
     if (chat) {
-        if (session.domNodes?.length) {
+        if (conversationHistory.length > 0) {
+            renderInitialChatHistoryWindow(conversationHistory, session.id);
+        } else if (session.domNodes?.length) {
+            resetChatRenderWindowState(session.id);
             chat.replaceChildren(...session.domNodes);
         } else if (session.chatHtml?.trim()) {
+            resetChatRenderWindowState(session.id);
             chat.innerHTML = sanitizeChatHtmlMediaSources(session.chatHtml || "");
-        } else if (conversationHistory.length > 0) {
-            renderChatFromConversationHistoryFallback(conversationHistory);
         } else {
+            resetChatRenderWindowState(session.id);
             chat.replaceChildren();
         }
         chat.style.display = activeChatHasContent() ? "block" : "none";
@@ -3620,12 +5928,14 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
         applyActiveVoiceOrbTheme();
     }
     if (welcome) welcome.style.display = activeChatHasContent() ? "none" : "flex";
+    updateComposerChatContentLayoutState();
 
     updateTokenDisplay();
     updateActiveChatTitle();
     renderProjectList();
     renderComposerProjectPicker();
     updateGenerationUi?.({ renderHistory: false });
+    renderPromptTimeline();
 }
 
 function restoreEmptyChatDraft({ render = true, persist = true, updateUrl = true } = {}) {
@@ -3638,16 +5948,19 @@ function restoreEmptyChatDraft({ render = true, persist = true, updateUrl = true
     setChatTitleEditing(false);
 
     if (chat) {
+        resetChatRenderWindowState(null);
         chat.replaceChildren();
         chat.style.display = "none";
     }
     if (welcome) welcome.style.display = "flex";
+    updateComposerChatContentLayoutState();
 
     updateTokenDisplay();
     updateActiveChatTitle();
     renderProjectList();
     renderComposerProjectPicker();
     updateGenerationUi?.({ renderHistory: false });
+    renderPromptTimeline();
     if (persist) persistChatSessions();
     if (render) renderChatHistory();
     if (updateUrl && activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND) {
@@ -4642,6 +6955,7 @@ function setLibraryPickerTypeFilter(type) {
         button.classList.toggle("active", active);
         button.setAttribute("aria-pressed", String(active));
     });
+    scheduleAnimatedSegmentIndicators();
     renderLibraryPicker();
 }
 
@@ -4652,6 +6966,7 @@ function setLibraryPickerSortOrder(sortOrder) {
         button.classList.toggle("active", active);
         button.setAttribute("aria-pressed", String(active));
     });
+    scheduleAnimatedSegmentIndicators();
     renderLibraryPicker();
 }
 

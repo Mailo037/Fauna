@@ -2,27 +2,52 @@
     <button id="projectAgentResizeHandle" class="project-agent-resize-handle" type="button" aria-label="Resize project panel" data-tooltip="Resize project panel"></button>
     <div class="project-agent-dock-shell">
         <div class="project-agent-tabbar">
-            <div class="project-agent-tabs" role="tablist" aria-label="Workspace panel tabs">
-                <button id="projectPanelMenuTab" class="project-agent-tab active" type="button" role="tab" aria-selected="true" aria-controls="projectMenuPane" data-project-agent-tab="menu">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5h14"></path><path d="M5 12h14"></path><path d="M5 19h14"></path></svg>
-                    <span>Workspace</span>
-                </button>
-                <button id="projectFilesTab" class="project-agent-tab" type="button" role="tab" aria-selected="false" aria-controls="projectFilesPane" data-project-agent-tab="files">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
-                    <span>Open file</span>
-                </button>
-                <button id="projectActivityTab" class="project-agent-tab" type="button" role="tab" aria-selected="false" aria-controls="projectActivityPane" data-project-agent-tab="activity">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path><path d="M8 12h8"></path><path d="M8 16h5"></path></svg>
-                    <span>Activity</span>
-                </button>
-                <button id="projectPageChatTab" class="project-agent-tab" type="button" role="tab" aria-selected="false" aria-controls="projectPageChatPane" data-project-agent-tab="chat">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"></path><path d="M8 10h8"></path><path d="M8 14h5"></path></svg>
-                    <span>Page chat</span>
-                </button>
-            </div>
-            <button id="projectPanelAddTabBtn" class="project-agent-icon-btn project-agent-add-tab-btn" type="button" aria-label="Open workspace menu" data-tooltip="Workspace menu">
+            <div id="projectAgentTabs" class="project-agent-tabs" role="tablist" aria-label="Workspace panel tabs"></div>
+            <button id="projectPanelAddTabBtn" class="project-agent-icon-btn project-agent-add-tab-btn" type="button" aria-label="Open tab menu" data-tooltip="Open tab menu">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
             </button>
+            <div id="projectPanelTabMenu" class="project-agent-tab-menu" role="menu" aria-label="Open workspace tab" hidden>
+                <button class="workspace-menu-action" type="button" role="menuitem" data-workspace-panel-action="inspect">
+                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"></path><path d="M4 8h16"></path><path d="M4 16h16"></path><path d="M8 4v16"></path><path d="M16 4v16"></path></svg></span>
+                    <span>Inspect</span>
+                    <kbd>Ctrl+Shift+G</kbd>
+                </button>
+                <button class="workspace-menu-action" type="button" role="menuitem" data-workspace-panel-action="terminal">
+                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m7 8 4 4-4 4"></path><path d="M13 16h4"></path><rect x="3" y="4" width="18" height="16" rx="2"></rect></svg></span>
+                    <span>Terminal</span>
+                </button>
+                <button class="workspace-menu-action" type="button" role="menuitem" data-workspace-panel-action="browser">
+                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18"></path><path d="M12 3a14 14 0 0 0 0 18"></path></svg></span>
+                    <span>Browser</span>
+                    <kbd>Ctrl+T</kbd>
+                </button>
+                <button class="workspace-menu-action" type="button" role="menuitem" data-workspace-panel-action="files">
+                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg></span>
+                    <span>Files</span>
+                    <kbd>Ctrl+P</kbd>
+                </button>
+                <button class="workspace-menu-action" type="button" role="menuitem" data-workspace-panel-action="page-chat">
+                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8.5 8.5 0 1 1-4.8-7.6"></path><path d="M21 4v6h-6"></path><path d="M8 12h8"></path><path d="M12 8v8"></path></svg></span>
+                    <span>Side chat</span>
+                    <kbd>Ctrl+Alt+S</kbd>
+                </button>
+            </div>
+            <div class="window-workspace-panel-controls" aria-label="Workspace panel controls">
+                <button id="windowSidebarMaximizeBtn" class="window-bar-icon-btn window-sidebar-maximize-btn" type="button" aria-label="Maximize workspace panel" aria-pressed="false" data-tooltip="Maximize workspace panel" hidden>
+                    <svg class="window-sidebar-maximize-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M8 4H4v4"></path>
+                        <path d="M16 4h4v4"></path>
+                        <path d="M20 16v4h-4"></path>
+                        <path d="M8 20H4v-4"></path>
+                    </svg>
+                </button>
+                <button id="windowSidebarToggleBtn" class="window-bar-icon-btn window-sidebar-toggle-btn" type="button" aria-label="Close workspace panel" aria-expanded="true" data-tooltip="Close workspace panel">
+                    <svg class="window-sidebar-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M18 6 6 18"></path>
+                        <path d="m6 6 12 12"></path>
+                    </svg>
+                </button>
+            </div>
             <button id="projectAgentCollapseBtn" class="project-agent-icon-btn project-agent-header-btn" type="button" aria-label="Close workspace panel" data-tooltip="Close workspace panel">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <rect x="3" y="4" width="18" height="16" rx="2"></rect>
@@ -31,71 +56,100 @@
                 </svg>
             </button>
         </div>
-        <div id="projectMenuPane" class="project-agent-pane project-menu-pane" role="tabpanel" aria-labelledby="projectPanelMenuTab">
-            <div class="workspace-menu-list" aria-label="Workspace actions">
-                <button class="workspace-menu-action" type="button" data-workspace-panel-action="inspect">
-                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"></path><path d="M4 8h16"></path><path d="M4 16h16"></path><path d="M8 4v16"></path><path d="M16 4v16"></path></svg></span>
-                    <span>Inspect</span>
-                    <kbd>Ctrl+Shift+G</kbd>
-                </button>
-                <button class="workspace-menu-action" type="button" data-workspace-panel-action="terminal">
-                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m7 8 4 4-4 4"></path><path d="M13 16h4"></path><rect x="3" y="4" width="18" height="16" rx="2"></rect></svg></span>
-                    <span>Terminal</span>
-                </button>
-                <button class="workspace-menu-action" type="button" data-workspace-panel-action="browser">
-                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18"></path><path d="M12 3a14 14 0 0 0 0 18"></path></svg></span>
-                    <span>Browser</span>
-                    <kbd>Ctrl+T</kbd>
-                </button>
-                <button class="workspace-menu-action" type="button" data-workspace-panel-action="files">
-                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg></span>
-                    <span>Files</span>
-                    <kbd>Ctrl+P</kbd>
-                </button>
-                <button class="workspace-menu-action" type="button" data-workspace-panel-action="page-chat">
-                    <span class="workspace-menu-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8.5 8.5 0 1 1-4.8-7.6"></path><path d="M21 4v6h-6"></path><path d="M8 12h8"></path><path d="M12 8v8"></path></svg></span>
-                    <span>Page chat</span>
-                    <kbd>Ctrl+Alt+S</kbd>
-                </button>
+        <div id="projectMenuPane" class="project-agent-pane project-menu-pane project-browser-pane" role="tabpanel" aria-label="Workspace menu">
+            <div class="project-browser-placeholder">
+                <span class="project-browser-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"></path><path d="M4 12h10"></path><path d="M4 19h7"></path><path d="m15 16 3 3 3-3"></path><path d="M18 10v9"></path></svg></span>
+                <strong>Fauna</strong>
+                <span>Open another workspace tab from the plus menu.</span>
             </div>
         </div>
-        <div id="projectFilesPane" class="project-agent-pane" role="tabpanel" aria-labelledby="projectFilesTab" hidden>
-            <div class="project-agent-actions">
-                <button id="projectExplorerRefreshBtn" class="project-agent-icon-btn" type="button" aria-label="Refresh files" data-tooltip="Refresh files">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2"></path><path d="M3 12A9 9 0 0 1 18.5 5.8"></path><path d="M18 2v4h-4"></path><path d="M6 22v-4h4"></path></svg>
-                </button>
-                <button id="projectInstructionsBtn" class="project-agent-icon-btn" type="button" aria-label="Project instructions" data-tooltip="Project instructions">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h6"></path></svg>
-                </button>
-                <button id="projectDiffReviewBtn" class="project-agent-icon-btn" type="button" aria-label="Review changes" data-tooltip="Review changes">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v18"></path><path d="M18 3v18"></path><path d="M9 7h6"></path><path d="M9 12h3"></path><path d="M12 17h3"></path></svg>
-                </button>
-                <button id="projectWorktreeActionBtn" class="project-agent-icon-btn" type="button" aria-label="Create worktree" data-tooltip="Create worktree">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><path d="M12 5v6"></path><path d="M9 8h6"></path></svg>
-                </button>
+        <div id="projectFilesPane" class="project-agent-pane project-files-pane" role="tabpanel" aria-labelledby="projectFilesTab" hidden>
+            <div class="project-file-workspace">
+                <section class="project-file-surface" aria-label="File preview">
+                    <header class="project-file-header">
+                        <div class="project-file-breadcrumb" aria-label="Open file path">
+                            <span id="projectFileBreadcrumbRoot">Workspace</span>
+                            <span aria-hidden="true">›</span>
+                            <strong id="projectFileBreadcrumbName">Open file</strong>
+                        </div>
+                        <div class="project-file-header-actions">
+                            <button id="projectFileMoreBtn" class="project-file-header-btn" type="button" aria-label="File view options" aria-haspopup="menu" aria-expanded="false" data-tooltip="File view options">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg>
+                            </button>
+                            <button id="projectFileRevealBtn" class="project-file-header-btn" type="button" aria-label="Focus file tree" data-tooltip="Focus file tree">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg>
+                            </button>
+                            <div id="projectFileMoreMenu" class="project-file-more-menu" role="menu" aria-label="File view options" hidden>
+                                <button id="projectFileCopyPathBtn" type="button" role="menuitem">
+                                    <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></span>
+                                    <span>Copy path</span>
+                                </button>
+                                <button id="projectFileCopyContentBtn" type="button" role="menuitem">
+                                    <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></span>
+                                    <span>Copy content</span>
+                                </button>
+                                <button id="projectFileToggleExtendedBtn" type="button" role="menuitem">
+                                    <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16"></path><path d="M4 12h10"></path><path d="M4 19h7"></path><path d="m15 16 3 3 3-3"></path><path d="M18 10v9"></path></svg></span>
+                                    <span>Disable extended view</span>
+                                </button>
+                                <button id="projectFileToggleWrapBtn" type="button" role="menuitem">
+                                    <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M3 12h13a4 4 0 0 1 0 8h-2"></path><path d="m16 16-4 4 4 4"></path></svg></span>
+                                    <span>Enable line wrap</span>
+                                </button>
+                            </div>
+                        </div>
+                    </header>
+                    <div id="projectFileEmptyState" class="project-file-empty-state">
+                        <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path></svg></span>
+                        <strong>Open file</strong>
+                        <p>Select a file in the workspace tree.</p>
+                    </div>
+                    <div id="projectFileViewer" class="project-file-viewer" hidden>
+                        <div id="projectFileRendered" class="project-file-rendered markdown"></div>
+                        <div id="projectFileCode" class="project-file-code" aria-label="File source"></div>
+                    </div>
+                </section>
+                <aside class="project-explorer-sidebar" aria-label="Workspace files">
+                    <div class="project-explorer-tools">
+                        <button id="projectExplorerRefreshBtn" class="project-agent-icon-btn" type="button" aria-label="Refresh files" data-tooltip="Refresh files">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.5 6.2"></path><path d="M3 12A9 9 0 0 1 18.5 5.8"></path><path d="M18 2v4h-4"></path><path d="M6 22v-4h4"></path></svg>
+                        </button>
+                        <button id="projectInstructionsBtn" class="project-agent-icon-btn" type="button" aria-label="Project instructions" data-tooltip="Project instructions">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h6"></path></svg>
+                        </button>
+                        <button id="projectDiffReviewBtn" class="project-agent-icon-btn" type="button" aria-label="Review changes" data-tooltip="Review changes">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v18"></path><path d="M18 3v18"></path><path d="M9 7h6"></path><path d="M9 12h3"></path><path d="M12 17h3"></path></svg>
+                        </button>
+                        <button id="projectWorktreeActionBtn" class="project-agent-icon-btn" type="button" aria-label="Create worktree" data-tooltip="Create worktree">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v5a4 4 0 0 0 4 4h4"></path><path d="M18 21v-5a4 4 0 0 0-4-4h-4"></path><path d="M12 5v6"></path><path d="M9 8h6"></path></svg>
+                        </button>
+                    </div>
+                    <div id="projectBranchSummary" class="project-branch-summary">No project selected</div>
+                    <label class="project-explorer-filter">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="11" cy="11" r="7"></circle>
+                            <path d="m16 16 4 4"></path>
+                        </svg>
+                        <input id="projectExplorerFilterInput" type="search" autocomplete="off" spellcheck="false" placeholder="Filter files..." aria-label="Filter files" />
+                    </label>
+                    <div class="project-explorer-path-row">
+                        <button id="projectExplorerUpBtn" class="project-agent-icon-btn project-explorer-up-btn" type="button" aria-label="Go up" data-tooltip="Go up">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"></path></svg>
+                        </button>
+                        <span id="projectExplorerPath" class="project-explorer-path">.</span>
+                    </div>
+                    <div id="projectExplorerList" class="project-explorer-list" aria-live="polite"></div>
+                </aside>
             </div>
-            <div id="projectBranchSummary" class="project-branch-summary">No project selected</div>
-            <label class="project-explorer-filter">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="11" cy="11" r="7"></circle>
-                    <path d="m16 16 4 4"></path>
-                </svg>
-                <input id="projectExplorerFilterInput" type="search" autocomplete="off" spellcheck="false" placeholder="Filter files..." aria-label="Filter files" />
-            </label>
-            <div class="project-explorer-path-row">
-                <button id="projectExplorerUpBtn" class="project-agent-icon-btn project-explorer-up-btn" type="button" aria-label="Go up" data-tooltip="Go up">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"></path></svg>
-                </button>
-                <span id="projectExplorerPath" class="project-explorer-path">.</span>
-            </div>
-            <div id="projectExplorerList" class="project-explorer-list" aria-live="polite"></div>
+        </div>
+        <div id="projectTerminalPane" class="project-agent-pane project-terminal-pane" role="tabpanel" aria-labelledby="projectTerminalTab" hidden>
+            <pre id="projectCommandOutput" class="project-command-output project-terminal-output" tabindex="0" aria-label="Project terminal" aria-live="polite">No command output yet.</pre>
             <div class="project-command-runner">
                 <input id="projectCommandInput" class="project-command-input" type="text" autocomplete="off" spellcheck="false" placeholder="Run command in project" aria-label="Run command in project" />
                 <button id="projectCommandRunBtn" class="project-command-run-btn" type="button" aria-label="Run command" data-tooltip="Run command">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 8 7-8 7V5Z"></path></svg>
                 </button>
             </div>
-            <pre id="projectCommandOutput" class="project-command-output" hidden></pre>
         </div>
         <div id="projectActivityPane" class="project-agent-pane" role="tabpanel" aria-labelledby="projectActivityTab" hidden>
             <div id="agentActivityList" class="agent-activity-list" aria-live="polite"></div>
@@ -106,11 +160,25 @@
                     Start a workspace chat here. The AI can use the selected project, files, and terminal tools.
                 </div>
             </div>
-            <div class="project-page-chat-composer">
-                <textarea id="projectPageChatInput" class="project-page-chat-input" rows="2" spellcheck="true" placeholder="Ask about this project..." aria-label="Page chat prompt"></textarea>
-                <button id="projectPageChatSendBtn" class="project-command-run-btn project-page-chat-send" type="button" aria-label="Send page chat message" data-tooltip="Send page chat message">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>
-                </button>
+            <div class="project-page-chat-composer input-container-floating">
+                <textarea id="projectPageChatInput" class="project-page-chat-input" rows="1" spellcheck="true" placeholder="Ask about this project..." aria-label="Page chat prompt"></textarea>
+                <div class="input-action-bar">
+                    <div class="action-bar-left"></div>
+                    <div class="action-bar-right">
+                        <button id="projectPageChatSendBtn" class="run-btn project-page-chat-send" type="button" aria-label="Send page chat message" data-tooltip="Send page chat message">
+                            <span class="send-btn-idle-state" data-send-state="idle">
+                                <span class="send-btn-icon" aria-hidden="true">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 19V5"></path>
+                                        <path d="m6 11 6-6 6 6"></path>
+                                    </svg>
+                                </span>
+                                <span class="send-btn-label">Send</span>
+                                <span class="shortcut-badge">Enter</span>
+                            </span>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -984,6 +984,29 @@ async function runWorkspaceCommand(command, cwd = ".", timeout = 20, signal = nu
     });
 }
 
+async function getWorkspaceGitInfo(signal = null, bridgeOptions = {}) {
+    const options = bridgeOptions || {};
+    const params = new URLSearchParams({
+        path: String(options.path || ".").trim() || "."
+    });
+    if (options.scope) params.set("scope", options.scope);
+    return requestWorkspaceBridge(`/git?${params.toString()}`, { signal });
+}
+
+async function checkoutWorkspaceGitBranch(branch, options = {}, signal = null, bridgeOptions = {}) {
+    return requestWorkspaceBridge("/git", {
+        method: "POST",
+        body: {
+            branch: String(branch || "").trim(),
+            create: options.create === true,
+            remote: options.remote === true,
+            path: String((bridgeOptions || {}).path || ".").trim() || ".",
+            ...(bridgeOptions || {})
+        },
+        signal
+    });
+}
+
 async function writeWorkspaceFile(path, content = "", signal = null, bridgeOptions = {}, append = false) {
     return requestWorkspaceBridge("/write", {
         method: "POST",

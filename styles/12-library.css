@@ -101,7 +101,8 @@
 }
 
 .library-filter-group,
-.library-layout-group {
+.library-layout-group,
+.library-picker-filter-row {
     position: relative;
     isolation: isolate;
     display: inline-flex;
@@ -116,7 +117,8 @@
 }
 
 .library-filter-group::before,
-.library-layout-group::before {
+.library-layout-group::before,
+.library-picker-filter-row::before {
     content: "";
     position: absolute;
     top: -1px;
@@ -134,7 +136,8 @@
 }
 
 .library-filter-group.segment-indicator-ready::before,
-.library-layout-group.segment-indicator-ready::before {
+.library-layout-group.segment-indicator-ready::before,
+.library-picker-filter-row.segment-indicator-ready::before {
     opacity: 1;
 }
 
@@ -811,32 +814,36 @@ body.library-view-active .input-wrapper {
     color: rgba(255, 255, 255, 0.42);
 }
 
-.library-picker-filter-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-}
-
 .library-picker-chip {
-    min-height: 32px;
+    position: relative;
+    z-index: 1;
+    min-height: 28px;
     padding: 0 10px;
     border: 0;
-    border-radius: 8px;
+    border-radius: 7px;
     background: transparent;
-    color: #f0f0f0;
-    font-size: 12px;
-    font-weight: 650;
+    color: rgba(255, 255, 255, 0.48);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
 }
 
 .library-picker-chip:hover,
 .library-picker-chip:focus-visible {
-    background: #303030;
-    color: #fff;
+    color: rgba(255, 255, 255, 0.82);
 }
 
 .library-picker-chip.active {
-    background: #333333;
-    color: #fff;
+    background: #303030;
+    color: #f4f4f4;
+}
+
+.library-picker-filter-row.segment-indicator-ready .library-picker-chip.active {
+    background: transparent;
 }
 
 .library-picker-grid {

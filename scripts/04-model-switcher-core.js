@@ -138,11 +138,15 @@ const WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY = "faunaWorkspaceBridgeEnabled";
 const WORKSPACE_PROJECTS_STORAGE_KEY = "faunaWorkspaceProjects";
 const WORKSPACE_PROJECT_SORT_STORAGE_KEY = "faunaWorkspaceProjectSort";
 const AGENT_TASK_MODE_STORAGE_KEY = "faunaAgentTaskMode";
+const PROJECT_AGENT_TABS_STORAGE_KEY = "faunaProjectAgentTabs";
 const PROJECT_AGENT_TAB_STORAGE_KEY = "faunaProjectAgentTab";
 const PROJECT_EXPLORER_PATH_STORAGE_KEY = "faunaProjectExplorerPath";
+const PROJECT_EXPLORER_EXPANDED_PATHS_STORAGE_KEY = "faunaProjectExplorerExpandedPaths";
 const PROJECT_AGENT_WIDTH_STORAGE_KEY = "faunaProjectAgentWidth";
 const PROJECT_AGENT_COLLAPSED_STORAGE_KEY = "faunaProjectAgentCollapsed";
 const PROJECT_AGENT_MAXIMIZED_STORAGE_KEY = "faunaProjectAgentMaximized";
+const PROJECT_FILE_EXTENDED_VIEW_STORAGE_KEY = "faunaProjectFileExtendedView";
+const PROJECT_FILE_LINE_WRAP_STORAGE_KEY = "faunaProjectFileLineWrap";
 const MEMORY_ENABLED_STORAGE_KEY = "faunaMemoryEnabled";
 const MEMORY_STORAGE_KEY = "faunaMemories";
 const KEYBOARD_SHORTCUTS_STORAGE_KEY = "faunaKeyboardShortcuts";
@@ -365,7 +369,7 @@ function normalizeWorkspaceAccessPolicy(value) {
     if (policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE) return WORKSPACE_ACCESS_POLICY_FULL_MACHINE;
     return WORKSPACE_ACCESS_POLICY_BRIDGE_ROOT;
 }
-const LOCAL_TOOL_SYSTEM_PROMPT = `The token-protected Local Workspace Bridge is active for this chat. You can access local files and execute terminal commands through Fauna local workspace tools. Do not claim you have no local file or terminal access when this prompt is present; request the matching tool instead. Use these tools when the user asks about local files, this project, code search, directory listings, file creation, command output, tests, installs, scripts, or terminal commands. To request a tool, respond with only the required hidden chat title block when present, then exactly one tool XML block, and no normal prose. Directory read/list examples: <fauna_tool_call>{"tool":"read_directory","path":".","depth":2}</fauna_tool_call> or <fauna_tool_call>{"tool":"list_directory","path":"assets","depth":1}</fauna_tool_call>. File write example: <fauna_tool_call>{"tool":"write_file","path":"index.html","content":"<!doctype html>\\n<html>...</html>"}</fauna_tool_call>. Append example: <fauna_tool_call>{"tool":"append_file","path":"styles.css","content":"\\n.footer { display: grid; }"}</fauna_tool_call>. Directory example: <fauna_tool_call>{"tool":"make_directory","path":"assets"}</fauna_tool_call>. File search example: <fauna_tool_call>{"tool":"search_files","query":"settings","path":".","depth":5}</fauna_tool_call>. Text search example: <fauna_tool_call>{"tool":"search_text","query":"function saveCurrentSession","path":"scripts","include":"*.js","caseSensitive":false}</fauna_tool_call>. Single-file read example: <fauna_tool_call>{"tool":"read_file","path":"index.html"}</fauna_tool_call>. Multi-file read example: <fauna_tool_call>{"tool":"read_files","paths":["index.html","styles.css","script.js"]}</fauna_tool_call>. Terminal example: <fauna_tool_call>{"tool":"run_terminal_command","command":"git status --short","cwd":".","timeout":20}</fauna_tool_call>. Tool file results include line numbers; when you cite local files, reference them inline as path (line N) or path (lines A-B). After Fauna returns a tool result, answer the user normally. Do not call the same tool with the same path, query, or command again; use the returned result unless you need different files, a different query, or a command.`;
+const LOCAL_TOOL_SYSTEM_PROMPT = `The token-protected Local Workspace Bridge is active for this chat. You can access local files and execute terminal commands through Fauna local workspace tools. Do not claim you have no local file or terminal access when this prompt is present; request the matching tool instead. Use these tools when the user asks about local files, this project, code search, directory listings, file creation, command output, tests, installs, scripts, terminal commands, or local system tasks that can be handled from a terminal, such as inspecting running processes or closing specific apps the user names. For system/process actions, prefer targeted, graceful commands first; do not broadly kill unrelated apps or processes unless the user explicitly asks for that and the command is clear. To request a tool, respond with only the required hidden chat title block when present, then exactly one tool XML block, and no normal prose. Directory read/list examples: <fauna_tool_call>{"tool":"read_directory","path":".","depth":2}</fauna_tool_call> or <fauna_tool_call>{"tool":"list_directory","path":"assets","depth":1}</fauna_tool_call>. File write example: <fauna_tool_call>{"tool":"write_file","path":"index.html","content":"<!doctype html>\\n<html>...</html>"}</fauna_tool_call>. Append example: <fauna_tool_call>{"tool":"append_file","path":"styles.css","content":"\\n.footer { display: grid; }"}</fauna_tool_call>. Directory example: <fauna_tool_call>{"tool":"make_directory","path":"assets"}</fauna_tool_call>. File search example: <fauna_tool_call>{"tool":"search_files","query":"settings","path":".","depth":5}</fauna_tool_call>. Text search example: <fauna_tool_call>{"tool":"search_text","query":"function saveCurrentSession","path":"scripts","include":"*.js","caseSensitive":false}</fauna_tool_call>. Single-file read example: <fauna_tool_call>{"tool":"read_file","path":"index.html"}</fauna_tool_call>. Multi-file read example: <fauna_tool_call>{"tool":"read_files","paths":["index.html","styles.css","script.js"]}</fauna_tool_call>. Terminal example: <fauna_tool_call>{"tool":"run_terminal_command","command":"git status --short","cwd":".","timeout":20}</fauna_tool_call>. System task example: <fauna_tool_call>{"tool":"run_terminal_command","command":"Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 ProcessName,Id,CPU","cwd":".","timeout":20}</fauna_tool_call>. Tool file results include line numbers; when you cite local files, reference them inline as path (line N) or path (lines A-B). After Fauna returns a tool result, answer the user normally. Do not call the same tool with the same path, query, or command again; use the returned result unless you need different files, a different query, or a command.`;
 function buildLocalToolSystemPrompt(accessPolicy = WORKSPACE_ACCESS_POLICY_BRIDGE_ROOT, sessionId = activeSessionId) {
     const projectPrompt = typeof getActiveWorkspaceProjectSystemPrompt === "function"
         ? getActiveWorkspaceProjectSystemPrompt(sessionId)
@@ -374,7 +378,7 @@ function buildLocalToolSystemPrompt(accessPolicy = WORKSPACE_ACCESS_POLICY_BRIDG
     const policyPrompt = projectPrompt || (policy === WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT
         ? "Desktop access policy: Chat Output only. Every local file tool and terminal command is scoped to this chat's output folder, stored beside the chat as chats/<chatId>/output. Use simple relative paths such as index.html, styles.css, script.js, or assets/logo.svg. Do not try to access files outside that output folder; ask the user to switch the access policy if broader access is needed."
         : policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE
-            ? "Desktop access policy: Full Machine. Absolute paths are allowed and terminal commands run without Fauna's command blocklist. This is powerful; prefer non-destructive commands unless the user explicitly asks for destructive system changes."
+            ? "Desktop access policy: Full Machine. Absolute paths are allowed and terminal commands run without Fauna's command blocklist. This is powerful; prefer non-destructive commands unless the user explicitly asks for destructive system changes. You may use terminal commands for local system tasks such as listing processes, diagnosing the machine, or closing specific apps the user names; use targeted commands and avoid terminating unrelated work."
             : "Access policy: Bridge Root. Local tools are limited by the currently configured bridge root and bridge command policy.");
     return `${policyPrompt}\n\n${LOCAL_TOOL_SYSTEM_PROMPT}`;
 }
@@ -392,7 +396,7 @@ const CLARIFYING_QUESTION_RE = createAssistantControlTagRegex("question", "i");
 const CLARIFYING_QUESTION_SYSTEM_PROMPT = `When you need user input before continuing, ask the question in your normal response and append one hidden JSON block at the end using this exact format: <fauna_question>{"questions":[{"question":"What should I know?","options":["Option A","Option B"],"allowCustom":true,"placeholder":"Type your answer..."}]}</fauna_question>. Use 1-3 concise questions. Each question may include 2-5 short options. Do not mention the XML block to the user. If you can answer well without more information, do not use this block.`;
 const MEMORY_REQUEST_RE = createAssistantControlTagRegex("memory", "gi");
 const MEMORY_SYSTEM_PROMPT = `Memory beta is enabled. Saved memories are durable user context across chats. When the user asks to inspect, search, save, update, or delete saved memories, prefer the memory tool so the answer reflects the latest local state. To request a memory tool, respond with exactly one XML block and no other text: <fauna_tool_call>{"tool":"read_memories"}</fauna_tool_call>, <fauna_tool_call>{"tool":"read_memories","query":"writing style"}</fauna_tool_call>, <fauna_tool_call>{"tool":"save_memory","text":"User prefers concise answers."}</fauna_tool_call>, or <fauna_tool_call>{"tool":"delete_memory","target":"2"}</fauna_tool_call>. Save a memory only when the user explicitly asks you to remember something or gives a stable preference, project fact, or personal detail likely to be useful later. Delete a memory only when the user asks you to forget it. After Fauna returns a tool result, answer normally.`;
-const AGENT_LOOP_SYSTEM_PROMPT = `You have an agent loop with tool-call limits. If you need more tool-backed work after several consecutive tool calls, call the thinking tool first: <fauna_tool_call>{"tool":"thinking","summary":"What I know and what I will do next."}</fauna_tool_call>. Thinking does not access external data; it resets only the consecutive step counter. The total max steps per run is still a hard stop. After useful tool results, answer the user normally instead of repeating the same tool call.`;
+const AGENT_LOOP_SYSTEM_PROMPT = `You have an agent loop with tool-call limits. If you need more tool-backed work after several consecutive tool calls, call the thinking tool first: <fauna_tool_call>{"tool":"thinking","summary":"What I know and what I will do next."}</fauna_tool_call>. Thinking does not access external data; it resets only the consecutive step counter. The total max steps per run is still a hard stop. After useful tool results, answer the user normally with a concise summary of what changed, what was found, or what remains; do not replay tool logs or repeat the same tool call.`;
 const USER_LOCALE_SYSTEM_PROMPT = `Use this browser locale context as a hint for language, spelling, units, dates, and regional assumptions. Reply in the user's message language by default. If the message language is ambiguous, prefer the primary browser language. Do not claim a precise physical location; the country or region is inferred from browser locale settings.`;
 const CODE_BLOCK_SYSTEM_PROMPT = `When you include a fenced code block, always add the best language identifier after the opening fence, such as \`\`\`python, \`\`\`javascript, \`\`\`html, \`\`\`css, \`\`\`json, \`\`\`bash, or \`\`\`powershell. For a large generated file that should appear as a compact preview card instead of an expanded code block, put an HTML comment immediately before the fence, like <!-- fauna-file: index.html -->, then include the full fenced code as usual.`;
 const IMAGE_EDIT_MODEL = "moondream";
@@ -828,6 +832,9 @@ activeOllamaTopK = normalizeOllamaTopK(safeLocalStorageGet(OLLAMA_TOP_K_STORAGE_
 activeOpenAiVerbosity = normalizeOpenAiVerbosity(safeLocalStorageGet(OPENAI_VERBOSITY_STORAGE_KEY));
 activeAgentMaxStepsAtATime = normalizeAgentMaxStepsAtATime(safeLocalStorageGet(AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY));
 activeAgentMaxStepsPerRun = normalizeAgentMaxStepsPerRun(safeLocalStorageGet(AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY));
+activeContextCompactionThresholdPercent = normalizeContextCompactionThresholdPercent(safeLocalStorageGet(CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY));
+isContextCompactionReviewEnabled = safeLocalStorageGet(CONTEXT_COMPACTION_REVIEW_STORAGE_KEY) === "true";
+activeContextCompactionRotationLimit = normalizeContextCompactionRotationLimit(safeLocalStorageGet(CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY));
 isAiCachingEnabled = safeLocalStorageGet(AI_CACHING_STORAGE_KEY) === "true";
 activeVoiceSpeed = normalizeStoredVoiceSpeed(safeLocalStorageGet(VOICE_SPEED_STORAGE_KEY));
 isVoiceReplyEnabled = safeLocalStorageGet(VOICE_REPLY_ENABLED_STORAGE_KEY) !== "false";
@@ -896,6 +903,25 @@ function normalizeAgentMaxStepsPerRun(value) {
     const steps = Number(value);
     if (!Number.isFinite(steps)) return DEFAULT_AGENT_MAX_STEPS_PER_RUN;
     return Math.min(MAX_AGENT_STEPS_PER_RUN, Math.max(MIN_AGENT_MAX_STEPS, Math.round(steps)));
+}
+
+function normalizeContextCompactionThresholdPercent(value) {
+    if (value === null || value === undefined || String(value).trim() === "") {
+        return DEFAULT_CONTEXT_COMPACTION_THRESHOLD_PERCENT;
+    }
+    const percent = Number(value);
+    if (!Number.isFinite(percent)) return DEFAULT_CONTEXT_COMPACTION_THRESHOLD_PERCENT;
+    const stepped = Math.round(percent / 5) * 5;
+    return Math.min(MAX_CONTEXT_COMPACTION_THRESHOLD_PERCENT, Math.max(MIN_CONTEXT_COMPACTION_THRESHOLD_PERCENT, stepped));
+}
+
+function normalizeContextCompactionRotationLimit(value) {
+    if (value === null || value === undefined || String(value).trim() === "") {
+        return DEFAULT_CONTEXT_COMPACTION_ROTATION_LIMIT;
+    }
+    const rotations = Number(value);
+    if (!Number.isFinite(rotations)) return DEFAULT_CONTEXT_COMPACTION_ROTATION_LIMIT;
+    return Math.min(MAX_CONTEXT_COMPACTION_ROTATION_LIMIT, Math.max(MIN_CONTEXT_COMPACTION_ROTATION_LIMIT, Math.round(rotations)));
 }
 
 function normalizeModelId(model) {
@@ -1224,6 +1250,21 @@ function getActiveComposerModelLabel() {
     return isOpenAiProvider() ? getOpenAiChatModel() : OLLAMA_MODEL;
 }
 
+function getActiveModelContextLength(modelId = getActiveComposerModelLabel()) {
+    if (isOpenAiProvider()) {
+        const record = aiCapabilityRegistry.getModelOption(modelId) || getOpenAiChatModelOption(modelId);
+        const contextLength = Number(record?.contextLength || 0);
+        return Number.isFinite(contextLength) && contextLength > 0
+            ? contextLength
+            : CONTEXT_COMPACTION_OPENAI_DEFAULT_CONTEXT;
+    }
+    const capability = getOllamaModelCapability(modelId);
+    const contextLength = Number(capability?.contextLength || 0);
+    return Number.isFinite(contextLength) && contextLength > 0
+        ? contextLength
+        : CONTEXT_COMPACTION_LOCAL_DEFAULT_CONTEXT;
+}
+
 function getOllamaOfflineErrorMessage() {
     return `Ollama is offline at ${OLLAMA_BASE_URL}. Start Ollama, click Check Ollama, or switch Fauna to OpenAI in Settings.`;
 }
@@ -1451,6 +1492,35 @@ function updateAiCallSettingsUi() {
     setSettingStatus(
         agentLoopStatus,
         `Runs up to ${activeAgentMaxStepsPerRun} total steps; thinking resets each ${activeAgentMaxStepsAtATime}-step burst.`
+    );
+
+    if (contextCompactionThreshold) {
+        contextCompactionThreshold.value = String(activeContextCompactionThresholdPercent);
+    }
+    if (contextCompactionThresholdValue) {
+        contextCompactionThresholdValue.textContent = `${activeContextCompactionThresholdPercent}%`;
+    }
+    setSettingStatus(
+        contextCompactionStatus,
+        `Compacts automatically above ${activeContextCompactionThresholdPercent}% of the active model context.`
+    );
+    if (contextCompactionReviewToggle) {
+        contextCompactionReviewToggle.checked = isContextCompactionReviewEnabled;
+    }
+    if (contextCompactionRotationLimitInput) {
+        contextCompactionRotationLimitInput.value = String(activeContextCompactionRotationLimit);
+        setSettingsControlUnavailable(
+            contextCompactionRotationLimitInput,
+            !isContextCompactionReviewEnabled,
+            "Enable critical review to use rotation limits."
+        );
+    }
+    setSettingStatus(
+        contextCompactionReviewStatus,
+        isContextCompactionReviewEnabled
+            ? `On. A second model can challenge the summary for up to ${activeContextCompactionRotationLimit} pass${activeContextCompactionRotationLimit === 1 ? "" : "es"}.`
+            : "Off. The first summary is used directly.",
+        false
     );
 
     openAiVerbosityButtons.forEach(button => {

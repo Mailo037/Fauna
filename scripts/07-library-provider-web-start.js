@@ -42,6 +42,7 @@ function renderLibraryPicker() {
     libraryPickerGrid.hidden = isEmpty;
     libraryPickerEmpty.hidden = !isEmpty;
     updateLibraryPickerSelectionUi();
+    scheduleAnimatedSegmentIndicators();
 }
 
 function openLibraryPickerModal() {
@@ -66,6 +67,7 @@ function openLibraryPickerModal() {
     setLibraryPickerTypeFilter(libraryPickerTypeFilter);
     setLibraryPickerSortOrder(libraryPickerSortOrder);
     renderLibraryPicker();
+    scheduleAnimatedSegmentIndicators();
     window.setTimeout(() => libraryPickerSearch?.focus({ preventScroll: true }), 0);
 }
 
@@ -523,11 +525,13 @@ function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, up
         if (chatTitleEditBtn) chatTitleEditBtn.hidden = false;
         updateActiveChatTitle();
         updateTokenDisplay();
+        renderPromptTimeline();
         if (focusComposer) focusComposerInput({ force: true });
     }
 
     if (closeSidebar) sidebarController.close();
     if (updateUrl) updateWorkspaceUrlFragment({ replace: urlMode === "replace" });
+    renderPromptTimeline();
     window.setTimeout(() => {
         if (isFaunaDesktopApp()) {
             void refreshDesktopNavigationState();
@@ -1657,7 +1661,7 @@ function extractOpenAiResponseText(data) {
 
 async function sendOpenAiResponse(messages, options = {}, signal = null, streamOptions = {}) {
     const prepared = prepareOpenAiResponseInput(messages);
-    const model = getOpenAiChatModel();
+    const model = normalizeModelId(options.model || options.openAiModel) || getOpenAiChatModel();
     if (openAiMessagesIncludeImages(messages) && !openAiModelSupportsImages(model)) {
         throw new Error(`${model} does not support image input. Choose a vision-capable chat model before sending images.`);
     }

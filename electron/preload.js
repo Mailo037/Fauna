@@ -62,6 +62,25 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   filePathToUrl(filePath) {
     return invokeSync("fauna:file-url", filePath);
   },
+  clipboard: {
+    writeText(value) {
+      return ipcRenderer.invoke("fauna:clipboard-write-text", value);
+    }
+  },
+  notifications: {
+    getPermission() {
+      return ipcRenderer.invoke("fauna:notifications-permission");
+    },
+    requestPermission() {
+      return ipcRenderer.invoke("fauna:notifications-request");
+    },
+    show(payload = {}) {
+      return ipcRenderer.invoke("fauna:notifications-show", payload);
+    },
+    onClicked(handler) {
+      return onRendererEvent("fauna:notification-clicked", handler);
+    }
+  },
   getFilePreviewUrl(file) {
     const filePath = getFilePath(file);
     return filePath ? invokeSync("fauna:file-url", filePath) : "";
@@ -103,6 +122,18 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
     },
     openTerminal(projectPath) {
       return ipcRenderer.invoke("fauna:projects-open-terminal", projectPath);
+    },
+    startTerminalSession(payload = {}) {
+      return ipcRenderer.invoke("fauna:terminal-start", payload);
+    },
+    writeTerminalSession(payload = {}) {
+      return ipcRenderer.invoke("fauna:terminal-write", payload);
+    },
+    stopTerminalSession(payload = {}) {
+      return ipcRenderer.invoke("fauna:terminal-stop", payload);
+    },
+    onTerminalData(handler) {
+      return onRendererEvent("fauna:terminal-data", handler);
     },
     createWorktree(payload = {}) {
       return ipcRenderer.invoke("fauna:projects-create-worktree", payload);

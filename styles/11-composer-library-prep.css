@@ -431,6 +431,259 @@ textarea#prompt::placeholder {
     font-weight: 700;
 }
 
+.composer-branch-menu {
+    position: fixed;
+    left: 10px;
+    top: 10px;
+    bottom: auto;
+    z-index: 392;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: 7px;
+    width: min(340px, calc(100vw - 28px));
+    max-height: min(430px, calc(100vh - 168px));
+    padding: 8px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.11);
+    border-radius: 14px;
+    background: #202020;
+    color: #f5f5f5;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5), 0 4px 14px rgba(0, 0, 0, 0.26);
+}
+
+.composer-branch-menu[hidden] {
+    display: none !important;
+}
+
+.composer-branch-header {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    padding: 2px 4px 0;
+}
+
+.composer-branch-title {
+    color: rgba(255, 255, 255, 0.74);
+    font-size: 12px;
+    font-weight: 760;
+    line-height: 1.2;
+}
+
+.composer-branch-status {
+    min-width: 0;
+    overflow: hidden;
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10.5px;
+    font-weight: 620;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.composer-branch-search {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.055);
+    color: rgba(255, 255, 255, 0.54);
+}
+
+.composer-branch-search:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 38%, rgba(255, 255, 255, 0.12));
+    background: rgba(255, 255, 255, 0.075);
+}
+
+.composer-branch-search svg {
+    width: 14px;
+    height: 14px;
+}
+
+.composer-branch-search input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: #f5f5f5;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 620;
+    outline: none;
+}
+
+.composer-branch-search input::placeholder {
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.composer-branch-list {
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    min-height: 84px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 1px;
+}
+
+.composer-branch-option,
+.composer-branch-create {
+    width: 100%;
+    min-height: 40px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: #d8d8d8;
+    text-align: left;
+}
+
+.composer-branch-option {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 18px;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+}
+
+.composer-branch-option:hover,
+.composer-branch-option:focus-visible,
+.composer-branch-option.active,
+.composer-branch-create:hover:not(:disabled),
+.composer-branch-create:focus-visible:not(:disabled) {
+    background: #303030;
+    color: #fff;
+}
+
+.composer-branch-option.active {
+    background: #2a2f3e;
+}
+
+.composer-branch-option-icon,
+.composer-branch-option-check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.composer-branch-option-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.52);
+}
+
+.composer-branch-option-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.composer-branch-option-check {
+    width: 18px;
+    height: 18px;
+    color: color-mix(in srgb, var(--accent) 78%, #fff);
+    opacity: 0;
+}
+
+.composer-branch-option-check svg {
+    width: 14px;
+    height: 14px;
+}
+
+.composer-branch-option.active .composer-branch-option-check {
+    opacity: 1;
+}
+
+.composer-branch-option-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.composer-branch-option-label,
+.composer-branch-option-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.composer-branch-option-label {
+    color: #eeeeee;
+    font-size: 12.5px;
+    font-weight: 650;
+    line-height: 1.15;
+}
+
+.composer-branch-option-meta,
+.composer-branch-message {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10.5px;
+    font-weight: 620;
+    line-height: 1.25;
+}
+
+.composer-branch-message {
+    padding: 10px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.045);
+}
+
+.composer-branch-message-warning {
+    color: color-mix(in srgb, var(--warning) 72%, #fff);
+}
+
+.composer-branch-footer {
+    padding-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.composer-branch-create {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    color: color-mix(in srgb, var(--accent) 78%, #fff);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.composer-branch-create svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+}
+
+.composer-branch-create span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.composer-branch-create:disabled {
+    cursor: not-allowed;
+    color: rgba(255, 255, 255, 0.32);
+    opacity: 0.62;
+}
+
+.composer-branch-menu[data-busy="true"] {
+    pointer-events: none;
+}
+
+.composer-branch-btn[data-git-state="connected"] .composer-context-icon {
+    color: color-mix(in srgb, var(--accent) 68%, rgba(255, 255, 255, 0.72));
+}
+
+.composer-branch-btn[data-git-state="missing"] .composer-context-icon,
+.composer-branch-btn[data-git-state="unavailable"] .composer-context-icon,
+.composer-branch-btn[data-git-state="offline"] .composer-context-icon {
+    color: color-mix(in srgb, var(--warning) 70%, rgba(255, 255, 255, 0.5));
+}
+
 .composer-context-bar {
     display: flex;
     width: calc(100% - 14px);
@@ -439,10 +692,14 @@ textarea#prompt::placeholder {
     flex-wrap: wrap;
     gap: 6px 12px;
     min-height: 46px;
-    margin: 3px auto 0;
+    margin: 1px auto 0;
     padding: 6px 12px 10px;
     border-radius: 0 0 14px 14px;
     background: #1b1b1b;
+}
+
+.input-wrapper.has-chat-content .composer-context-bar {
+    display: none;
 }
 
 .composer-context-bar .agent-task-mode-wrap {
@@ -884,11 +1141,14 @@ textarea#prompt::placeholder {
 }
 
 .tools-dropdown .switch {
-    width: 38px;
-    height: 22px;
+    width: 40px !important;
+    height: 22px !important;
+    flex: 0 0 40px !important;
 }
 
 .tools-dropdown .toggle-slider {
+    inset: 0 !important;
+    box-sizing: border-box !important;
     border-color: rgba(255, 255, 255, 0.12) !important;
     background: #2b2b2b !important;
 }
@@ -896,7 +1156,10 @@ textarea#prompt::placeholder {
 .tools-dropdown .toggle-slider::before {
     width: 16px !important;
     height: 16px !important;
+    top: 50% !important;
+    left: 3px !important;
     background: rgba(255, 255, 255, 0.55) !important;
+    transform: translateY(-50%) !important;
 }
 
 .tools-dropdown .switch input:checked + .toggle-slider {
@@ -905,7 +1168,7 @@ textarea#prompt::placeholder {
 }
 
 .tools-dropdown .switch input:checked + .toggle-slider::before {
-    transform: translateX(18px) !important;
+    transform: translate(18px, -50%) !important;
     background: #f4f4f4 !important;
 }
 

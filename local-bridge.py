@@ -30,7 +30,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 128_000
 MAX_WRITE_BODY_BYTES = 5_000_000
@@ -60,6 +60,7 @@ WEB_FETCH_MAX_BYTES = 160_000
 WEB_FETCH_TIMEOUT_SECONDS = 20
 WEB_FETCH_MAX_REDIRECTS = 5
 WEB_FETCH_USER_AGENT = f"Fauna-Bridge/{VERSION} (+local user-requested fetch)"
+MAX_GIT_BRANCHES = 240
 SKIPPED_DIRS = {
     ".git",
     ".hg",
@@ -553,6 +554,187 @@ def run_command(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]
         }
 
 
+def run_git_command(
+    config: BridgeConfig,
+    args: list[str],
+    scope: str | None = None,
+    requested: str | None = ".",
+    timeout: int = 10,
+) -> subprocess.CompletedProcess[str]:
+    cwd = resolve_bridge_path(config, requested or ".", scope, create_scope=bool(scope))
+    if not cwd.exists() or not cwd.is_dir():
+        raise NotADirectoryError("Git cwd is not a directory")
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=max(1, min(MAX_EXEC_SECONDS, timeout)),
+    )
+
+
+def get_git_output(
+    config: BridgeConfig,
+    args: list[str],
+    scope: str | None = None,
+    requested: str | None = ".",
+    timeout: int = 10,
+    required: bool = True,
+) -> str:
+    result = run_git_command(config, args, scope, requested, timeout)
+    if result.returncode != 0:
+        if not required:
+            return ""
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(detail or f"git {' '.join(args)} failed")
+    return (result.stdout or "").strip()
+
+
+def parse_git_branch_rows(output: str, kind: str, current_branch: str) -> list[dict[str, Any]]:
+    branches: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_line in output.splitlines():
+        parts = raw_line.split("\t")
+        name = parts[0].strip() if parts else ""
+        if not name or name in seen or name.endswith("/HEAD") or (kind == "remote" and "/" not in name):
+            continue
+        seen.add(name)
+        marker = parts[1].strip() if len(parts) > 1 else ""
+        upstream = parts[2].strip() if len(parts) > 2 else ""
+        branches.append({
+            "name": name,
+            "type": kind,
+            "current": marker == "*" or (kind == "local" and name == current_branch),
+            "upstream": upstream,
+        })
+    return branches
+
+
+def should_fallback_unregistered_git_scope(scope: str | None, requested: str | None, exc: Exception) -> bool:
+    clean_requested = str(requested or "").strip()
+    return bool(
+        scope
+        and scope.startswith("project:")
+        and clean_requested
+        and clean_requested != "."
+        and "Project scope is not registered with this bridge" in str(exc)
+    )
+
+
+def get_git_branch_counts(config: BridgeConfig, upstream: str, scope: str | None = None, requested: str | None = ".") -> tuple[int, int]:
+    if not upstream:
+        return 0, 0
+    output = get_git_output(config, ["rev-list", "--left-right", "--count", f"{upstream}...HEAD"], scope, requested, 10, required=False)
+    match = re.match(r"^\s*(\d+)\s+(\d+)\s*$", output)
+    if not match:
+        return 0, 0
+    behind = int(match.group(1))
+    ahead = int(match.group(2))
+    return ahead, behind
+
+
+def get_git_info(config: BridgeConfig, scope: str | None = None, requested: str | None = ".") -> dict[str, Any]:
+    try:
+        cwd = resolve_bridge_path(config, requested or ".", scope)
+    except ValueError as exc:
+        if should_fallback_unregistered_git_scope(scope, requested, exc):
+            return get_git_info(config, None, requested)
+        raise
+    probe = run_git_command(config, ["rev-parse", "--is-inside-work-tree"], scope, requested, 10)
+    if probe.returncode != 0 or (probe.stdout or "").strip().lower() != "true":
+        return {
+            "isRepo": False,
+            "path": response_path(config, cwd, scope),
+            "branches": [],
+            "dirtyCount": 0,
+        }
+
+    repo_root = get_git_output(config, ["rev-parse", "--show-toplevel"], scope, requested, 10, required=False)
+    branch = get_git_output(config, ["branch", "--show-current"], scope, requested, 10, required=False)
+    head = get_git_output(config, ["rev-parse", "--short", "HEAD"], scope, requested, 10, required=False)
+    upstream = get_git_output(config, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], scope, requested, 10, required=False)
+    status_output = get_git_output(config, ["status", "--porcelain=v1"], scope, requested, 10, required=False)
+    dirty_lines = [line for line in status_output.splitlines() if line.strip()]
+    local_output = get_git_output(
+        config,
+        ["for-each-ref", "--format=%(refname:short)\t%(HEAD)\t%(upstream:short)", "refs/heads"],
+        scope,
+        requested,
+        10,
+        required=False,
+    )
+    remote_output = get_git_output(
+        config,
+        ["for-each-ref", "--format=%(refname:short)\t%(HEAD)\t%(upstream:short)", "refs/remotes"],
+        scope,
+        requested,
+        10,
+        required=False,
+    )
+    branches = [
+        *parse_git_branch_rows(local_output, "local", branch),
+        *parse_git_branch_rows(remote_output, "remote", branch),
+    ][:MAX_GIT_BRANCHES]
+    ahead, behind = get_git_branch_counts(config, upstream, scope, requested)
+    return {
+        "isRepo": True,
+        "path": response_path(config, cwd, scope),
+        "repoRoot": repo_root,
+        "branch": branch,
+        "detached": not bool(branch),
+        "head": head,
+        "upstream": upstream,
+        "ahead": ahead,
+        "behind": behind,
+        "dirtyCount": len(dirty_lines),
+        "branches": branches,
+    }
+
+
+def validate_git_branch_value(branch: str) -> str:
+    clean = str(branch or "").strip()
+    if not clean:
+        raise ValueError("Branch name is required")
+    if len(clean) > 240 or clean.startswith("-") or re.search(r"[\r\n\t\0]", clean):
+        raise ValueError("Branch name is not valid")
+    return clean
+
+
+def checkout_git_branch(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    scope = payload.get("scope") or None
+    requested = str(payload.get("path") or ".")
+    branch = validate_git_branch_value(str(payload.get("branch") or ""))
+    create = bool(payload.get("create"))
+    remote = bool(payload.get("remote"))
+
+    try:
+        if create:
+            check = run_git_command(config, ["check-ref-format", "--branch", branch], scope, requested, 10)
+            if check.returncode != 0:
+                detail = (check.stderr or check.stdout or "").strip()
+                raise ValueError(detail or "Branch name is not valid")
+            command = ["checkout", "-b", branch]
+        elif remote:
+            command = ["checkout", "--track", branch]
+        else:
+            command = ["checkout", branch]
+
+        result = run_git_command(config, command, scope, requested, 60)
+    except ValueError as exc:
+        if should_fallback_unregistered_git_scope(scope, requested, exc):
+            fallback_payload = {**payload}
+            fallback_payload.pop("scope", None)
+            return checkout_git_branch(config, fallback_payload)
+        raise
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(detail or "Could not check out branch")
+
+    return get_git_info(config, scope, requested)
+
+
 def clean_header_value(value: Any, max_length: int = 300) -> str:
     return str(value or "").replace("\r", "").replace("\n", "")[:max_length]
 
@@ -848,6 +1030,13 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
                     query.get("scope", [""])[0] or None,
                 )
                 json_response(self, 200, {"ok": True, **result})
+            elif parsed.path == "/git":
+                result = get_git_info(
+                    self.config,
+                    query.get("scope", [""])[0] or None,
+                    query.get("path", ["."])[0],
+                )
+                json_response(self, 200, {"ok": True, **result})
             else:
                 json_response(self, 404, {"ok": False, "error": "Unknown endpoint"})
         except Exception as exc:  # noqa: BLE001 - local API returns readable errors.
@@ -879,6 +1068,9 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
             payload = json.loads(body or "{}")
             if parsed.path == "/exec":
                 result = run_command(self.config, payload)
+                json_response(self, 200, {"ok": True, **result})
+            elif parsed.path == "/git":
+                result = checkout_git_branch(self.config, payload)
                 json_response(self, 200, {"ok": True, **result})
             elif parsed.path == "/write":
                 result = write_text_file(self.config, payload, append=bool(payload.get("append")))

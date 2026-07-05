@@ -558,6 +558,7 @@ let hasShownOllamaStartPrompt = false;
 let activeOnboardingStep = 0;
 let onboardingStepDirection = "next";
 let onboardingReturnFocus = null;
+let onboardingSelectedProvider = normalizeAiProvider(activeAiProvider);
 
 const ONBOARDING_STEP_TITLES = [
     "Welcome to Fauna",
@@ -654,10 +655,18 @@ function isOnboardingOpen() {
     return Boolean(onboardingModal && !onboardingModal.hidden);
 }
 
+function getOnboardingSelectedProvider() {
+    return normalizeAiProvider(onboardingSelectedProvider);
+}
+
+function isOnboardingOpenAiSelected() {
+    return getOnboardingSelectedProvider() === AI_PROVIDER_OPENAI;
+}
+
 function updateOnboardingProviderChoices() {
     onboardingModal?.querySelectorAll("[data-onboarding-action='provider-local'], [data-onboarding-action='provider-openai']")
         .forEach(button => {
-            const isActive = button.dataset.onboardingAction === (isOpenAiProvider() ? "provider-openai" : "provider-local");
+            const isActive = button.dataset.onboardingAction === (isOnboardingOpenAiSelected() ? "provider-openai" : "provider-local");
             button.classList.toggle("active", isActive);
         });
 }
@@ -701,7 +710,7 @@ function updateOnboardingOpenAiStatus() {
 }
 
 function updateOnboardingProviderSetup() {
-    const provider = isOpenAiProvider() ? "openai" : "local";
+    const provider = getOnboardingSelectedProvider();
     onboardingProviderSetupPanels.forEach(panel => {
         const isActive = panel.dataset.onboardingProviderSetup === provider;
         panel.hidden = !isActive;
@@ -752,8 +761,17 @@ function saveOpenAiKeyFromOnboarding() {
 function renderOnboarding() {
     const maxStep = Math.max(0, onboardingSlides.length - 1);
     activeOnboardingStep = Math.max(0, Math.min(maxStep, activeOnboardingStep));
+    const activeProvider = getOnboardingSelectedProvider();
+    const progressScale = maxStep > 0 ? activeOnboardingStep / maxStep : 1;
     onboardingDialog?.classList.toggle("onboarding-direction-back", onboardingStepDirection === "back");
     onboardingDialog?.classList.toggle("onboarding-direction-next", onboardingStepDirection !== "back");
+    if (onboardingDialog) {
+        onboardingDialog.dataset.onboardingStep = String(activeOnboardingStep);
+        onboardingDialog.dataset.onboardingProvider = activeProvider;
+    }
+    if (onboardingProgress) {
+        onboardingProgress.style.setProperty("--onboarding-progress-scale", String(progressScale));
+    }
     onboardingSlides.forEach(slide => {
         const step = Number(slide.dataset.onboardingSlide);
         const isActive = step === activeOnboardingStep;
@@ -770,7 +788,7 @@ function renderOnboarding() {
     }
     if (onboardingTitle) {
         onboardingTitle.textContent = activeOnboardingStep === 1
-            ? (isOpenAiProvider() ? "Connect OpenAI" : "Connect Ollama")
+            ? (isOnboardingOpenAiSelected() ? "Connect OpenAI" : "Connect Ollama")
             : ONBOARDING_STEP_TITLES[activeOnboardingStep] || "Fauna setup";
     }
     if (onboardingBackBtn) onboardingBackBtn.disabled = activeOnboardingStep === 0;
@@ -794,6 +812,7 @@ function openOnboardingModal({ force = false } = {}) {
     onboardingReturnFocus = document.activeElement instanceof HTMLElement && !onboardingModal.contains(document.activeElement)
         ? document.activeElement
         : null;
+    onboardingSelectedProvider = isOpenAiProvider() ? AI_PROVIDER_OPENAI : AI_PROVIDER_LOCAL;
     onboardingModal.hidden = false;
     onboardingModal.setAttribute("aria-hidden", "false");
     document.body.classList.add("onboarding-modal-open");
@@ -827,14 +846,14 @@ async function handleOnboardingAction(action, button) {
     try {
         switch (action) {
             case "provider-local":
-                setActiveAiProvider(AI_PROVIDER_LOCAL, { refreshStatus: false });
+                onboardingSelectedProvider = AI_PROVIDER_LOCAL;
                 showToast("Ollama selected.", "success");
-                setOnboardingStep(1);
+                renderOnboarding();
                 break;
             case "provider-openai":
-                setActiveAiProvider(AI_PROVIDER_OPENAI, { refreshStatus: false });
+                onboardingSelectedProvider = AI_PROVIDER_OPENAI;
                 showToast("OpenAI selected.", "info");
-                setOnboardingStep(1);
+                renderOnboarding();
                 break;
             case "check-ollama":
                 await checkOllamaStatus();
@@ -917,7 +936,19 @@ function loadNotificationSettings() {
     completionSoundVolumeLevel = normalizeCompletionSoundVolume(safeLocalStorageGet(COMPLETION_SOUND_VOLUME_STORAGE_KEY) || "0.55");
 }
 
+function getDesktopNotificationsApi() {
+    const api = getFaunaDesktopApi()?.notifications;
+    return typeof api?.show === "function" ? api : null;
+}
+
+function normalizeNotificationPermissionResult(result) {
+    if (typeof result === "string") return result || "default";
+    if (result?.supported === false) return "unsupported";
+    return String(result?.permission || "granted");
+}
+
 function getNotificationPermissionState() {
+    if (getDesktopNotificationsApi()) return "granted";
     if (!("Notification" in window)) return "unsupported";
     return Notification.permission || "default";
 }
@@ -967,6 +998,25 @@ function renderNotificationSettings() {
 }
 
 async function requestCompletionNotificationPermission({ silent = false } = {}) {
+    const desktopNotifications = getDesktopNotificationsApi();
+    if (desktopNotifications) {
+        let permission = "granted";
+        try {
+            const result = typeof desktopNotifications.requestPermission === "function"
+                ? await desktopNotifications.requestPermission()
+                : await desktopNotifications.getPermission?.();
+            permission = normalizeNotificationPermissionResult(result);
+        } catch (err) {
+            console.warn("Desktop notification permission check failed:", err);
+            permission = "granted";
+        }
+        renderNotificationSettings();
+        if (!silent) {
+            if (permission === "granted") showToast("Notifications enabled.", "success");
+            else showToast("System notifications are not supported here.", "warning");
+        }
+        return permission;
+    }
     if (!("Notification" in window)) {
         if (!silent) showToast("System notifications are not supported here.", "warning");
         renderNotificationSettings();
@@ -1036,14 +1086,32 @@ async function playCompletionSound() {
 
 function showCompletionSystemNotification(sessionId, { title = "", body = "" } = {}) {
     if (!completionNotificationsEnabled) return false;
-    if (!("Notification" in window) || Notification.permission !== "granted") return false;
     const session = chatSessions.find(item => item.id === sessionId);
     const notificationTitle = title || "Fauna";
     const notificationBody = body || `${session?.title || "A chat"} finished generating.`;
+    const notificationTag = sessionId ? `fauna-chat-${sessionId}-complete` : "fauna-chat-complete";
+    const desktopNotifications = getDesktopNotificationsApi();
+    if (desktopNotifications) {
+        void desktopNotifications.show({
+            title: notificationTitle,
+            body: notificationBody,
+            tag: notificationTag,
+            sessionId,
+            silent: true
+        }).then(result => {
+            if (result?.ok === false) {
+                console.warn("Desktop notification failed:", result?.message || result);
+            }
+        }).catch(err => {
+            console.warn("Desktop notification failed:", err);
+        });
+        return true;
+    }
+    if (!("Notification" in window) || Notification.permission !== "granted") return false;
     try {
         const notification = new Notification(notificationTitle, {
             body: notificationBody,
-            tag: sessionId ? `fauna-chat-${sessionId}-complete` : "fauna-chat-complete",
+            tag: notificationTag,
             silent: true
         });
         notification.onclick = () => {
@@ -1059,6 +1127,19 @@ function showCompletionSystemNotification(sessionId, { title = "", body = "" } =
         console.warn("Completion notification failed:", err);
         return false;
     }
+}
+
+function bindDesktopNotificationClicks() {
+    if (desktopNotificationClickUnsubscribe) return;
+    const desktopNotifications = getDesktopNotificationsApi();
+    if (typeof desktopNotifications?.onClicked !== "function") return;
+    desktopNotificationClickUnsubscribe = desktopNotifications.onClicked(payload => {
+        const sessionId = String(payload?.sessionId || "");
+        window.focus?.();
+        if (sessionId && typeof activateChatSession === "function") {
+            activateChatSession(sessionId, { closeSidebar: false });
+        }
+    });
 }
 
 function notifyChatGenerationCompleted(sessionId) {
@@ -1093,6 +1174,7 @@ async function testCompletionNotificationAlert() {
 
 function initializeNotificationSettings() {
     loadNotificationSettings();
+    bindDesktopNotificationClicks();
     renderNotificationSettings();
 }
 
@@ -2046,6 +2128,13 @@ onboardingModal?.addEventListener("click", event => {
     }
 });
 
+onboardingModal?.querySelectorAll("[data-onboarding-action]").forEach(actionButton => {
+    actionButton.addEventListener("click", event => {
+        event.stopPropagation();
+        void handleOnboardingAction(actionButton.dataset.onboardingAction, actionButton);
+    });
+});
+
 onboardingBackBtn?.addEventListener("click", () => setOnboardingStep(activeOnboardingStep - 1));
 onboardingNextBtn?.addEventListener("click", () => setOnboardingStep(activeOnboardingStep + 1));
 onboardingFinishBtn?.addEventListener("click", () => closeOnboardingModal({ complete: true }));
@@ -2281,6 +2370,24 @@ agentMaxStepsAtATimeInput?.addEventListener("change", event => {
 agentMaxStepsPerRunInput?.addEventListener("change", event => {
     activeAgentMaxStepsPerRun = normalizeAgentMaxStepsPerRun(event.target.value);
     safeLocalStorageSet(AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY, String(activeAgentMaxStepsPerRun));
+    updateAiCallSettingsUi();
+});
+
+contextCompactionThreshold?.addEventListener("input", event => {
+    activeContextCompactionThresholdPercent = normalizeContextCompactionThresholdPercent(event.target.value);
+    safeLocalStorageSet(CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY, String(activeContextCompactionThresholdPercent));
+    updateAiCallSettingsUi();
+});
+
+contextCompactionReviewToggle?.addEventListener("change", event => {
+    isContextCompactionReviewEnabled = Boolean(event.target.checked);
+    safeLocalStorageSet(CONTEXT_COMPACTION_REVIEW_STORAGE_KEY, isContextCompactionReviewEnabled ? "true" : "false");
+    updateAiCallSettingsUi();
+});
+
+contextCompactionRotationLimitInput?.addEventListener("change", event => {
+    activeContextCompactionRotationLimit = normalizeContextCompactionRotationLimit(event.target.value);
+    safeLocalStorageSet(CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY, String(activeContextCompactionRotationLimit));
     updateAiCallSettingsUi();
 });
 

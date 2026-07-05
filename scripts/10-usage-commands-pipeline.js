@@ -1032,7 +1032,7 @@ async function processWorkspaceEntry(options = {}) {
     const generationSessionId = generationSession.id;
     if (isSessionGenerating(generationSessionId)) return;
 
-    const runHistory = cloneConversationHistory(conversationHistory);
+    let runHistory = cloneConversationHistory(conversationHistory);
     let runTokenTotal = sessionTotalTokens;
     const generationController = new AbortController();
     activeRequestController = generationController;
@@ -1128,7 +1128,7 @@ async function processWorkspaceEntry(options = {}) {
         let messageContent = speakThisReply ? `${textValue}${getVoiceModeInstruction()}` : textValue;
         let base64Images = [];
         let openAiImageFileIds = [];
-        const aiBubble = options?.targetBubble || addRenderNode("__thinking__", "output");
+        let aiBubble = options?.targetBubble || addRenderNode("__thinking__", "output");
         if (options?.targetBubble) {
             prepareBubbleForRetry(aiBubble);
         }
@@ -1351,11 +1351,45 @@ async function processWorkspaceEntry(options = {}) {
             userMessageObject.openAiImageFileIds = openAiImageFileIds;
         }
         runHistory.push(userMessageObject);
+        let preflightCompaction = { compacted: false, history: runHistory, progressTarget: aiBubble };
+        try {
+            preflightCompaction = await maybeCompactHistoryForContext({
+                history: runHistory,
+                sessionId: generationSessionId,
+                tokenTotal: runTokenTotal,
+                preferredModel: routedModel,
+                signal: generationSignal,
+                progressTarget: aiBubble,
+                trigger: "threshold"
+            });
+        } catch (err) {
+            renderErrorCard(aiBubble, err, {
+                title: err.name === "AbortError" ? "Context compaction stopped" : "Context compaction failed",
+                message: err.name === "AbortError"
+                    ? "Your prompt is safe to edit and run again."
+                    : "Fauna could not compact this chat before sending it to the model.",
+                retryLabel: "Retry generation",
+                onRetry: () => processWorkspaceEntry({
+                    textValue,
+                    files: currentFiles,
+                    skipWorkspaceContext,
+                    skipUserBubble: true,
+                    targetBubble: aiBubble
+                })
+            });
+            return;
+        }
+        if (preflightCompaction.compacted) {
+            runHistory = cloneConversationHistory(preflightCompaction.history);
+            aiBubble = preflightCompaction.progressTarget || aiBubble;
+        }
         if (isChatSessionVisible(generationSessionId)) {
             conversationHistory = cloneConversationHistory(runHistory);
         }
         const userHistoryIndex = runHistory.length - 1;
-        const userMessageNode = userBubble?.closest?.(".message-node.user-node");
+        const userMessageNode = Array.from(chat?.querySelectorAll?.(".message-node.user-node") || [])
+            .find(node => node.dataset.createdAt === userMessageCreatedAt)
+            || userBubble?.closest?.(".message-node.user-node");
         if (userMessageNode) {
             userMessageNode.dataset.historyIndex = String(userHistoryIndex);
             userMessageNode.dataset.createdAt = userMessageCreatedAt;
@@ -1370,17 +1404,45 @@ async function processWorkspaceEntry(options = {}) {
                 ...getActiveChatRequestOptions(),
                 sessionId: generationSessionId
             };
-            const data = await sendOllamaChatWithLocalTools(
-                runHistory,
-                requestOptions,
-                routedModel,
-                generationSignal,
-                aiBubble,
-                {
-                    enabled: true,
-                    preserveActiveModel: shouldPreserveActiveLocalModelForRoute(routedModel)
+            let data = null;
+            let recoveredFromContextError = false;
+            while (true) {
+                try {
+                    data = await sendOllamaChatWithLocalTools(
+                        runHistory,
+                        requestOptions,
+                        routedModel,
+                        generationSignal,
+                        aiBubble,
+                        {
+                            enabled: true,
+                            preserveActiveModel: shouldPreserveActiveLocalModelForRoute(routedModel)
+                        }
+                    );
+                    break;
+                } catch (err) {
+                    if (!recoveredFromContextError && isLikelyContextWindowError(err)) {
+                        recoveredFromContextError = true;
+                        const recoveryCompaction = await maybeCompactHistoryForContext({
+                            history: runHistory,
+                            sessionId: generationSessionId,
+                            tokenTotal: runTokenTotal,
+                            preferredModel: routedModel,
+                            signal: generationSignal,
+                            progressTarget: aiBubble,
+                            trigger: "context_error",
+                            force: true,
+                            aggressive: true
+                        });
+                        if (recoveryCompaction.compacted) {
+                            runHistory = cloneConversationHistory(recoveryCompaction.history);
+                            aiBubble = recoveryCompaction.progressTarget || aiBubble;
+                            continue;
+                        }
+                    }
+                    throw err;
                 }
-            );
+            }
             const tokenUsage = getProviderTokenUsage(data);
             const assistantMessage = getAssistantMessageForConversation(data, routedModel);
             attachTokenUsage(assistantMessage, tokenUsage);

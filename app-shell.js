@@ -51,6 +51,30 @@ async function loadIncludes() {
     }
 }
 
+async function writeStartupTextToClipboard(value = "") {
+    const text = String(value ?? "");
+    const desktopClipboard = window.faunaDesktop?.clipboard?.writeText;
+    if (typeof desktopClipboard === "function") {
+        const result = await desktopClipboard(text);
+        if (result?.ok === false) throw new Error(result.message || "Desktop clipboard failed.");
+        return;
+    }
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const temp = document.createElement("textarea");
+    temp.value = text;
+    temp.setAttribute("readonly", "");
+    temp.style.position = "fixed";
+    temp.style.opacity = "0";
+    document.body.appendChild(temp);
+    temp.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(temp);
+    if (!ok) throw new Error("Legacy copy command failed.");
+}
+
 function escapeHtml(value) {
     return String(value ?? "")
         .replaceAll("&", "&amp;")
@@ -134,7 +158,7 @@ function renderStartupError(error) {
     });
     copyButton?.addEventListener("click", async () => {
         try {
-            await navigator.clipboard.writeText(info.detail);
+            await writeStartupTextToClipboard(info.detail);
             copyButton.textContent = "Copied";
             window.setTimeout(() => {
                 copyButton.textContent = "Copy details";
@@ -150,7 +174,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260703-agent-workspace-release");
+        await import("./script.js?v=20260705-terminal-sidebar-composer");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));

@@ -708,6 +708,493 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     return lastData;
 }
 
+function getContextCompactionRoleLabel(role) {
+    if (role === "system") return "SYSTEM";
+    if (role === "assistant") return "ASSISTANT";
+    return "USER";
+}
+
+function serializeMessagesForContextEstimate(messages = []) {
+    return (Array.isArray(messages) ? messages : [])
+        .map((message, index) => {
+            const parts = [`[${index + 1}] ${getContextCompactionRoleLabel(message?.role)}`];
+            if (message?.createdAt) parts.push(`at ${message.createdAt}`);
+            parts.push(String(message?.content || ""));
+            if (Array.isArray(message?.images) && message.images.length > 0) {
+                parts.push(`[${message.images.length} local image attachment${message.images.length === 1 ? "" : "s"} omitted]`);
+            }
+            if (Array.isArray(message?.openAiImageFileIds) && message.openAiImageFileIds.length > 0) {
+                parts.push(`[${message.openAiImageFileIds.length} OpenAI image attachment${message.openAiImageFileIds.length === 1 ? "" : "s"} omitted]`);
+            }
+            return parts.join("\n");
+        })
+        .join("\n\n");
+}
+
+function estimateTextTokens(text = "") {
+    const value = String(text || "").trim();
+    if (!value) return 0;
+    const wordEstimate = Math.ceil(value.split(/\s+/).filter(Boolean).length * 1.35);
+    const charEstimate = Math.ceil(value.length / 4);
+    return Math.max(wordEstimate, charEstimate);
+}
+
+function buildContextMeasurementMessages(history = [], preferredModel = OLLAMA_MODEL, sessionId = activeSessionId) {
+    const allowToolCalls = canUseComposerTools();
+    const allowLocalTools = allowToolCalls && hasWorkspaceBridgeAccess();
+    const allowWebTools = allowToolCalls && isWebSearchEnabled;
+    const allowLocationTools = allowToolCalls && isApproxLocationEnabled;
+    return [
+        { role: "system", content: buildAssistantSystemPrompt(allowLocalTools, false, allowWebTools, allowToolCalls, allowLocationTools, getEffectiveWorkspaceAccessPolicy(), sessionId) },
+        ...cloneConversationHistory(history, { includeImages: false })
+    ];
+}
+
+async function getContextUsageEstimate(history = [], preferredModel = OLLAMA_MODEL, sessionId = activeSessionId) {
+    const model = isOpenAiProvider() ? getOpenAiChatModel() : normalizeModelId(preferredModel) || OLLAMA_MODEL;
+    const contextLimit = getActiveModelContextLength(model);
+    const measurementMessages = buildContextMeasurementMessages(history, preferredModel, sessionId);
+    const tokenText = serializeMessagesForContextEstimate(measurementMessages);
+    let count = estimateTextTokens(tokenText) + measurementMessages.length * 6;
+    let source = "estimate";
+
+    if (!isOpenAiProvider() && isOllamaReachable && tokenText.trim()) {
+        try {
+            count = await requestOllamaTokenCount(tokenText, model);
+            source = `Ollama tokenizer (${model})`;
+        } catch {
+            // Keep the fast local estimate if tokenizer preflight is unavailable.
+        }
+    }
+
+    return {
+        count,
+        contextLimit,
+        ratio: contextLimit > 0 ? count / contextLimit : 0,
+        source,
+        model
+    };
+}
+
+function canCompactConversationHistory(history = []) {
+    const compactableCount = (Array.isArray(history) ? history : [])
+        .filter(message => message && !isContextCompactionMessage(message)).length;
+    return compactableCount >= CONTEXT_COMPACTION_MIN_HISTORY_MESSAGES;
+}
+
+function getContextCompactionKeepStart(history = [], aggressive = false) {
+    const source = Array.isArray(history) ? history : [];
+    const keepCount = aggressive
+        ? CONTEXT_COMPACTION_AGGRESSIVE_KEEP_RECENT_MESSAGES
+        : CONTEXT_COMPACTION_KEEP_RECENT_MESSAGES;
+    return Math.max(1, source.length - keepCount);
+}
+
+function getContextCompactionSummarizerModel(preferredModel = OLLAMA_MODEL) {
+    return isOpenAiProvider()
+        ? getOpenAiChatModel()
+        : normalizeModelId(preferredModel) || OLLAMA_MODEL;
+}
+
+function getContextCompactionCriticModel(summarizerModel = getContextCompactionSummarizerModel()) {
+    const activeModel = normalizeModelId(summarizerModel);
+    if (isOpenAiProvider()) {
+        const candidates = [
+            DEFAULT_OPENAI_CHAT_MODEL,
+            "gpt-5.1-chat-latest",
+            "gpt-5-mini",
+            ...getOpenAiModelSwitcherOptions().map(option => option.id)
+        ].map(normalizeModelId).filter(Boolean);
+        return candidates.find(model => model !== activeModel) || activeModel;
+    }
+
+    const candidates = [
+        getLocalTaskModel("reasoning"),
+        FALLBACK_MODEL,
+        ...installedOllamaModels,
+        ...LOCAL_MODEL_OPTIONS.map(option => option.id)
+    ].map(normalizeModelId).filter(Boolean);
+    return candidates.find(model => model !== activeModel && getOllamaModelCapability(model).supportsStreaming !== false)
+        || activeModel;
+}
+
+function extractJsonObjectFromText(text = "") {
+    const value = String(text || "").trim();
+    if (!value) return null;
+    try {
+        return JSON.parse(value);
+    } catch {
+        const first = value.indexOf("{");
+        const last = value.lastIndexOf("}");
+        if (first < 0 || last <= first) return null;
+        try {
+            return JSON.parse(value.slice(first, last + 1));
+        } catch {
+            return null;
+        }
+    }
+}
+
+function normalizeCompactionCarryForward(value) {
+    if (Array.isArray(value)) {
+        return value.map(item => String(item || "").trim()).filter(Boolean).slice(0, 16);
+    }
+    const text = String(value || "").trim();
+    if (!text) return [];
+    return text.split(/\n+|;\s*/).map(item => item.replace(/^[-*\d.)\s]+/, "").trim()).filter(Boolean).slice(0, 16);
+}
+
+function normalizeContextCompactionDraft(rawText = "") {
+    const parsed = extractJsonObjectFromText(rawText);
+    if (parsed && typeof parsed === "object") {
+        const summary = String(parsed.summary || parsed.compacted_summary || parsed.context || "").trim();
+        const nextStep = String(parsed.next_step || parsed.nextStep || parsed.next || "").trim();
+        const carryForward = normalizeCompactionCarryForward(parsed.carry_forward || parsed.carryForward || parsed.important || parsed.facts);
+        return {
+            summary: summary || String(rawText || "").trim(),
+            nextStep,
+            carryForward
+        };
+    }
+    return {
+        summary: String(rawText || "").trim(),
+        nextStep: "",
+        carryForward: []
+    };
+}
+
+function normalizeContextCompactionReview(rawText = "") {
+    const parsed = extractJsonObjectFromText(rawText);
+    if (parsed && typeof parsed === "object") {
+        const issues = normalizeCompactionCarryForward(parsed.issues || parsed.missing || parsed.feedback || parsed.concerns);
+        const approved = Boolean(parsed.approved || parsed.ok || parsed.complete)
+            || (issues.length === 0 && /good|sufficient|approved|complete|passt|okay/i.test(String(parsed.verdict || parsed.status || "")));
+        return {
+            approved,
+            issues,
+            feedback: String(parsed.feedback || parsed.reason || parsed.verdict || "").trim()
+        };
+    }
+    const text = String(rawText || "").trim();
+    const approved = /\b(good|sufficient|approved|complete|looks good|passt|ist gut|okay)\b/i.test(text)
+        && !/\b(missing|forgot|fehlt|vergessen|issue|problem|but)\b/i.test(text);
+    return {
+        approved,
+        issues: approved ? [] : normalizeCompactionCarryForward(text),
+        feedback: text
+    };
+}
+
+function getContextCompactionTaskOptions() {
+    const options = { ...getActiveChatRequestOptions() };
+    delete options.faunaToolContext;
+    delete options.agent_max_steps_at_a_time;
+    delete options.agent_max_steps_per_run;
+    if (isOpenAiProvider()) {
+        options.max_output_tokens = Math.max(Number(options.max_output_tokens || 0), 2200);
+    } else {
+        options.num_predict = Math.max(Number(options.num_predict || 0), 1800);
+    }
+    return options;
+}
+
+async function sendContextCompactionTask(messages, model, signal = null) {
+    const options = getContextCompactionTaskOptions();
+    if (isOpenAiProvider()) {
+        return sendOpenAiResponse(messages, { ...options, model }, signal, { enabled: false });
+    }
+    return sendOllamaTaskChat(messages, model, options, signal);
+}
+
+function buildContextCompactionTranscript(history = []) {
+    return serializeMessagesForContextEstimate(cloneConversationHistory(history, { includeImages: false }));
+}
+
+function buildContextCompactionUserPrompt(history, keepStart, previousDraft = null, review = null) {
+    const transcript = buildContextCompactionTranscript(history);
+    const retainedCount = Math.max(0, history.length - keepStart);
+    const lines = [
+        "Compact this chat history for the next model call.",
+        `The last ${retainedCount} message${retainedCount === 1 ? "" : "s"} will remain verbatim after the compacted summary. Do not repeat those recent messages unless a detail is essential.`,
+        "Preserve exact project names, file paths, commands, errors, decisions, constraints, user preferences, tool results, and unresolved tasks.",
+        "Say what the next assistant step should be.",
+        "Return JSON only with this shape: {\"summary\":\"...\",\"carry_forward\":[\"...\"],\"next_step\":\"...\"}.",
+        "",
+        "Full chat transcript:",
+        transcript
+    ];
+    if (previousDraft) {
+        lines.push("", "Previous compacted summary:", JSON.stringify(previousDraft, null, 2));
+    }
+    if (review?.feedback || review?.issues?.length) {
+        lines.push("", "Critical review feedback to fix:", review.feedback || review.issues.join("\n"));
+    }
+    return lines.join("\n");
+}
+
+async function requestContextCompactionDraft(history, keepStart, {
+    model,
+    previousDraft = null,
+    review = null,
+    signal = null
+} = {}) {
+    const messages = [
+        {
+            role: "system",
+            content: "You compact long AI chat histories. Be precise, skeptical, and loss-minimizing. Return valid JSON only."
+        },
+        {
+            role: "user",
+            content: buildContextCompactionUserPrompt(history, keepStart, previousDraft, review)
+        }
+    ];
+    const data = await sendContextCompactionTask(messages, model, signal);
+    return normalizeContextCompactionDraft(data?.message?.content || "");
+}
+
+async function requestContextCompactionReview(history, keepStart, draft, {
+    model,
+    summarizerModel,
+    signal = null
+} = {}) {
+    const messages = [
+        {
+            role: "system",
+            content: "You are a critical reviewer for chat context compaction. Find omissions, distorted facts, lost constraints, and missing next steps. Return JSON only."
+        },
+        {
+            role: "user",
+            content: [
+                "Review this compacted summary against the full chat transcript.",
+                `The summarizer model was ${summarizerModel}. The last ${Math.max(0, history.length - keepStart)} messages remain verbatim, but the summary still needs to carry forward important older context.`,
+                "Return JSON only with this shape: {\"approved\":true|false,\"issues\":[\"...\"],\"feedback\":\"...\"}.",
+                "",
+                "Compacted summary:",
+                JSON.stringify(draft, null, 2),
+                "",
+                "Full chat transcript:",
+                buildContextCompactionTranscript(history)
+            ].join("\n")
+        }
+    ];
+    const data = await sendContextCompactionTask(messages, model, signal);
+    return normalizeContextCompactionReview(data?.message?.content || "");
+}
+
+async function buildReviewedContextCompaction(history, keepStart, {
+    signal = null,
+    preferredModel = OLLAMA_MODEL
+} = {}) {
+    const summarizerModel = getContextCompactionSummarizerModel(preferredModel);
+    const criticModel = getContextCompactionCriticModel(summarizerModel);
+    let draft = await requestContextCompactionDraft(history, keepStart, {
+        model: summarizerModel,
+        signal
+    });
+    let reviewed = false;
+    let approved = !isContextCompactionReviewEnabled;
+    let rotations = 0;
+    let lastReview = null;
+
+    if (isContextCompactionReviewEnabled) {
+        const limit = normalizeContextCompactionRotationLimit(activeContextCompactionRotationLimit);
+        while (rotations < limit) {
+            rotations += 1;
+            reviewed = true;
+            lastReview = await requestContextCompactionReview(history, keepStart, draft, {
+                model: criticModel,
+                summarizerModel,
+                signal
+            });
+            if (lastReview.approved || lastReview.issues.length === 0) {
+                approved = true;
+                break;
+            }
+            draft = await requestContextCompactionDraft(history, keepStart, {
+                model: summarizerModel,
+                previousDraft: draft,
+                review: lastReview,
+                signal
+            });
+        }
+    }
+
+    return {
+        draft,
+        reviewed,
+        approved,
+        rotations,
+        review: lastReview,
+        summarizerModel,
+        criticModel: reviewed ? criticModel : ""
+    };
+}
+
+function createContextCompactionMessageContent(draft, reviewInfo) {
+    const carryForward = draft.carryForward?.length
+        ? draft.carryForward.map(item => `- ${item}`).join("\n")
+        : "- No separate carry-forward items were returned.";
+    const reviewLine = reviewInfo.reviewed
+        ? (reviewInfo.approved ? "Critical review approved the compacted context." : "Critical review rotation limit reached; carrying forward the latest revision.")
+        : "Critical review was not enabled.";
+    return [
+        "Previous chat context has been automatically compacted for the next model call.",
+        "",
+        "Summary:",
+        draft.summary || "No summary was returned.",
+        "",
+        "Carry-forward details:",
+        carryForward,
+        "",
+        "Next step:",
+        draft.nextStep || "Continue from the latest user request.",
+        "",
+        reviewLine
+    ].join("\n");
+}
+
+function createContextCompactionHistoryMessage({
+    draft,
+    reviewInfo,
+    originalMessageCount,
+    keptMessageCount,
+    usage,
+    trigger
+}) {
+    const createdAt = new Date().toISOString();
+    return {
+        role: "system",
+        content: createContextCompactionMessageContent(draft, reviewInfo),
+        createdAt,
+        contextCompaction: {
+            type: CONTEXT_COMPACTION_MESSAGE_TYPE,
+            summary: draft.summary || "",
+            nextStep: draft.nextStep || "",
+            carryForward: draft.carryForward || [],
+            originalMessageCount,
+            keptMessageCount,
+            thresholdPercent: activeContextCompactionThresholdPercent,
+            estimatedTokens: usage?.count || 0,
+            contextLimit: usage?.contextLimit || 0,
+            reviewed: reviewInfo.reviewed,
+            approved: reviewInfo.approved,
+            rotations: reviewInfo.rotations,
+            model: reviewInfo.summarizerModel,
+            criticModel: reviewInfo.criticModel,
+            trigger,
+            createdAt
+        }
+    };
+}
+
+function renderContextCompactionProgress(progressTarget, stage = "Compacting", meta = "Running") {
+    if (!progressTarget) return;
+    renderToolActivity(progressTarget, {
+        title: "Compacting context...",
+        items: [{
+            kind: "memory",
+            label: "Context compaction",
+            tool: "context_compaction",
+            detail: stage,
+            input: `${activeContextCompactionThresholdPercent}% threshold`,
+            meta
+        }]
+    });
+}
+
+function isLikelyContextWindowError(error) {
+    const message = String(error?.message || error || "");
+    return /context(?: length| window)?|maximum context|too many tokens|token limit|tokens? exceed|prompt is too long|context_length_exceeded|num_ctx/i.test(message);
+}
+
+function applyCompactedHistoryToGenerationView(history, sessionId, tokenTotal, progressTarget = null) {
+    if (!isChatSessionVisible(sessionId)) {
+        updateStoredSessionFromGeneration(sessionId, {
+            history,
+            tokenTotal,
+            render: false
+        });
+        return progressTarget;
+    }
+
+    conversationHistory = cloneConversationHistory(history);
+    sessionTotalTokens = tokenTotal;
+    renderInitialChatHistoryWindow(conversationHistory, sessionId);
+    updateStoredSessionFromGeneration(sessionId, {
+        history: conversationHistory,
+        tokenTotal,
+        render: false
+    });
+    const nextBubble = addRenderNode("__thinking__", "output");
+    if (document.body?.classList.contains("voice-chat-active")) {
+        setCurrentVoiceAssistantNode(nextBubble?.closest(".message-node"));
+    }
+    return nextBubble || progressTarget;
+}
+
+async function maybeCompactHistoryForContext({
+    history,
+    sessionId,
+    tokenTotal,
+    preferredModel,
+    signal,
+    progressTarget,
+    trigger = "threshold",
+    force = false,
+    aggressive = false
+} = {}) {
+    const sourceHistory = cloneConversationHistory(history);
+    if (!canCompactConversationHistory(sourceHistory)) {
+        return {
+            compacted: false,
+            history: sourceHistory,
+            progressTarget,
+            usage: null
+        };
+    }
+
+    const usage = await getContextUsageEstimate(sourceHistory, preferredModel, sessionId);
+    const thresholdRatio = activeContextCompactionThresholdPercent / 100;
+
+    if (!force && usage.ratio < thresholdRatio) {
+        return {
+            compacted: false,
+            history: sourceHistory,
+            progressTarget,
+            usage
+        };
+    }
+
+    renderContextCompactionProgress(progressTarget, force ? "Recovering from context limit" : "Summarizing chat history", "Running");
+    const keepStart = getContextCompactionKeepStart(sourceHistory, aggressive);
+    const keptMessages = sourceHistory.slice(keepStart).filter(message => !isContextCompactionMessage(message));
+    const reviewInfo = await buildReviewedContextCompaction(sourceHistory, keepStart, {
+        signal,
+        preferredModel
+    });
+    const compactionMessage = createContextCompactionHistoryMessage({
+        draft: reviewInfo.draft,
+        reviewInfo,
+        originalMessageCount: sourceHistory.length,
+        keptMessageCount: keptMessages.length,
+        usage,
+        trigger
+    });
+    const nextHistory = [
+        compactionMessage,
+        ...keptMessages
+    ];
+    renderContextCompactionProgress(progressTarget, "Context summary ready", "Done");
+    const nextProgressTarget = applyCompactedHistoryToGenerationView(nextHistory, sessionId, tokenTotal, progressTarget);
+    return {
+        compacted: true,
+        history: nextHistory,
+        progressTarget: nextProgressTarget,
+        usage,
+        compactionMessage
+    };
+}
+
 modelSwitcher = createModelSwitcher({
     button: modelBtn,
     dropdown: modelDropdown,
@@ -868,6 +1355,12 @@ chat.addEventListener("click", (e) => {
     const assistantTtsToggle = e.target.closest("[data-assistant-tts-toggle]");
     if (assistantTtsToggle) {
         handleAssistantTtsPlayerToggle(assistantTtsToggle);
+        return;
+    }
+
+    const turnDurationToggle = e.target.closest("[data-turn-duration-toggle]");
+    if (turnDurationToggle) {
+        toggleTurnToolActivityDetails(turnDurationToggle);
         return;
     }
 
