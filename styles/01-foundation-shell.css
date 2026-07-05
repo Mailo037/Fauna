@@ -243,6 +243,12 @@ a:focus-visible {
     display: block;
 }
 
+.app-brand-icon {
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+}
+
 .mobile-header {
     display: none;
     position: fixed;

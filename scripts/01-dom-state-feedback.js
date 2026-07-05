@@ -714,6 +714,7 @@ const COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY = "faunaCompletionOnlyUnfocused";
 const COMPLETION_BACKGROUND_ONLY_STORAGE_KEY = "faunaCompletionBackgroundOnly";
 const COMPLETION_SOUND_VOLUME_STORAGE_KEY = "faunaCompletionSoundVolume";
 const DESKTOP_FILE_URL_RE = /^(?:fauna-app|fauna-file|file):\/\//i;
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const STREAM_RENDER_THROTTLE_MS = 45;
 const CHAT_AUTO_SCROLL_THRESHOLD = 96;
 const CHAT_INITIAL_RENDER_COUNT = 24;
@@ -1064,8 +1065,8 @@ function renderChangelogMenu() {
         const badge = document.createElement("span");
         badge.className = "changelog-entry-summary";
         badge.textContent = entry.title;
-        const chevron = document.createElement("svg");
-        chevron.className = "changelog-entry-chevron";
+        const chevron = document.createElementNS(SVG_NAMESPACE, "svg");
+        chevron.setAttribute("class", "changelog-entry-chevron");
         chevron.setAttribute("viewBox", "0 0 24 24");
         chevron.setAttribute("fill", "none");
         chevron.setAttribute("stroke", "currentColor");
@@ -1073,7 +1074,9 @@ function renderChangelogMenu() {
         chevron.setAttribute("stroke-linecap", "round");
         chevron.setAttribute("stroke-linejoin", "round");
         chevron.setAttribute("aria-hidden", "true");
-        chevron.innerHTML = '<path d="m9 18 6-6-6-6"></path>';
+        const chevronPath = document.createElementNS(SVG_NAMESPACE, "path");
+        chevronPath.setAttribute("d", "m9 18 6-6-6-6");
+        chevron.append(chevronPath);
         toggle.append(titleWrap, badge, chevron);
         header.append(toggle);
 

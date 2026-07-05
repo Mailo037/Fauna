@@ -726,6 +726,10 @@ body,
     border-bottom: 1px solid rgba(255, 255, 255, 0.045) !important;
 }
 
+.mobile-logo {
+    color: #f2f2f2 !important;
+}
+
 
 /* ═══════════════════════════════════════════════════════
    Voice picker: collapsed grid with gradient + show-more

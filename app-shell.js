@@ -1,5 +1,7 @@
 const includeSelector = "[data-include]";
 const MIN_BOOT_MS = 520;
+const APP_ICON_SRC = "favicon.png?v=20260705-brand-icon";
+const APP_ICON_MARKUP = `<img class="fauna-mark app-brand-icon" src="${APP_ICON_SRC}" alt="" decoding="async" draggable="false">`;
 
 function createBootLoader() {
     document.body?.classList.add("app-loading");
@@ -12,7 +14,7 @@ function createBootLoader() {
     loader.setAttribute("aria-live", "polite");
     loader.innerHTML = `
         <div class="app-boot-loader-mark" aria-hidden="true">
-            <svg class="fauna-mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.09 6.26 6.73.92-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+            ${APP_ICON_MARKUP}
         </div>
         <div class="app-boot-loader-text">Starting Fauna</div>
         <div class="app-boot-loader-bar" aria-hidden="true"><span></span></div>
@@ -124,7 +126,7 @@ function renderStartupError(error) {
         <main class="startup-error" role="alert" aria-labelledby="startupErrorTitle">
             <section class="startup-error-card">
                 <div class="startup-error-mark" aria-hidden="true">
-                    <svg class="fauna-mark" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.09 6.26 6.73.92-5.09 3.7L17.82 20 12 16.27 6.18 20l1.09-7.12-5.09-3.7 6.73-.92L12 2z"/></svg>
+                    ${APP_ICON_MARKUP}
                 </div>
                 <div class="startup-error-copy">
                     <p class="startup-error-kicker">Startup interrupted</p>
@@ -174,7 +176,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260705-side-chat-composer-full");
+        await import("./script.js?v=20260705-changelog-popover");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));
