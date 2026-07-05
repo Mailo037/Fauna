@@ -475,12 +475,23 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.10";
-const FAUNA_APP_BUILD_ID = "20260705-workspace-tabs-tools";
+const FAUNA_APP_VERSION = "0.1.11";
+const FAUNA_APP_BUILD_ID = "20260705-hex-color-swatches";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.1.11",
+        date: "2026-07-05",
+        commit: "v0.1.11",
+        title: "Hex color previews",
+        changes: [
+            "Added inline color swatches for CSS hex values in AI answers and rendered Markdown files.",
+            "Kept fenced code blocks untouched while previewing inline code and prose colors.",
+            "Refreshed static cache keys so the Markdown renderer and swatch styling load cleanly."
+        ]
+    },
     {
         version: "0.1.10",
         date: "2026-07-05",
