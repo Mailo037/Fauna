@@ -1675,46 +1675,35 @@ textarea#prompt::placeholder {
     display: inline-flex;
     align-items: center;
     max-width: min(100%, 360px);
-    margin: 0 2px;
-    padding: 2px 8px 2px 3px;
-    border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--surface-2) 82%, transparent);
-    color: color-mix(in srgb, var(--accent) 82%, #ffffff);
+    margin: 0 1px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--accent);
     font: inherit;
-    font-size: 0.92em;
-    font-weight: 800;
+    font-size: 1em;
+    font-weight: 720;
     line-height: 1.35;
+    text-decoration: none;
+    text-underline-offset: 0.18em;
     vertical-align: baseline;
     cursor: pointer;
-    transform: translateY(2px);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
-    transition: border-color 0.14s var(--ease), background 0.14s var(--ease), color 0.14s var(--ease), box-shadow 0.14s var(--ease);
+    transform: none;
+    box-shadow: none;
+    transition: color 0.14s var(--ease), text-decoration-color 0.14s var(--ease);
 }
 
 .file-reference:hover,
 .file-reference:focus-visible,
 .file-reference.copied {
-    border-color: color-mix(in srgb, var(--accent) 72%, white 16%);
-    background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
-    color: #ffffff;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+    color: color-mix(in srgb, var(--accent) 72%, #ffffff);
+    text-decoration: underline;
+    outline: none;
 }
 
 .file-reference-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 19px;
-    height: 18px;
-    flex: 0 0 auto;
-    margin-right: 5px;
-    border-radius: 4px;
-    background: #2f74ff;
-    color: #ffffff;
-    font-size: 7.5px;
-    font-weight: 950;
-    letter-spacing: 0;
+    display: none;
 }
 
 .file-reference-icon-css {
@@ -1755,45 +1744,32 @@ textarea#prompt::placeholder {
     display: inline-flex;
     align-items: center;
     max-width: min(100%, 240px);
-    margin: 0 2px;
-    padding: 2px 8px 2px 3px;
-    border: 1px solid color-mix(in srgb, var(--border) 72%, #ffffff 8%);
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--surface-2) 78%, transparent);
-    color: color-mix(in srgb, var(--text) 88%, var(--accent));
+    margin: 0 1px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--accent);
     font: inherit;
-    font-size: 0.92em;
-    font-weight: 800;
+    font-size: 1em;
+    font-weight: 720;
     line-height: 1.35;
     text-decoration: none;
+    text-underline-offset: 0.18em;
     vertical-align: baseline;
-    transform: translateY(2px);
-    transition: border-color 0.14s var(--ease), background 0.14s var(--ease), color 0.14s var(--ease);
+    transform: none;
+    transition: color 0.14s var(--ease), text-decoration-color 0.14s var(--ease);
 }
 
 .website-reference:hover,
 .website-reference:focus-visible {
-    border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
-    background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
-    color: #ffffff;
+    color: color-mix(in srgb, var(--accent) 72%, #ffffff);
+    text-decoration: underline;
     outline: none;
 }
 
 .website-reference-icon {
-    display: inline-grid;
-    place-items: center;
-    width: 18px;
-    height: 18px;
-    flex: 0 0 auto;
-    margin-right: 5px;
-    overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
-    border-radius: 50%;
-    background: #1f2633;
-    color: #ffffff;
-    font-size: 9px;
-    font-weight: 900;
-    letter-spacing: 0;
+    display: none;
 }
 
 .website-reference-favicon {

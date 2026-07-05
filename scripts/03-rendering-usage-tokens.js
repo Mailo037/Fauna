@@ -765,7 +765,7 @@ function renderToolActivity(container, options = {}) {
         ? options.collapsed
         : previousState.collapsed !== undefined
             ? previousState.collapsed
-            : true;
+            : !isRunning;
     const panelId = previousState.panelId || `tool-activity-panel-${++toolActivityPanelIdCounter}`;
     const hasResponseHtml = Object.prototype.hasOwnProperty.call(options, "responseHtml");
     const responseHtml = hasResponseHtml ? String(options.responseHtml || "") : String(previousState.responseHtml || "");
@@ -896,6 +896,7 @@ function renderAssistantContentHtml(target, html, { final = false, busy = false,
         renderToolActivity(target, {
             ...target._faunaToolActivityState,
             status: final ? "done" : "running",
+            collapsed: final ? true : target._faunaToolActivityState.collapsed,
             responseHtml: html,
             responseBusy: busy && typewriter
         });

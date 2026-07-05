@@ -500,12 +500,24 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.11";
-const FAUNA_APP_BUILD_ID = "20260705-all-updates";
+const FAUNA_APP_VERSION = "0.1.12";
+const FAUNA_APP_BUILD_ID = "20260705-chat-tool-ui";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.1.12",
+        date: "2026-07-05",
+        commit: "v0.1.12",
+        title: "Chat tool activity UI cleanup",
+        changes: [
+            "Removed the left accent gradient from tool-backed assistant answers.",
+            "Changed file and website references in Markdown answers from boxed pills to inline accent text.",
+            "Opened live tool activity while an answer is running, then collapsed it again after the final response.",
+            "Tightened spacing between thinking notes, tool rows, and the final answer in chat."
+        ]
+    },
     {
         version: "0.1.11",
         date: "2026-07-05",

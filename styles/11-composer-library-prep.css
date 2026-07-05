@@ -2034,11 +2034,11 @@ textarea#prompt::placeholder {
 }
 
 :root[data-density="compact"] .bubble-block > .bubble.tool-activity-bubble:not(:first-child) {
-    margin-top: 8px;
+    margin-top: 3px;
 }
 
 :root[data-density="compact"] .bubble-block > .bubble.tool-activity-bubble + .bubble {
-    margin-top: 6px;
+    margin-top: 3px;
 }
 
 :root[data-density="compact"] .input-action-bar {

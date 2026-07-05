@@ -174,7 +174,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260705-hex-color-swatches");
+        await import("./script.js?v=20260705-chat-tool-ui");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));
