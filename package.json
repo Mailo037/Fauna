@@ -1,6 +1,6 @@
 {
   "name": "fauna-desktop",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "license": "MIT",
   "description": "Fauna desktop app shell",

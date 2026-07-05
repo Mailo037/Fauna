@@ -203,6 +203,77 @@ def response_root(config: BridgeConfig, scope: str | None = None) -> Path:
     return resolve_bridge_path(config, ".", scope) if scope else config.root
 
 
+def get_git_root_for_path(path: Path) -> Path | None:
+    git = shutil.which("git")
+    if not git:
+        return None
+    try:
+        completed = subprocess.run(
+            [git, "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    root = completed.stdout.strip()
+    if not root:
+        return None
+    try:
+        return Path(root).resolve()
+    except OSError:
+        return None
+
+
+def mark_git_ignored_entries(base: Path, entry_paths: list[tuple[dict[str, Any], Path, bool]]) -> None:
+    git = shutil.which("git")
+    git_root = get_git_root_for_path(base)
+    if not git or not git_root or not entry_paths:
+        return
+
+    rel_paths: list[str] = []
+    rel_to_item: dict[str, dict[str, Any]] = {}
+    for item, path, is_dir in entry_paths:
+        try:
+            rel_path = path.resolve().relative_to(git_root).as_posix()
+        except (OSError, ValueError):
+            continue
+        if not rel_path:
+            continue
+        check_path = f"{rel_path}/" if is_dir else rel_path
+        rel_paths.append(check_path)
+        rel_to_item[rel_path.rstrip("/")] = item
+        rel_to_item[check_path.rstrip("/")] = item
+
+    if not rel_paths:
+        return
+
+    try:
+        completed = subprocess.run(
+            [git, "-C", str(git_root), "check-ignore", "-z", "--stdin"],
+            input=("\0".join(rel_paths) + "\0").encode("utf-8"),
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+
+    if completed.returncode not in {0, 1}:
+        return
+
+    for raw_ignored_path in completed.stdout.split(b"\0"):
+        if not raw_ignored_path:
+            continue
+        ignored_path = raw_ignored_path.decode("utf-8", "replace").strip().rstrip("/")
+        item = rel_to_item.get(ignored_path)
+        if item is not None:
+            item["ignored"] = True
+
+
 def list_tree(config: BridgeConfig, requested: str, depth: int, limit: int, scope: str | None = None) -> dict[str, Any]:
     base = resolve_bridge_path(config, requested, scope, create_scope=bool(scope))
     if not base.exists():
@@ -211,6 +282,7 @@ def list_tree(config: BridgeConfig, requested: str, depth: int, limit: int, scop
         raise NotADirectoryError("Path is not a directory")
 
     entries: list[dict[str, Any]] = []
+    entry_paths: list[tuple[dict[str, Any], Path, bool]] = []
     truncated = False
 
     def walk(current: Path, current_depth: int) -> None:
@@ -249,11 +321,13 @@ def list_tree(config: BridgeConfig, requested: str, depth: int, limit: int, scop
                 except OSError:
                     item["size"] = None
             entries.append(item)
+            entry_paths.append((item, resolved_child, is_dir))
 
             if is_dir and current_depth < depth:
                 walk(resolved_child, current_depth + 1)
 
     walk(base, 0)
+    mark_git_ignored_entries(base, entry_paths)
     return {
         "root": str(response_root(config, scope)),
         "path": response_path(config, base, scope),

@@ -2,8 +2,8 @@
 @import url("./styles/02-composer-controls.css?v=20260703-agent-access-ui-polish-2");
 @import url("./styles/03-code-workbench.css?v=20260702-window-updates");
 @import url("./styles/04-product-shell.css?v=20260705-ui-comment-polish");
-@import url("./styles/05-session-sidebar.css?v=20260705-terminal-sidebar-composer");
-@import url("./styles/06-motion.css?v=20260702-window-updates");
+@import url("./styles/05-session-sidebar.css?v=20260705-workspace-tabs-tools");
+@import url("./styles/06-motion.css?v=20260705-workspace-tabs-tools");
 @import url("./styles/07-settings-modal.css?v=20260702-window-updates");
 @import url("./styles/08-fauna-refinements.css?v=20260702-window-updates");
 @import url("./styles/09-popup-theme.css?v=20260705-terminal-sidebar-composer");

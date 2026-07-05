@@ -1548,6 +1548,12 @@ function cloneConversationHistory(history, { includeImages = true, sanitizeConte
             if (contextCompaction) {
                 cloned.contextCompaction = contextCompaction;
             }
+            const toolActivity = typeof normalizeToolActivityItems === "function"
+                ? normalizeToolActivityItems(message.faunaToolActivity || [])
+                : [];
+            if (toolActivity.length > 0) {
+                cloned.faunaToolActivity = toolActivity;
+            }
             return cloned;
         });
 }

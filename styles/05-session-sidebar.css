@@ -726,6 +726,16 @@
     height: 12px;
 }
 
+.project-chat-empty {
+    width: calc(100% - 28px);
+    min-height: 28px;
+    margin-left: 28px;
+    padding: 6px 8px 0;
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 650;
+}
+
 .project-chat-list-toggle {
     width: calc(100% - 28px);
     min-height: 28px;
@@ -2018,8 +2028,12 @@ body.project-agent-maximized .project-explorer-sidebar {
 .project-terminal-output {
     min-height: 0;
     max-height: none;
+    border: 0;
     border-radius: 0;
     background: #151515;
+    color: #dce3ea;
+    box-shadow: none;
+    outline: none;
 }
 
 .project-page-chat-log {
@@ -2417,7 +2431,7 @@ body.project-agent-maximized .project-explorer-sidebar {
 
 .project-explorer-path-row {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: center;
     gap: 6px;
 }
@@ -2465,8 +2479,27 @@ body.project-agent-maximized .project-explorer-sidebar {
     transition: opacity 0.14s var(--ease), background-color 0.14s var(--ease);
 }
 
+.project-explorer-row::after {
+    content: "";
+    position: absolute;
+    top: -2px;
+    bottom: -2px;
+    left: calc(var(--project-entry-indent) - 10px);
+    width: 1px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-muted) 32%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.14s var(--ease), background-color 0.14s var(--ease);
+}
+
 .project-explorer-row[data-depth]:not([data-depth="0"])::before {
     left: calc(1px + var(--project-entry-indent));
+}
+
+.project-explorer-row[data-depth]:not([data-depth="0"]):hover::after,
+.project-explorer-row[data-depth]:not([data-depth="0"]):focus-visible::after {
+    opacity: 1;
 }
 
 .project-explorer-row:hover,
@@ -2488,13 +2521,6 @@ body.project-agent-maximized .project-explorer-sidebar {
 }
 
 .project-explorer-row-dir .project-explorer-row-icon {
-    opacity: 0;
-    transform: translateX(-2px);
-}
-
-.project-explorer-row-dir:hover .project-explorer-row-icon,
-.project-explorer-row-dir:focus-visible .project-explorer-row-icon,
-.project-explorer-row-dir[data-expanded="true"] .project-explorer-row-icon {
     opacity: 1;
     transform: translateX(0);
 }
@@ -2559,6 +2585,24 @@ body.project-agent-maximized .project-explorer-sidebar {
     color: var(--text-dim);
     font-size: 9.5px;
     font-weight: 600;
+}
+
+.project-explorer-row[data-git-ignored="true"] {
+    color: color-mix(in srgb, var(--text-dim) 70%, transparent);
+}
+
+.project-explorer-row[data-git-ignored="true"] .project-explorer-row-name {
+    opacity: 0.55;
+}
+
+.project-explorer-row[data-git-ignored="true"] .project-explorer-row-icon {
+    opacity: 0.5;
+    filter: grayscale(1);
+}
+
+.project-explorer-row[data-git-ignored="true"]:hover .project-explorer-row-name,
+.project-explorer-row[data-git-ignored="true"]:focus-visible .project-explorer-row-name {
+    opacity: 0.78;
 }
 
 .project-explorer-row[data-file-kind="audio"] {
@@ -2700,6 +2744,88 @@ body.project-agent-maximized .project-explorer-sidebar {
 .project-terminal-pane .project-command-output {
     max-height: none;
     min-height: 0;
+    border: 0;
+    background: #111;
+    box-shadow: none;
+    color: #dce3ea;
+}
+
+.project-terminal-pane .project-command-output:focus {
+    border-color: transparent;
+    box-shadow: none;
+    outline: none;
+}
+
+.project-command-output .ansi-bold {
+    font-weight: 800;
+}
+
+.project-command-output .ansi-dim {
+    opacity: 0.64;
+}
+
+.project-command-output .ansi-fg-black {
+    color: #747b84;
+}
+
+.project-command-output .ansi-fg-red {
+    color: #ff7878;
+}
+
+.project-command-output .ansi-fg-green {
+    color: #7ee787;
+}
+
+.project-command-output .ansi-fg-yellow {
+    color: #f3d675;
+}
+
+.project-command-output .ansi-fg-blue {
+    color: #7db7ff;
+}
+
+.project-command-output .ansi-fg-magenta {
+    color: #d9a5ff;
+}
+
+.project-command-output .ansi-fg-cyan {
+    color: #76d4ff;
+}
+
+.project-command-output .ansi-fg-white {
+    color: #edf2f7;
+}
+
+.project-command-output .ansi-fg-bright-black {
+    color: #9aa4af;
+}
+
+.project-command-output .ansi-fg-bright-red {
+    color: #ff9b9b;
+}
+
+.project-command-output .ansi-fg-bright-green {
+    color: #9ff0aa;
+}
+
+.project-command-output .ansi-fg-bright-yellow {
+    color: #ffe08a;
+}
+
+.project-command-output .ansi-fg-bright-blue {
+    color: #9fc8ff;
+}
+
+.project-command-output .ansi-fg-bright-magenta {
+    color: #e6bdff;
+}
+
+.project-command-output .ansi-fg-bright-cyan {
+    color: #9be4ff;
+}
+
+.project-command-output .ansi-fg-bright-white {
+    color: #ffffff;
 }
 
 .agent-activity-list {

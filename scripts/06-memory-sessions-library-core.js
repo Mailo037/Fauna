@@ -295,10 +295,11 @@ function getProjectAgentTabDefinition(tab) {
 }
 
 function getProjectAgentTabLabel(definition = {}, tabKey = definition.id) {
-    let label = definition.id === "files" && activeProjectFile?.name
-        ? activeProjectFile.name
-        : (definition.label || "Tab");
     const key = normalizeProjectAgentTabKey(tabKey);
+    const fileState = definition.id === "files" ? projectFileStates.get(key) : null;
+    let label = definition.id === "files" && fileState?.file?.name
+        ? fileState.file.name
+        : (definition.label || "Tab");
     const sameTypeTabs = activeProjectAgentTabs.filter(tab => normalizeProjectAgentTab(tab) === definition.id);
     if (definition.id !== "menu" && sameTypeTabs.length > 1) {
         const index = sameTypeTabs.indexOf(key);
@@ -351,6 +352,93 @@ function normalizeProjectExplorerPath(path = ".") {
         parts.push(segment);
     });
     return parts.join("/") || ".";
+}
+
+function createEmptyWorkspacePanelState() {
+    return {
+        activeTab: "menu",
+        tabs: ["menu"],
+        explorerPath: ".",
+        expandedPaths: [],
+        fileStates: [],
+        sideChatStates: [],
+        terminalStates: []
+    };
+}
+
+function normalizeProjectFileStateFile(file = null) {
+    if (!file || typeof file !== "object") return null;
+    const path = normalizeProjectExplorerPath(file.path || "");
+    if (!path || path === ".") return null;
+    return {
+        path,
+        name: String(file.name || getProjectFileDisplayName(path)),
+        content: String(file.content || "").slice(0, 160000),
+        size: Number(file.size || 0) || 0,
+        truncated: Boolean(file.truncated)
+    };
+}
+
+function normalizeWorkspacePanelStateEntryKey(value = "", type = "files") {
+    const key = normalizeProjectAgentTabKey(value);
+    return normalizeProjectAgentTab(key) === type ? key : "";
+}
+
+function normalizeStoredWorkspacePanelState(raw) {
+    if (!raw || typeof raw !== "object") return createEmptyWorkspacePanelState();
+    const tabs = normalizeProjectAgentTabs(raw.tabs);
+    const activeTab = normalizeProjectAgentTabKey(raw.activeTab);
+    return {
+        activeTab: activeTab && tabs.includes(activeTab) ? activeTab : (tabs[0] || "menu"),
+        tabs,
+        explorerPath: normalizeProjectExplorerPath(raw.explorerPath || "."),
+        expandedPaths: Array.isArray(raw.expandedPaths)
+            ? raw.expandedPaths.map(path => normalizeProjectExplorerPath(path)).filter(path => path && path !== ".")
+            : [],
+        fileStates: Array.isArray(raw.fileStates)
+            ? raw.fileStates.map(item => {
+                const tabKey = normalizeWorkspacePanelStateEntryKey(item?.tabKey, "files");
+                const file = normalizeProjectFileStateFile(item?.file);
+                return tabKey ? {
+                    tabKey,
+                    rootId: String(item?.rootId || ""),
+                    file
+                } : null;
+            }).filter(Boolean)
+            : [],
+        sideChatStates: Array.isArray(raw.sideChatStates)
+            ? raw.sideChatStates.map(item => {
+                const tabKey = normalizeWorkspacePanelStateEntryKey(item?.tabKey, "chat");
+                const history = Array.isArray(item?.history)
+                    ? item.history.map(message => ({
+                        role: message?.role === "user" ? "user" : "assistant",
+                        content: String(message?.content || "").slice(0, 24000),
+                        createdAt: String(message?.createdAt || "")
+                    })).filter(message => message.content).slice(-24)
+                    : [];
+                return tabKey ? {
+                    tabKey,
+                    rootId: String(item?.rootId || ""),
+                    history
+                } : null;
+            }).filter(Boolean)
+            : [],
+        terminalStates: Array.isArray(raw.terminalStates)
+            ? raw.terminalStates.map(item => {
+                const tabKey = normalizeWorkspacePanelStateEntryKey(item?.tabKey, "terminal");
+                const lines = Array.isArray(item?.lines)
+                    ? item.lines.map(line => String(line || "")).slice(-260)
+                    : [];
+                return tabKey ? {
+                    tabKey,
+                    rootId: String(item?.rootId || ""),
+                    lines,
+                    buffer: String(item?.buffer || "").slice(-120000),
+                    draft: String(item?.draft || "").slice(-4000)
+                } : null;
+            }).filter(Boolean)
+            : []
+    };
 }
 
 function normalizeProjectExplorerExpandedPaths(raw) {
@@ -413,22 +501,18 @@ let activeProjectAgentWidth = normalizeProjectAgentWidth(safeLocalStorageGet(PRO
 const storedProjectAgentCollapsed = safeLocalStorageGet(PROJECT_AGENT_COLLAPSED_STORAGE_KEY);
 let isProjectAgentCollapsed = storedProjectAgentCollapsed ? storedProjectAgentCollapsed === "true" : true;
 let isProjectAgentMaximized = safeLocalStorageGet(PROJECT_AGENT_MAXIMIZED_STORAGE_KEY) === "true";
-let projectTerminalLines = [];
-let projectTerminalSessionId = "";
-let projectTerminalSessionRootId = "";
-let projectTerminalSessionNewline = "\n";
-let projectTerminalSessionStarting = false;
-let projectTerminalSessionBuffer = "";
-let projectTerminalSessionDraft = "";
 let projectTerminalDataUnsubscribe = null;
 let projectChatListState = normalizeProjectChatListState(safeLocalStorageGet(PROJECT_CHAT_LIST_STATE_STORAGE_KEY));
 let projectExplorerRootId = "";
 let currentProjectExplorerResult = { entries: [], truncated: false };
 let projectExplorerLoadingPath = "";
 let agentActivityEvents = [];
+let pendingProjectChatRootId = "";
 let projectPageChatRootId = "";
 let projectPageChatHistory = [];
 const projectPageChatStates = new Map();
+const projectFileStates = new Map();
+const projectTerminalStates = new Map();
 let activeProjectGitInfo = null;
 let activeProjectGitInfoRootId = "";
 let activeProjectGitRequestId = 0;
@@ -591,13 +675,29 @@ function getWorkspaceProjectRootById(rootId = "") {
     return null;
 }
 
-function getSessionProjectRoot(session = getActiveSession()) {
-    const context = normalizeStoredSessionProjectContext(session?.projectContext);
+function getPendingProjectChatRoot() {
+    return pendingProjectChatRootId ? getWorkspaceProjectRootById(pendingProjectChatRootId) : null;
+}
+
+function setPendingProjectChatRoot(root = null) {
+    pendingProjectChatRootId = root?.id || "";
+}
+
+function clearPendingProjectChatRoot() {
+    pendingProjectChatRootId = "";
+}
+
+function getSessionProjectRoot(session = undefined) {
+    const targetSession = session === undefined ? getActiveSession() : session;
+    if (!targetSession && session === undefined) return getPendingProjectChatRoot();
+    const context = normalizeStoredSessionProjectContext(targetSession?.projectContext);
     return getWorkspaceProjectRootById(context.rootId || context.projectId);
 }
 
-function getSessionWorkspaceMode(session = getActiveSession()) {
-    return normalizeChatWorkspaceMode(session?.workspaceMode, session?.projectContext);
+function getSessionWorkspaceMode(session = undefined) {
+    const targetSession = session === undefined ? getActiveSession() : session;
+    if (!targetSession && session === undefined && getPendingProjectChatRoot()) return "project";
+    return normalizeChatWorkspaceMode(targetSession?.workspaceMode, targetSession?.projectContext);
 }
 
 function createProjectContextForRoot(root) {
@@ -611,8 +711,9 @@ function isProjectChatSession(session = getActiveSession()) {
 }
 
 function getWorkspaceProjectRootForSession(sessionId = activeSessionId) {
-    const session = sessionId ? getChatSessionById(sessionId) : getActiveSession();
-    return getSessionProjectRoot(session);
+    const cleanSessionId = String(sessionId || "").trim();
+    if (cleanSessionId) return getSessionProjectRoot(getChatSessionById(cleanSessionId));
+    return getSessionProjectRoot();
 }
 
 function getWorkspaceProjectRootForSignal(signal = null) {
@@ -1168,10 +1269,11 @@ function enableWorkspaceBridgeForProject() {
 function ensureProjectAssignableSession() {
     let session = getActiveSession();
     if (session) return session;
-    session = createChatSession();
+    session = createChatSessionForCurrentDraft();
     session.composerDraft = captureComposerDraft();
     chatSessions.unshift(session);
     activeSessionId = session.id;
+    clearPendingProjectChatRoot();
     updateActiveChatTitle();
     updateWorkspaceUrlFragment?.({ replace: true });
     return session;
@@ -1360,8 +1462,14 @@ function closeProjectAgentTab(tab) {
     if (!definition.closeable || !activeProjectAgentTabs.includes(tabId)) return;
     const closingIndex = activeProjectAgentTabs.indexOf(tabId);
     activeProjectAgentTabs = activeProjectAgentTabs.filter(openTab => openTab !== tabId);
-    if (normalizeProjectAgentTab(tabId) === "chat") {
+    const tabType = normalizeProjectAgentTab(tabId);
+    if (tabType === "chat") {
         projectPageChatStates.delete(tabId);
+    } else if (tabType === "files") {
+        projectFileStates.delete(tabId);
+    } else if (tabType === "terminal") {
+        void stopProjectTerminalSession(tabId);
+        projectTerminalStates.delete(tabId);
     }
     if (!activeProjectAgentTabs.length) activeProjectAgentTabs = ["menu"];
     persistProjectAgentTabs();
@@ -1498,11 +1606,15 @@ function setProjectAgentTab(tab, { persist = true, open = true, closeMenu = true
         const pane = getProjectAgentPane(definition.id);
         if (pane) pane.hidden = definition.id !== activeTabType;
     });
-    if (activeTabType === "chat") {
+    if (activeTabType === "files") {
+        syncProjectFileStateForActiveTab({ render: false });
+        renderProjectFileViewer();
+    } else if (activeTabType === "chat") {
         ensureProjectPageChatRoot();
     } else if (activeTabType === "terminal") {
         void ensureProjectTerminalSession();
     }
+    if (persist) persistActiveWorkspacePanelState();
 }
 
 function getActiveProjectBridgeOptions() {
@@ -1910,7 +2022,68 @@ function getProjectFileDisplayName(path = "") {
 }
 
 function isProjectMarkdownFile(path = "") {
-    return /\.(md|mdx)$/i.test(String(path || ""));
+    return /\.(md|mdx|markdown)$/i.test(String(path || ""));
+}
+
+function getActiveProjectFileKey(tabKey = activeProjectAgentTab) {
+    const key = normalizeProjectAgentTabKey(tabKey);
+    if (normalizeProjectAgentTab(key) === "files") return key;
+    return activeProjectAgentTabs.find(tab => normalizeProjectAgentTab(tab) === "files") || "files";
+}
+
+function createProjectFileState(rootId = "") {
+    return {
+        rootId,
+        file: null
+    };
+}
+
+function getProjectFileState(tabKey = activeProjectAgentTab, root = getSessionProjectRoot()) {
+    const key = getActiveProjectFileKey(tabKey);
+    const rootId = root?.id || "";
+    let state = projectFileStates.get(key);
+    if (!state || state.rootId !== rootId) {
+        state = createProjectFileState(rootId);
+        projectFileStates.set(key, state);
+    }
+    return state;
+}
+
+function syncProjectFileStateForActiveTab({ render = false } = {}) {
+    activeProjectFile = getProjectFileState().file;
+    if (render) renderProjectFileViewer();
+    return activeProjectFile;
+}
+
+function setActiveProjectFileForCurrentTab(file = null) {
+    const state = getProjectFileState();
+    state.file = normalizeProjectFileStateFile(file);
+    activeProjectFile = state.file;
+    return activeProjectFile;
+}
+
+function getProjectFileLanguage(path = "") {
+    const name = getProjectFileDisplayName(path).toLowerCase();
+    const extension = name.includes(".") ? name.split(".").pop() : "";
+    const aliases = {
+        bat: "batch",
+        cjs: "javascript",
+        cmd: "batch",
+        htm: "html",
+        js: "javascript",
+        jsx: "jsx",
+        markdown: "markdown",
+        md: "markdown",
+        mdx: "markdown",
+        mjs: "javascript",
+        ps1: "powershell",
+        py: "python",
+        sh: "bash",
+        ts: "typescript",
+        tsx: "tsx",
+        yml: "yaml"
+    };
+    return normalizeCodeLanguage(aliases[extension] || extension || "text");
 }
 
 function parseProjectMarkdownFrontmatter(content = "") {
@@ -2022,10 +2195,11 @@ function openProjectLineComment(lineRow, lineNumber, lineText = "") {
     window.requestAnimationFrame(() => textarea?.focus());
 }
 
-function renderProjectFileCode(content = "") {
+function renderProjectFileCode(content = "", path = activeProjectFile?.path || "") {
     if (!projectFileCode) return;
     clearProjectLineCommentPanels();
     projectFileCode.replaceChildren();
+    const language = getProjectFileLanguage(path);
     const lines = String(content || "").split(/\r?\n/);
     if (!lines.length) lines.push("");
     lines.forEach((line, index) => {
@@ -2047,7 +2221,10 @@ function renderProjectFileCode(content = "") {
         number.textContent = String(lineNumber);
         const code = document.createElement("code");
         code.className = "project-file-line-text";
-        code.textContent = line || " ";
+        code.dataset.language = language;
+        code.innerHTML = typeof highlightCode === "function"
+            ? highlightCode(line || " ", language)
+            : escapeHtml(line || " ");
         row.append(addButton, number, code);
         projectFileCode.appendChild(row);
     });
@@ -2066,6 +2243,9 @@ function renderProjectFileExtended(content = "") {
 }
 
 function renderProjectFileViewer() {
+    if (normalizeProjectAgentTab(activeProjectAgentTab) === "files") {
+        syncProjectFileStateForActiveTab({ render: false });
+    }
     const root = getSessionProjectRoot();
     if (projectFileBreadcrumbRoot) projectFileBreadcrumbRoot.textContent = root?.name || "Workspace";
     if (projectFileBreadcrumbName) projectFileBreadcrumbName.textContent = activeProjectFile?.name || "Open file";
@@ -2094,7 +2274,7 @@ function renderProjectFileViewer() {
     if (showRendered) {
         renderProjectFileExtended(content);
     } else {
-        renderProjectFileCode(content);
+        renderProjectFileCode(content, activeProjectFile.path);
     }
 }
 
@@ -2135,6 +2315,7 @@ function setProjectExplorerDirectoryExpanded(path = "", expanded = false, { pers
         activeProjectExplorerExpandedPaths.delete(cleanPath);
     }
     if (persist) persistProjectExplorerExpandedPaths();
+    persistActiveWorkspacePanelState();
 }
 
 function expandProjectExplorerAncestors(path = "", { persist = true } = {}) {
@@ -2242,7 +2423,6 @@ function renderProjectExplorerCurrentEntries() {
     const entries = Array.isArray(result.entries) ? result.entries : [];
     const filterText = getProjectExplorerFilterText();
     if (projectExplorerPath) projectExplorerPath.textContent = activeProjectExplorerPath;
-    if (projectExplorerUpBtn) projectExplorerUpBtn.disabled = activeProjectExplorerPath === ".";
     projectExplorerList.replaceChildren();
     const filterSets = getProjectExplorerFilterSets(entries, filterText);
     appendProjectExplorerRows(activeProjectExplorerPath, 0, {
@@ -2308,6 +2488,7 @@ function createProjectExplorerRow(entry = {}, { parent = false, depth = 0, expan
     button.dataset.depth = String(depth);
     button.dataset.path = normalizeProjectExplorerPath(entry.path || ".");
     if (expanded) button.dataset.expanded = "true";
+    if (entry.ignored) button.dataset.gitIgnored = "true";
     if (isDirectory) {
         button.setAttribute("aria-expanded", String(expanded));
         button.dataset.hasChildren = String(hasChildren);
@@ -2324,7 +2505,7 @@ function createProjectExplorerRow(entry = {}, { parent = false, depth = 0, expan
     `;
     button.querySelector(".project-explorer-row-name").textContent = parent ? "Parent folder" : (entry.name || entry.path || "Untitled");
     button.querySelector(".project-explorer-row-meta").textContent = isDirectory ? "Folder" : formatProjectFileSize(entry.size);
-    button.setAttribute("aria-label", `${parent ? "Go to parent folder" : isDirectory ? (expanded ? "Collapse folder" : "Expand folder") : "Open file"} ${entry.name || entry.path || ""}`.trim());
+    button.setAttribute("aria-label", `${parent ? "Go to parent folder" : isDirectory ? (expanded ? "Collapse folder" : "Expand folder") : "Open file"} ${entry.name || entry.path || ""}${entry.ignored ? " (Git ignored)" : ""}`.trim());
     button.addEventListener("click", () => {
         if (isDirectory) {
             void toggleProjectExplorerDirectory(entry);
@@ -2387,6 +2568,7 @@ async function refreshProjectExplorer({ path = activeProjectExplorerPath, silent
     }
     activeProjectExplorerPath = normalizeProjectExplorerPath(path);
     safeLocalStorageSet(PROJECT_EXPLORER_PATH_STORAGE_KEY, activeProjectExplorerPath);
+    persistActiveWorkspacePanelState();
     if (projectExplorerPath) projectExplorerPath.textContent = activeProjectExplorerPath;
     currentProjectExplorerResult = { entries: [], truncated: false };
     renderProjectExplorerMessage("Loading files...", "muted");
@@ -2488,17 +2670,19 @@ async function openProjectFilePreview(path = "") {
     try {
         const result = await readWorkspaceFile(cleanPath, null, getActiveProjectBridgeOptions());
         updateAgentActivityEvent(activityId, { status: "done" });
-        activeProjectFile = {
+        const nextFile = {
             path: normalizeProjectExplorerPath(result.path || cleanPath),
             name: getProjectFileDisplayName(result.path || cleanPath),
             content: result.content || "",
             size: Number(result.size || 0),
             truncated: Boolean(result.truncated)
         };
+        setActiveProjectFileForCurrentTab(nextFile);
         expandProjectExplorerAncestors(activeProjectFile.path);
         openProjectWorkspacePanel("files", { refresh: false });
         renderProjectExplorerCurrentEntries();
         renderProjectFileViewer();
+        persistActiveWorkspacePanelState();
     } catch (err) {
         updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
         showToast(`Could not read file: ${err.message}`, "error");
@@ -2550,31 +2734,169 @@ function getProjectTerminalApi() {
     return null;
 }
 
-function appendProjectTerminalSessionText(text = "") {
-    projectTerminalSessionBuffer = `${projectTerminalSessionBuffer}${String(text || "")}`.slice(-120000);
+function getActiveProjectTerminalKey(tabKey = activeProjectAgentTab) {
+    const key = normalizeProjectAgentTabKey(tabKey);
+    if (normalizeProjectAgentTab(key) === "terminal") return key;
+    return activeProjectAgentTabs.find(tab => normalizeProjectAgentTab(tab) === "terminal") || "terminal";
+}
+
+function createProjectTerminalState(rootId = "") {
+    return {
+        rootId,
+        lines: [],
+        sessionId: "",
+        sessionRootId: "",
+        newline: "\n",
+        starting: false,
+        buffer: "",
+        draft: ""
+    };
+}
+
+function getExistingProjectTerminalState(tabKey = activeProjectAgentTab) {
+    return projectTerminalStates.get(getActiveProjectTerminalKey(tabKey)) || null;
+}
+
+function getProjectTerminalState(tabKey = activeProjectAgentTab, root = getSessionProjectRoot()) {
+    const key = getActiveProjectTerminalKey(tabKey);
+    const rootId = root?.id || "";
+    let state = projectTerminalStates.get(key);
+    if (!state || state.rootId !== rootId) {
+        const oldSessionId = state?.sessionId || "";
+        if (oldSessionId) {
+            try {
+                void getProjectTerminalApi()?.stopTerminalSession?.({ sessionId: oldSessionId });
+            } catch {
+                // The shell may already have exited.
+            }
+        }
+        state = createProjectTerminalState(rootId);
+        projectTerminalStates.set(key, state);
+    }
+    return state;
+}
+
+function findProjectTerminalStateBySessionId(sessionId = "") {
+    const cleanSessionId = String(sessionId || "");
+    if (!cleanSessionId) return null;
+    for (const state of projectTerminalStates.values()) {
+        if (state?.sessionId === cleanSessionId) return state;
+    }
+    return null;
+}
+
+function isActiveProjectTerminalState(state) {
+    return Boolean(state && getExistingProjectTerminalState(activeProjectAgentTab) === state);
+}
+
+function appendProjectTerminalStateText(state, text = "") {
+    if (!state) return;
+    state.buffer = `${state.buffer || ""}${String(text || "")}`.slice(-120000);
+}
+
+const ANSI_TERMINAL_FG_CLASSES = [
+    "ansi-fg-black",
+    "ansi-fg-red",
+    "ansi-fg-green",
+    "ansi-fg-yellow",
+    "ansi-fg-blue",
+    "ansi-fg-magenta",
+    "ansi-fg-cyan",
+    "ansi-fg-white",
+    "ansi-fg-bright-black",
+    "ansi-fg-bright-red",
+    "ansi-fg-bright-green",
+    "ansi-fg-bright-yellow",
+    "ansi-fg-bright-blue",
+    "ansi-fg-bright-magenta",
+    "ansi-fg-bright-cyan",
+    "ansi-fg-bright-white"
+];
+
+function getAnsiTerminalClassName(codes = []) {
+    const classes = new Set();
+    codes.forEach(code => {
+        if (code === 1) classes.add("ansi-bold");
+        if (code === 2) classes.add("ansi-dim");
+        if (code >= 30 && code <= 37) classes.add(ANSI_TERMINAL_FG_CLASSES[code - 30]);
+        if (code >= 90 && code <= 97) classes.add(ANSI_TERMINAL_FG_CLASSES[code - 90 + 8]);
+    });
+    return [...classes].join(" ");
+}
+
+function formatAnsiTerminalOutput(value = "") {
+    const text = String(value || "");
+    const matcher = /\x1b\[([0-9;]*)m/g;
+    let match = null;
+    let index = 0;
+    let activeCodes = [];
+    let html = "";
+    const appendText = chunk => {
+        if (!chunk) return;
+        const className = getAnsiTerminalClassName(activeCodes);
+        html += className
+            ? `<span class="${className}">${escapeHtml(chunk)}</span>`
+            : escapeHtml(chunk);
+    };
+    while ((match = matcher.exec(text))) {
+        appendText(text.slice(index, match.index));
+        const codes = (match[1] || "0")
+            .split(";")
+            .filter(valuePart => valuePart !== "")
+            .map(valuePart => Number(valuePart) || 0);
+        codes.forEach(code => {
+            if (code === 0) {
+                activeCodes = [];
+            } else if (code === 22) {
+                activeCodes = activeCodes.filter(activeCode => activeCode !== 1 && activeCode !== 2);
+            } else if (code === 39) {
+                activeCodes = activeCodes.filter(activeCode => !(activeCode >= 30 && activeCode <= 37) && !(activeCode >= 90 && activeCode <= 97));
+            } else if (code === 1 || code === 2 || (code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+                if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+                    activeCodes = activeCodes.filter(activeCode => !(activeCode >= 30 && activeCode <= 37) && !(activeCode >= 90 && activeCode <= 97));
+                }
+                if (!activeCodes.includes(code)) activeCodes.push(code);
+            }
+        });
+        index = matcher.lastIndex;
+    }
+    appendText(text.slice(index));
+    return html;
+}
+
+function renderProjectTerminalOutput(text = "") {
+    if (!projectCommandOutput) return;
+    projectCommandOutput.hidden = false;
+    projectCommandOutput.innerHTML = formatAnsiTerminalOutput(text) || escapeHtml(`${getProjectTerminalPrompt()} `);
+    projectCommandOutput.scrollTop = projectCommandOutput.scrollHeight;
 }
 
 function ensureProjectTerminalDataListener(api = getProjectTerminalApi()) {
     if (projectTerminalDataUnsubscribe || !api) return;
     projectTerminalDataUnsubscribe = api.onTerminalData(payload => {
-        if (!payload || payload.sessionId !== projectTerminalSessionId) return;
-        if (payload.data) appendProjectTerminalSessionText(payload.data);
+        const state = findProjectTerminalStateBySessionId(payload?.sessionId);
+        if (!state) return;
+        if (payload.data) appendProjectTerminalStateText(state, payload.data);
         if (payload.type === "exit" || payload.type === "error") {
-            projectTerminalSessionId = "";
-            projectTerminalSessionRootId = "";
-            projectTerminalSessionStarting = false;
-            projectTerminalSessionDraft = "";
+            state.sessionId = "";
+            state.sessionRootId = "";
+            state.starting = false;
+            state.draft = "";
         }
-        renderProjectTerminal({ includeDraft: true });
+        if (isActiveProjectTerminalState(state)) {
+            renderProjectTerminal({ includeDraft: true });
+        }
     });
 }
 
-async function stopProjectTerminalSession() {
-    if (!projectTerminalSessionId) return;
-    const sessionId = projectTerminalSessionId;
-    projectTerminalSessionId = "";
-    projectTerminalSessionRootId = "";
-    projectTerminalSessionDraft = "";
+async function stopProjectTerminalSession(tabKey = activeProjectAgentTab) {
+    const state = getExistingProjectTerminalState(tabKey);
+    if (!state?.sessionId) return;
+    const sessionId = state.sessionId;
+    state.sessionId = "";
+    state.sessionRootId = "";
+    state.draft = "";
+    state.starting = false;
     try {
         await getProjectTerminalApi()?.stopTerminalSession?.({ sessionId });
     } catch {
@@ -2585,109 +2907,110 @@ async function stopProjectTerminalSession() {
 async function ensureProjectTerminalSession() {
     const root = getSessionProjectRoot();
     const api = getProjectTerminalApi();
+    const state = getProjectTerminalState(activeProjectAgentTab, root);
     if (!root || !api) {
         renderProjectTerminal();
         return;
     }
     ensureProjectTerminalDataListener(api);
-    if (projectTerminalSessionId && projectTerminalSessionRootId === root.id) {
+    if (state.sessionId && state.sessionRootId === root.id) {
         renderProjectTerminal();
         return;
     }
-    await stopProjectTerminalSession();
-    projectTerminalSessionRootId = root.id;
-    projectTerminalSessionStarting = true;
-    projectTerminalSessionBuffer = `Starting terminal in ${root.path}...\n`;
-    projectTerminalSessionDraft = "";
+    await stopProjectTerminalSession(activeProjectAgentTab);
+    state.sessionRootId = root.id;
+    state.starting = true;
+    state.buffer = `Starting terminal in ${root.path}...\n`;
+    state.draft = "";
     renderProjectTerminal({ includeDraft: false });
     try {
         const result = await api.startTerminalSession({ projectPath: root.path });
         if (result?.ok === false) throw new Error(result.message || "Terminal could not be started.");
-        projectTerminalSessionId = String(result.sessionId || "");
-        projectTerminalSessionRootId = root.id;
-        projectTerminalSessionNewline = String(result.newline || "\n");
-        projectTerminalSessionStarting = false;
-        projectTerminalSessionBuffer = `Started ${result.command || "terminal"} in ${root.path}\n`;
-        renderProjectTerminal();
+        state.sessionId = String(result.sessionId || "");
+        state.sessionRootId = root.id;
+        state.newline = String(result.newline || "\n");
+        state.starting = false;
+        state.buffer = `Started ${result.command || "terminal"} in ${root.path}\n`;
+        if (isActiveProjectTerminalState(state)) renderProjectTerminal();
     } catch (err) {
-        projectTerminalSessionId = "";
-        projectTerminalSessionRootId = "";
-        projectTerminalSessionStarting = false;
-        projectTerminalSessionDraft = "";
-        projectTerminalSessionBuffer = `Could not start terminal session: ${err.message}\n\n${getProjectTerminalPrompt()} `;
-        renderProjectTerminal({ includeDraft: false });
+        state.sessionId = "";
+        state.sessionRootId = "";
+        state.starting = false;
+        state.draft = "";
+        state.buffer = `Could not start terminal session: ${err.message}\n\n${getProjectTerminalPrompt()} `;
+        if (isActiveProjectTerminalState(state)) renderProjectTerminal({ includeDraft: false });
         showToast(`Could not start terminal: ${err.message}`, "error");
     }
 }
 
 function renderProjectTerminal({ includeDraft = true } = {}) {
+    const state = getProjectTerminalState();
     if (!projectCommandOutput) return;
-    if (projectTerminalSessionId || projectTerminalSessionStarting || projectTerminalSessionBuffer) {
-        const draft = includeDraft && projectTerminalSessionDraft ? projectTerminalSessionDraft : "";
-        projectCommandOutput.hidden = false;
-        projectCommandOutput.textContent = `${projectTerminalSessionBuffer}${draft}` || "Starting terminal...";
-        projectCommandOutput.scrollTop = projectCommandOutput.scrollHeight;
+    if (state.sessionId || state.starting || state.buffer) {
+        const draft = includeDraft && state.draft ? state.draft : "";
+        renderProjectTerminalOutput(`${state.buffer || ""}${draft}` || "Starting terminal...");
         return;
     }
-    projectTerminalLines = projectTerminalLines.slice(-260);
-    const lines = projectTerminalLines.slice();
+    state.lines = state.lines.slice(-260);
+    const lines = state.lines.slice();
     if (includeDraft) {
-        lines.push(`${getProjectTerminalPrompt()} ${projectCommandInput?.value || ""}`);
+        lines.push(`${getProjectTerminalPrompt()} ${state.draft || ""}`);
     }
-    projectCommandOutput.hidden = false;
-    projectCommandOutput.textContent = lines.join("\n") || `${getProjectTerminalPrompt()} `;
-    projectCommandOutput.scrollTop = projectCommandOutput.scrollHeight;
+    renderProjectTerminalOutput(lines.join("\n") || `${getProjectTerminalPrompt()} `);
 }
 
 function focusProjectTerminalInput() {
+    const state = getProjectTerminalState();
     if (getProjectTerminalApi()) {
         if (document.activeElement !== projectCommandOutput) projectCommandOutput?.focus?.();
         void ensureProjectTerminalSession();
         return;
     }
+    if (projectCommandInput) projectCommandInput.value = state.draft || "";
     projectCommandInput?.focus?.();
     renderProjectTerminal();
 }
 
 function handleProjectTerminalKeydown(event) {
     const terminalApi = getProjectTerminalApi();
+    const state = getProjectTerminalState();
     if (terminalApi) {
-        if (!projectTerminalSessionId) {
+        if (!state.sessionId) {
             event.preventDefault();
             void ensureProjectTerminalSession();
             return;
         }
         if (event.ctrlKey && event.key.toLowerCase() === "c") {
             event.preventDefault();
-            projectTerminalSessionDraft = "";
-            void terminalApi.writeTerminalSession({ sessionId: projectTerminalSessionId, data: "\x03" });
+            state.draft = "";
+            void terminalApi.writeTerminalSession({ sessionId: state.sessionId, data: "\x03" });
             renderProjectTerminal();
             return;
         }
         if (event.metaKey || event.altKey || (event.ctrlKey && event.key.toLowerCase() !== "v")) return;
         if (event.key === "Enter") {
             event.preventDefault();
-            const data = `${projectTerminalSessionDraft}${projectTerminalSessionNewline}`;
-            projectTerminalSessionDraft = "";
-            void terminalApi.writeTerminalSession({ sessionId: projectTerminalSessionId, data });
+            const data = `${state.draft}${state.newline || "\n"}`;
+            state.draft = "";
+            void terminalApi.writeTerminalSession({ sessionId: state.sessionId, data });
             renderProjectTerminal();
             return;
         }
         if (event.key === "Backspace") {
             event.preventDefault();
-            projectTerminalSessionDraft = projectTerminalSessionDraft.slice(0, -1);
+            state.draft = state.draft.slice(0, -1);
             renderProjectTerminal();
             return;
         }
         if (event.key === "Tab") {
             event.preventDefault();
-            projectTerminalSessionDraft += "    ";
+            state.draft += "    ";
             renderProjectTerminal();
             return;
         }
         if (event.key.length === 1) {
             event.preventDefault();
-            projectTerminalSessionDraft += event.key;
+            state.draft += event.key;
             renderProjectTerminal();
         }
         return;
@@ -2700,29 +3023,33 @@ function handleProjectTerminalKeydown(event) {
     }
     if (event.key === "Backspace") {
         event.preventDefault();
-        projectCommandInput.value = projectCommandInput.value.slice(0, -1);
+        state.draft = state.draft.slice(0, -1);
+        projectCommandInput.value = state.draft;
         focusProjectTerminalInput();
         return;
     }
     if (event.key.length === 1) {
         event.preventDefault();
-        projectCommandInput.value += event.key;
+        state.draft += event.key;
+        projectCommandInput.value = state.draft;
         focusProjectTerminalInput();
     }
 }
 
 function handleProjectTerminalPaste(event) {
-    const api = getProjectTerminalApi();
-    if (!api) return;
     const text = event.clipboardData?.getData("text") || "";
     if (!text) return;
+    const api = getProjectTerminalApi();
+    const state = getProjectTerminalState();
     event.preventDefault();
-    projectTerminalSessionDraft += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    state.draft += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    if (!api && projectCommandInput) projectCommandInput.value = state.draft;
     renderProjectTerminal();
 }
 
 async function runProjectCommandFromPanel() {
-    const command = String(projectCommandInput?.value || "").trim();
+    const state = getProjectTerminalState();
+    const command = String(state.draft || projectCommandInput?.value || "").trim();
     if (!command) {
         showToast("Enter a command first.", "warning");
         return;
@@ -2742,13 +3069,14 @@ async function runProjectCommandFromPanel() {
         status: "running"
     });
     if (projectCommandRunBtn) projectCommandRunBtn.disabled = true;
-    const runningIndex = projectTerminalLines.push(`${getProjectTerminalPrompt()} ${command}`, "Running...") - 1;
+    const runningIndex = state.lines.push(`${getProjectTerminalPrompt()} ${command}`, "Running...") - 1;
+    state.draft = "";
     if (projectCommandInput) projectCommandInput.value = "";
     renderProjectTerminal({ includeDraft: false });
     try {
         const result = await runWorkspaceCommand(command, activeProjectExplorerPath || ".", 60, null, getActiveProjectBridgeOptions());
         const output = formatProjectCommandOutput(result);
-        projectTerminalLines[runningIndex] = output;
+        state.lines[runningIndex] = output;
         renderProjectTerminal();
         updateAgentActivityEvent(activityId, {
             status: Number(result.exitCode || 0) === 0 && !result.timedOut ? "done" : "failed",
@@ -2756,12 +3084,13 @@ async function runProjectCommandFromPanel() {
         });
         void refreshProjectBranchSummary();
     } catch (err) {
-        projectTerminalLines[runningIndex] = `Command failed: ${err.message}`;
+        state.lines[runningIndex] = `Command failed: ${err.message}`;
         renderProjectTerminal();
         updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
         showToast(`Command failed: ${err.message}`, "error");
     } finally {
         if (projectCommandRunBtn) projectCommandRunBtn.disabled = false;
+        persistActiveWorkspacePanelState();
     }
 }
 
@@ -2926,7 +3255,104 @@ async function sendProjectPageChatMessage() {
         setProjectPageChatBusy(false);
         projectPageChatInput?.focus?.();
         projectPageChatLog.scrollTop = projectPageChatLog.scrollHeight;
+        persistActiveWorkspacePanelState();
     }
+}
+
+function captureWorkspacePanelState() {
+    if (normalizeProjectAgentTab(activeProjectAgentTab) === "files") {
+        setActiveProjectFileForCurrentTab(activeProjectFile);
+    }
+    if (normalizeProjectAgentTab(activeProjectAgentTab) === "chat") {
+        const chatKey = getActiveProjectPageChatKey();
+        projectPageChatStates.set(chatKey, {
+            rootId: projectPageChatRootId,
+            history: Array.isArray(projectPageChatHistory) ? projectPageChatHistory : []
+        });
+    }
+    const fileStates = [...projectFileStates.entries()].map(([tabKey, state]) => ({
+        tabKey,
+        rootId: state?.rootId || "",
+        file: normalizeProjectFileStateFile(state?.file)
+    }));
+    const sideChatStates = [...projectPageChatStates.entries()].map(([tabKey, state]) => ({
+        tabKey,
+        rootId: state?.rootId || "",
+        history: Array.isArray(state?.history) ? state.history : []
+    }));
+    const terminalStates = [...projectTerminalStates.entries()].map(([tabKey, state]) => ({
+        tabKey,
+        rootId: state?.rootId || "",
+        lines: Array.isArray(state?.lines) ? state.lines : [],
+        buffer: state?.buffer || "",
+        draft: state?.draft || ""
+    }));
+    return normalizeStoredWorkspacePanelState({
+        activeTab: activeProjectAgentTab,
+        tabs: activeProjectAgentTabs,
+        explorerPath: activeProjectExplorerPath,
+        expandedPaths: [...activeProjectExplorerExpandedPaths],
+        fileStates,
+        sideChatStates,
+        terminalStates
+    });
+}
+
+function restoreWorkspacePanelState(raw = null) {
+    const state = normalizeStoredWorkspacePanelState(raw);
+    activeProjectAgentTabs = normalizeProjectAgentTabs(state.tabs);
+    activeProjectAgentTab = activeProjectAgentTabs.includes(state.activeTab)
+        ? state.activeTab
+        : (activeProjectAgentTabs[0] || "menu");
+    activeProjectExplorerPath = state.explorerPath || ".";
+    activeProjectExplorerExpandedPaths = new Set(state.expandedPaths || []);
+
+    projectFileStates.clear();
+    state.fileStates.forEach(item => {
+        projectFileStates.set(item.tabKey, {
+            rootId: item.rootId || "",
+            file: normalizeProjectFileStateFile(item.file)
+        });
+    });
+
+    projectPageChatStates.clear();
+    state.sideChatStates.forEach(item => {
+        projectPageChatStates.set(item.tabKey, {
+            rootId: item.rootId || "",
+            history: Array.isArray(item.history) ? item.history : []
+        });
+    });
+
+    projectTerminalStates.forEach((_state, tabKey) => {
+        void stopProjectTerminalSession(tabKey);
+    });
+    projectTerminalStates.clear();
+    state.terminalStates.forEach(item => {
+        const terminalState = createProjectTerminalState(item.rootId || "");
+        terminalState.lines = Array.isArray(item.lines) ? item.lines : [];
+        terminalState.buffer = item.buffer || "";
+        terminalState.draft = item.draft || "";
+        projectTerminalStates.set(item.tabKey, terminalState);
+    });
+
+    projectPageChatRootId = "";
+    projectPageChatHistory = [];
+    activeProjectFile = null;
+    if (normalizeProjectAgentTab(activeProjectAgentTab) === "files") {
+        syncProjectFileStateForActiveTab({ render: false });
+    }
+    if (normalizeProjectAgentTab(activeProjectAgentTab) === "chat") {
+        syncProjectPageChatStateForActiveTab({ render: false });
+    }
+}
+
+function persistActiveWorkspacePanelState() {
+    const session = getActiveSession();
+    if (!session) return null;
+    session.workspacePanelState = captureWorkspacePanelState();
+    session.updatedAt = new Date().toISOString();
+    persistChatSessions();
+    return session.workspacePanelState;
 }
 
 async function openProjectDiffReview() {
@@ -3412,6 +3838,13 @@ function renderProjectRow(root, { nested = false, chatCount = 0 } = {}) {
 function appendProjectChatRows(container, root, { sessions = getProjectChatSessions(root.id) } = {}) {
     if (isProjectChatListCollapsed(root.id)) return;
     const isExpanded = isProjectChatListExpanded(root.id);
+    if (!sessions.length) {
+        const empty = document.createElement("div");
+        empty.className = "project-chat-empty";
+        empty.textContent = "No Chats";
+        container.appendChild(empty);
+        return;
+    }
     const visibleSessions = isExpanded ? sessions : sessions.slice(0, PROJECT_CHAT_PREVIEW_LIMIT);
     visibleSessions.forEach(session => {
         container.appendChild(createChatSessionRow(session, {
@@ -4076,9 +4509,6 @@ projectExplorerFilterInput?.addEventListener("input", renderProjectExplorerCurre
 projectExplorerRefreshBtn?.addEventListener("click", () => {
     void refreshProjectExplorer({ refreshBranch: true });
 });
-projectExplorerUpBtn?.addEventListener("click", () => {
-    void refreshProjectExplorer({ path: getProjectParentPath(activeProjectExplorerPath) });
-});
 projectFileMoreBtn?.addEventListener("click", event => {
     event.stopPropagation();
     toggleProjectFileMoreMenu();
@@ -4133,6 +4563,8 @@ projectCommandOutput?.addEventListener("focus", focusProjectTerminalInput);
 projectCommandOutput?.addEventListener("keydown", handleProjectTerminalKeydown);
 projectCommandOutput?.addEventListener("paste", handleProjectTerminalPaste);
 projectCommandInput?.addEventListener("input", () => {
+    const state = getProjectTerminalState();
+    state.draft = projectCommandInput.value || "";
     renderProjectTerminal();
 });
 projectCommandInput?.addEventListener("keydown", event => {
@@ -4211,9 +4643,10 @@ function applyAssistantChatTitle(content, sessionId = activeSessionId) {
 
     let session = sessionId ? getChatSessionById(sessionId) : getActiveSession();
     if (!session && (!sessionId || sessionId === activeSessionId) && activeChatHasContent()) {
-        session = createChatSession();
+        session = createChatSessionForCurrentDraft();
         chatSessions.unshift(session);
         activeSessionId = session.id;
+        clearPendingProjectChatRoot();
         updateWorkspaceUrlFragment({ replace: true });
     }
     if (!session || session.manualTitle) return false;
@@ -4243,14 +4676,30 @@ function createChatSession(overrides = {}) {
         conversationHistory: [],
         composerDraft: createEmptyComposerDraft(),
         projectContext: createEmptyProjectContext(),
+        workspacePanelState: createEmptyWorkspacePanelState(),
         workspaceMode: "normal",
         sessionTotalTokens: 0,
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER,
         ...overrides
     };
     session.projectContext = normalizeStoredSessionProjectContext(session.projectContext);
+    session.workspacePanelState = normalizeStoredWorkspacePanelState(session.workspacePanelState);
     session.workspaceMode = normalizeChatWorkspaceMode(session.workspaceMode, session.projectContext);
     return session;
+}
+
+function createChatSessionForCurrentDraft(overrides = {}) {
+    const pendingRoot = getPendingProjectChatRoot();
+    const pendingOverrides = pendingRoot
+        ? {
+            workspaceMode: "project",
+            projectContext: createProjectContextForRoot(pendingRoot)
+        }
+        : {};
+    return createChatSession({
+        ...pendingOverrides,
+        ...overrides
+    });
 }
 
 function createEmptyComposerDraft() {
@@ -4321,6 +4770,7 @@ function normalizeStoredChatSession(raw) {
         conversationHistory,
         composerDraft: normalizeStoredComposerDraft(raw.composerDraft),
         projectContext: normalizeStoredSessionProjectContext(raw.projectContext),
+        workspacePanelState: normalizeStoredWorkspacePanelState(raw.workspacePanelState),
         workspaceMode: normalizeChatWorkspaceMode(raw.workspaceMode, normalizeStoredSessionProjectContext(raw.projectContext)),
         sessionTotalTokens: Math.max(historyTokenTotal, trustedStoredTotal || 0),
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER
@@ -4757,7 +5207,10 @@ function renderHistoryMessageIntoChat(history, index, { beforeNode = null } = {}
     }
     const role = message?.role === "user" ? "user" : "output";
     const rawContent = String(message?.content || "").trim();
-    if (!rawContent) return null;
+    const activityItems = role === "output" && typeof normalizeToolActivityItems === "function"
+        ? normalizeToolActivityItems(message?.faunaToolActivity || [])
+        : [];
+    if (!rawContent && activityItems.length === 0) return null;
 
     const toolRequest = parseFaunaToolCall(rawContent);
     const visibleContent = role === "output"
@@ -4774,7 +5227,17 @@ function renderHistoryMessageIntoChat(history, index, { beforeNode = null } = {}
     if (!bubble) return null;
 
     if (role === "output") {
-        renderAssistantContentHtml(bubble, renderMarkdown(visibleContent), { final: true, busy: false });
+        if (activityItems.length > 0) {
+            renderToolActivity(bubble, {
+                title: getToolActivitySummary(activityItems, "Tool activity"),
+                items: activityItems,
+                status: "done",
+                collapsed: true,
+                responseHtml: visibleContent ? renderMarkdown(visibleContent) : ""
+            });
+        } else {
+            renderAssistantContentHtml(bubble, renderMarkdown(visibleContent), { final: true, busy: false });
+        }
         setupAssistantActions(bubble.parentElement, visibleContent, {
             messageIndex: index,
             canRegenerate: true,
@@ -5013,6 +5476,7 @@ function snapshotVisibleChatIntoSession(session, {
     }
     session.conversationHistory = cloneConversationHistory(history);
     session.composerDraft = captureComposerDraft();
+    session.workspacePanelState = captureWorkspacePanelState();
     session.sessionTotalTokens = tokenTotal;
     session.sessionTokenSource = TOKEN_USAGE_SOURCE_PROVIDER;
     if (!session.manualTitle && !session.assistantTitle) {
@@ -5068,9 +5532,10 @@ function ensureWritableActiveChatSession() {
     }
     if (active) return active;
 
-    const session = createChatSession();
+    const session = createChatSessionForCurrentDraft();
     chatSessions.unshift(session);
     activeSessionId = session.id;
+    clearPendingProjectChatRoot();
     persistChatSessions();
     renderChatHistory();
     updateActiveChatTitle();
@@ -5173,6 +5638,7 @@ function serializeChatSession(session, options = {}) {
         conversationHistory: conversation,
         composerDraft: serializeComposerDraftForStorage(session.composerDraft),
         projectContext: normalizeStoredSessionProjectContext(session.projectContext),
+        workspacePanelState: normalizeStoredWorkspacePanelState(session.workspacePanelState),
         workspaceMode: normalizeChatWorkspaceMode(session.workspaceMode, session.projectContext),
         sessionTotalTokens: normalizeTokenCount(session.sessionTotalTokens) || 0,
         sessionTokenSource: TOKEN_USAGE_SOURCE_PROVIDER
@@ -5274,9 +5740,10 @@ function saveCurrentSession({ render = true, updateUrl = true } = {}) {
             if (render) renderChatHistory();
             return null;
         }
-        session = createChatSession();
+        session = createChatSessionForCurrentDraft();
         chatSessions.unshift(session);
         activeSessionId = session.id;
+        clearPendingProjectChatRoot();
         createdActiveSession = true;
     }
 
@@ -5903,11 +6370,13 @@ function restoreComposerDraft(draft = createEmptyComposerDraft()) {
 
 function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
     if (!session) return;
+    clearPendingProjectChatRoot();
     if (closeWorkbench) closeCodeWorkbench();
     conversationHistory = cloneConversationHistory(session.conversationHistory);
     sessionTotalTokens = Math.max(sumHistoryTokenUsage(conversationHistory), normalizeTokenCount(session.sessionTotalTokens) || 0);
     clearComposerDraft();
     restoreComposerDraft(session.composerDraft);
+    restoreWorkspacePanelState(session.workspacePanelState);
 
     if (chat) {
         if (conversationHistory.length > 0) {
@@ -5934,6 +6403,7 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
     updateActiveChatTitle();
     renderProjectList();
     renderComposerProjectPicker();
+    updateProjectAgentPanel();
     updateGenerationUi?.({ renderHistory: false });
     renderPromptTimeline();
 }
@@ -5941,11 +6411,13 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
 function restoreEmptyChatDraft({ render = true, persist = true, updateUrl = true } = {}) {
     closeCodeWorkbench();
     clearClarifyingQuestionComposer();
+    clearPendingProjectChatRoot();
     activeSessionId = null;
     conversationHistory = [];
     sessionTotalTokens = 0;
     clearComposerDraft();
     setChatTitleEditing(false);
+    restoreWorkspacePanelState(createEmptyWorkspacePanelState());
 
     if (chat) {
         resetChatRenderWindowState(null);
@@ -5959,6 +6431,7 @@ function restoreEmptyChatDraft({ render = true, persist = true, updateUrl = true
     updateActiveChatTitle();
     renderProjectList();
     renderComposerProjectPicker();
+    updateProjectAgentPanel();
     updateGenerationUi?.({ renderHistory: false });
     renderPromptTimeline();
     if (persist) persistChatSessions();
@@ -6007,16 +6480,10 @@ function startNewChatSession({ notify = true, updateUrl = true, urlMode = "push"
     }
 
     if (projectRoot) {
-        const session = createChatSession({
-            workspaceMode: "project",
-            projectContext: createProjectContextForRoot(projectRoot)
-        });
-        chatSessions.unshift(session);
-        activeSessionId = session.id;
-        restoreChatSessionToView(session);
+        restoreEmptyChatDraft({ updateUrl: false });
+        setPendingProjectChatRoot(projectRoot);
         setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: true, closeSidebar: false, updateUrl, urlMode });
         enableWorkspaceBridgeForProject();
-        persistChatSessions();
         renderChatHistory();
         renderProjectList();
         renderComposerProjectPicker();

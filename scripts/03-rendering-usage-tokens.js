@@ -147,6 +147,15 @@ const PIXEL_LOADER_MOTIONS = ["shuffle", "hop", "orbit", "scatter", "drift"];
 let lastPixelLoaderSequenceIndex = -1;
 let lastPixelLoaderMotionIndex = -1;
 
+function getStablePixelLoaderHash(value = "") {
+    let hash = 0;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+        hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+    }
+    return Math.abs(hash);
+}
+
 function getPixelLoaderKind(kind = "thinking", label = "") {
     const normalizedKind = String(kind || "").toLowerCase();
     const normalizedLabel = String(label || "").toLowerCase();
@@ -281,11 +290,12 @@ function getPixelParticleTransitionStyle(frameIndex, target) {
 
 function renderPixelLoader(kind = "thinking", label = "Working") {
     const animationKind = getPixelLoaderKind(kind, label);
-    const sequence = getRandomPixelLoaderSequence();
-    const motionKind = getRandomPixelLoaderMotion();
+    const stableHash = getStablePixelLoaderHash(`${animationKind}:${label}`);
+    const sequence = PIXEL_LOADER_SEQUENCES[stableHash % PIXEL_LOADER_SEQUENCES.length] || getRandomPixelLoaderSequence();
+    const motionKind = PIXEL_LOADER_MOTIONS[Math.floor(stableHash / 7) % PIXEL_LOADER_MOTIONS.length] || getRandomPixelLoaderMotion();
     const spritePoints = sequence.map(spriteName => getPixelSpritePoints(spriteName));
-    const seed = Math.floor(Math.random() * PIXEL_LOADER_PARTICLE_COUNT);
-    const durationMs = 2500 + Math.floor(Math.random() * 700);
+    const seed = stableHash % PIXEL_LOADER_PARTICLE_COUNT;
+    const durationMs = 2500 + (stableHash % 700);
     const cells = Array.from({ length: PIXEL_LOADER_PARTICLE_COUNT }, (_, index) => {
         const frameTargets = spritePoints.map((points, frameIndex) =>
             getPixelParticleTarget(points, index, frameIndex, seed)
@@ -356,6 +366,7 @@ function getToolActivitySummary(items, fallbackTitle = "Thinking about") {
         location: 0,
         timer: 0,
         memory: 0,
+        thinking: 0,
         tool: 0
     };
 
@@ -368,6 +379,7 @@ function getToolActivitySummary(items, fallbackTitle = "Thinking about") {
         else if (item.kind === "location") counts.location += 1;
         else if (item.kind === "timer") counts.timer += 1;
         else if (item.kind === "memory") counts.memory += 1;
+        else if (item.kind === "thinking") counts.thinking += 1;
         else counts.tool += 1;
     });
 
@@ -382,6 +394,7 @@ function getToolActivitySummary(items, fallbackTitle = "Thinking about") {
     if (counts.memory) parts.push(`Checked ${getToolActivityCountLabel(counts.memory, "memory", "memories")}`);
     if (counts.tool) parts.push(`Used ${getToolActivityCountLabel(counts.tool, "tool")}`);
 
+    if (!parts.length && counts.thinking) return "Thinking through next steps";
     if (!parts.length) return fallbackTitle || "Working";
     return parts.map((part, index) => index === 0 ? part : lowerFirst(part)).join(", ");
 }
@@ -573,6 +586,21 @@ function renderToolActivityRow(item, index, extraClass = "", {
     panelId = "",
     preview = false
 } = {}) {
+    if (item.kind === "thinking") {
+        const itemId = getToolActivityItemId(item, index, panelId);
+        const thought = item.input || item.detail || item.label || "Thinking through next steps.";
+        const thoughtHtml = typeof renderMarkdown === "function"
+            ? renderMarkdown(thought)
+            : `<p>${escapeHtml(thought)}</p>`;
+        return `
+            <div class="tool-activity-row-wrap tool-activity-thinking-wrap ${preview ? "tool-activity-row-wrap-preview" : ""}" data-tool-activity-item-id="${escapeAttribute(itemId)}">
+                <div class="tool-activity-thinking-block ${extraClass}" data-tool-kind="thinking">
+                    ${thoughtHtml}
+                </div>
+            </div>
+        `;
+    }
+
     const title = getToolActivityRowTitle(item);
     const tag = getToolActivityTag(item);
     const itemId = getToolActivityItemId(item, index, panelId);

@@ -382,6 +382,21 @@ async function submitClarifyingAnswers() {
     }
 }
 
+function getAssistantToolActivityForConversationData(data = {}) {
+    const directItems = data?.__faunaToolActivity || data?.message?.faunaToolActivity || [];
+    return typeof normalizeToolActivityItems === "function"
+        ? normalizeToolActivityItems(directItems)
+        : [];
+}
+
+function attachToolActivityToAssistantMessage(message, data = {}) {
+    const items = getAssistantToolActivityForConversationData(data);
+    if (message && items.length > 0) {
+        message.faunaToolActivity = items;
+    }
+    return message;
+}
+
 function getAssistantMessageForConversation(data, fallbackModel = getCurrentModelLabel()) {
     const rawContent = data?.message?.content || "";
     const titleRequest = parseChatTitleRequest(rawContent);
@@ -395,7 +410,7 @@ function getAssistantMessageForConversation(data, fallbackModel = getCurrentMode
         || (toolRequest ? getAssistantToolPlaceholder(toolRequest) : "")
         || (titleRequest ? "I've named this chat." : rawContent);
     const model = normalizeModelId(data?.model || data?.message?.model || fallbackModel);
-    return attachTokenUsage({
+    return attachToolActivityToAssistantMessage(attachTokenUsage({
         ...(data?.message || { role: "assistant" }),
         role: data?.message?.role || "assistant",
         content,
@@ -403,7 +418,7 @@ function getAssistantMessageForConversation(data, fallbackModel = getCurrentMode
         provider: getCurrentProviderLabel(),
         reasoning: getReasoningLabelForMessage(model),
         createdAt: new Date().toISOString()
-    }, getProviderTokenUsage(data));
+    }, getProviderTokenUsage(data)), data);
 }
 
 async function renderAssistantResponse(data, aiBubble, webSources = [], signal = null, speakThisReply = false, options = {}) {
@@ -482,6 +497,18 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     const duplicateToolReminders = new Set();
     let totalToolSteps = 0;
     let burstToolSteps = 0;
+    const attachToolActivityToData = (data, status = "done") => {
+        if (!data || toolActivityItems.length === 0) return data;
+        const items = normalizeToolActivityItems(toolActivityItems).map(item => ({
+            ...item,
+            meta: item.meta === "Running" && status === "done" ? "Done" : item.meta
+        }));
+        data.__faunaToolActivity = items;
+        if (data.message && typeof data.message === "object") {
+            data.message.faunaToolActivity = items;
+        }
+        return data;
+    };
 
     while (totalToolSteps < maxStepsPerRun) {
         const streamRenderer = progressTarget
@@ -508,7 +535,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 data.message.content = stripAssistantControlBlocks(data.message.content)
                     || `${getActiveComposerModelLabel()} cannot call tools. Choose a tool-capable model first.`;
             }
-            return data;
+            return attachToolActivityToData(data);
         }
         if (toolCalls.length === 0) {
             if (streamRenderer) {
@@ -518,7 +545,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
             if (toolWebSources.length > 0) {
                 data.__faunaWebSources = mergeWebSources(toolWebSources);
             }
-            return data;
+            return attachToolActivityToData(data);
         }
 
         streamRenderer?.cancel();
@@ -539,7 +566,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 if (toolWebSources.length > 0) {
                     data.__faunaWebSources = mergeWebSources(toolWebSources);
                 }
-                return data;
+                return attachToolActivityToData(data);
             }
 
             if (totalToolSteps >= maxStepsPerRun) {
@@ -549,7 +576,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 if (toolWebSources.length > 0) {
                     data.__faunaWebSources = mergeWebSources(toolWebSources);
                 }
-                return data;
+                return attachToolActivityToData(data);
             }
 
             totalToolSteps += 1;
@@ -574,7 +601,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 data.__faunaAlreadyRendered = true;
                 data.__faunaPreserveRenderedContent = true;
                 data.__faunaImageToolHandled = true;
-                return data;
+                return attachToolActivityToData(data);
             }
 
             const toolSignature = isThinkingTool ? "" : getFaunaToolCallSignature(toolCall);
@@ -597,7 +624,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 if (toolWebSources.length > 0) {
                     data.__faunaWebSources = mergeWebSources(toolWebSources);
                 }
-                return data;
+                return attachToolActivityToData(data);
             }
 
             const activityItem = {
@@ -651,7 +678,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                         if (toolWebSources.length > 0) {
                             data.__faunaWebSources = mergeWebSources(toolWebSources);
                         }
-                        return data;
+                        return attachToolActivityToData(data, "waiting");
                     }
                     if (Array.isArray(toolResult.sources) && toolResult.sources.length > 0) {
                         activityItem.sources = toolResult.sources;
@@ -705,7 +732,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     if (lastData && toolWebSources.length > 0) {
         lastData.__faunaWebSources = mergeWebSources(toolWebSources);
     }
-    return lastData;
+    return attachToolActivityToData(lastData);
 }
 
 function getContextCompactionRoleLabel(role) {

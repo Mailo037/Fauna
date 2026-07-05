@@ -49,7 +49,6 @@ const projectInstructionsBtn = document.getElementById("projectInstructionsBtn")
 const projectDiffReviewBtn = document.getElementById("projectDiffReviewBtn");
 const projectWorktreeActionBtn = document.getElementById("projectWorktreeActionBtn");
 const projectBranchSummary = document.getElementById("projectBranchSummary");
-const projectExplorerUpBtn = document.getElementById("projectExplorerUpBtn");
 const projectExplorerPath = document.getElementById("projectExplorerPath");
 const projectExplorerFilterInput = document.getElementById("projectExplorerFilterInput");
 const projectExplorerList = document.getElementById("projectExplorerList");
@@ -476,12 +475,24 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.9";
-const FAUNA_APP_BUILD_ID = "20260705-terminal-sidebar-composer";
+const FAUNA_APP_VERSION = "0.1.10";
+const FAUNA_APP_BUILD_ID = "20260705-workspace-tabs-tools";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.1.10",
+        date: "2026-07-05",
+        commit: "v0.1.10",
+        title: "Workspace tab and tool activity bugfixes",
+        changes: [
+            "Fixed project chat drafts so empty project chats no longer appear as Current Session rows.",
+            "Saved workspace panel state, file tabs, side chats, terminals, and tool activity with each chat.",
+            "Reduced tool activity flashing and rendered thinking steps as inline text between tool calls.",
+            "Improved project file tree arrows, depth guides, Git-ignored file dimming, file syntax highlighting, and terminal colors."
+        ]
+    },
     {
         version: "0.1.9",
         date: "2026-07-05",
@@ -1117,9 +1128,12 @@ function ensureDesktopArtifactChatSessionId() {
 
     let session = getActiveSession?.() || null;
     if (!session && activeChatHasContent?.()) {
-        session = createChatSession();
+        session = typeof createChatSessionForCurrentDraft === "function"
+            ? createChatSessionForCurrentDraft()
+            : createChatSession();
         chatSessions.unshift(session);
         activeSessionId = session.id;
+        clearPendingProjectChatRoot?.();
         updateActiveChatTitle?.();
         if (activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND) {
             updateWorkspaceUrlFragment?.({ replace: true });
