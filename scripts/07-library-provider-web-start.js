@@ -45,7 +45,7 @@ function renderLibraryPicker() {
     scheduleAnimatedSegmentIndicators();
 }
 
-function openLibraryPickerModal() {
+function openLibraryPickerModal({ attachmentTarget = "main" } = {}) {
     if (!libraryPickerModal) return;
     if (!canUseComposerAttachments()) {
         showToast(`${getActiveComposerModelLabel()} cannot read attachments. Choose a file- or vision-capable model first.`, "warning");
@@ -53,9 +53,13 @@ function openLibraryPickerModal() {
     }
     if (activeChatHasContent()) saveCurrentSession({ render: false });
     closeAttachmentMenu();
+    if (typeof closeProjectPageChatAttachmentMenu === "function") closeProjectPageChatAttachmentMenu();
+    libraryPickerAttachmentTarget = attachmentTarget === "projectPageChat" ? "projectPageChat" : "main";
     libraryPickerReturnFocus = document.activeElement instanceof HTMLElement && !libraryPickerModal.contains(document.activeElement)
         ? document.activeElement
-        : uploadButton;
+        : libraryPickerAttachmentTarget === "projectPageChat"
+            ? projectPageChatUploadButton
+            : uploadButton;
     libraryPickerSelectedIds = new Set();
     libraryPickerQuery = "";
     libraryPickerTypeFilter = LIBRARY_PICKER_TYPE_ALL;
@@ -82,10 +86,13 @@ function closeLibraryPickerModal() {
     if (activeElement instanceof HTMLElement && libraryPickerModal.contains(activeElement)) {
         const focusTarget = libraryPickerReturnFocus && document.contains(libraryPickerReturnFocus)
             ? libraryPickerReturnFocus
-            : uploadButton || input;
+            : libraryPickerAttachmentTarget === "projectPageChat"
+                ? projectPageChatUploadButton || projectPageChatInput
+                : uploadButton || input;
         focusTarget?.focus?.({ preventScroll: true });
     }
     libraryPickerReturnFocus = null;
+    libraryPickerAttachmentTarget = "main";
 }
 
 function getLibrarySelectionKey(item) {
@@ -699,11 +706,13 @@ statusPill?.addEventListener("click", () => {
 
 function updateModelSwitcherForProvider() {
     const applyModelOptions = (options, activeModel, config = {}) => {
-        if (typeof modelSwitcher?.setModels === "function") {
-            modelSwitcher.setModels(options, activeModel, config);
-            return;
-        }
-        modelSwitcher?.setActive?.(activeModel);
+        [modelSwitcher, projectPageChatModelSwitcher].forEach(switcher => {
+            if (typeof switcher?.setModels === "function") {
+                switcher.setModels(options, activeModel, config);
+                return;
+            }
+            switcher?.setActive?.(activeModel);
+        });
     };
 
     if (isOpenAiProvider()) {

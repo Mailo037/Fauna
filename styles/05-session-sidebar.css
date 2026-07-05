@@ -2030,7 +2030,7 @@ body.project-agent-maximized .project-explorer-sidebar {
     max-height: none;
     border: 0;
     border-radius: 0;
-    background: #151515;
+    background: transparent;
     color: #dce3ea;
     box-shadow: none;
     outline: none;
@@ -2098,55 +2098,6 @@ body.project-agent-maximized .project-explorer-sidebar {
 
 .project-page-chat-body p:last-child {
     margin-bottom: 0;
-}
-
-.project-page-chat-composer.input-container-floating {
-    width: 100%;
-    min-height: 92px;
-    box-sizing: border-box;
-    gap: 8px;
-    padding: 14px;
-}
-
-.project-page-chat-input {
-    width: 100%;
-    min-width: 0;
-    min-height: 28px;
-    max-height: 118px;
-    box-sizing: border-box;
-    resize: none;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.5;
-    outline: none;
-    padding: 0;
-}
-
-.project-page-chat-input:focus {
-    box-shadow: none;
-}
-
-.project-page-chat-composer .input-action-bar {
-    min-height: 42px;
-}
-
-.project-page-chat-send.run-btn {
-    flex: 0 0 auto;
-}
-
-.project-page-chat-send {
-    width: 38px;
-    height: 38px;
-    min-width: 38px;
-    min-height: 38px;
-    border-radius: 999px;
-    background: var(--text);
-    color: var(--bg);
 }
 
 .workspace-menu-list {
@@ -2334,23 +2285,6 @@ body.project-agent-maximized .project-explorer-sidebar {
     cursor: not-allowed;
 }
 
-.project-page-chat-send {
-    width: 38px;
-    height: 38px;
-    min-width: 38px;
-    min-height: 38px;
-    border-radius: 999px;
-    background: var(--text);
-    color: var(--bg);
-}
-
-.project-page-chat-send:hover,
-.project-page-chat-send:focus-visible {
-    border-color: transparent;
-    background: #ffffff;
-    color: #111111;
-}
-
 .project-agent-expand-btn {
     position: fixed;
     top: calc(var(--window-bar-height) + 14px);
@@ -2450,6 +2384,7 @@ body.project-agent-maximized .project-explorer-sidebar {
 .project-explorer-row {
     --project-entry-indent: 0px;
     --project-file-color: color-mix(in srgb, var(--text-muted) 88%, #fff);
+    --project-tree-guide-color: color-mix(in srgb, var(--text-muted) 48%, transparent);
     position: relative;
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr);
@@ -2484,17 +2419,28 @@ body.project-agent-maximized .project-explorer-sidebar {
     position: absolute;
     top: -2px;
     bottom: -2px;
-    left: calc(var(--project-entry-indent) - 10px);
-    width: 1px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--text-muted) 32%, transparent);
+    left: 0;
+    width: var(--project-entry-indent);
+    background-image: repeating-linear-gradient(
+        to right,
+        transparent 0,
+        transparent 7px,
+        var(--project-tree-guide-color) 7px,
+        var(--project-tree-guide-color) 8px,
+        transparent 8px,
+        transparent 18px
+    );
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.14s var(--ease), background-color 0.14s var(--ease);
+    transition: opacity 0.14s var(--ease);
 }
 
 .project-explorer-row[data-depth]:not([data-depth="0"])::before {
     left: calc(1px + var(--project-entry-indent));
+}
+
+.project-explorer-row[data-depth]:not([data-depth="0"])::after {
+    opacity: 1;
 }
 
 .project-explorer-row[data-depth]:not([data-depth="0"]):hover::after,
@@ -2511,7 +2457,8 @@ body.project-agent-maximized .project-explorer-sidebar {
 }
 
 .project-explorer-row:hover::before,
-.project-explorer-row:focus-visible::before {
+.project-explorer-row:focus-visible::before,
+.project-explorer-row.active::before {
     opacity: 1;
 }
 
@@ -2745,7 +2692,8 @@ body.project-agent-maximized .project-explorer-sidebar {
     max-height: none;
     min-height: 0;
     border: 0;
-    background: #111;
+    padding: 0;
+    background: transparent;
     box-shadow: none;
     color: #dce3ea;
 }
@@ -2754,6 +2702,34 @@ body.project-agent-maximized .project-explorer-sidebar {
     border-color: transparent;
     box-shadow: none;
     outline: none;
+}
+
+.project-terminal-cursor {
+    display: inline-block;
+    width: 7px;
+    height: 1.15em;
+    margin-left: 1px;
+    background: currentColor;
+    vertical-align: -0.18em;
+    animation: projectTerminalCursorBlink 1s steps(2, start) infinite;
+}
+
+@keyframes projectTerminalCursorBlink {
+    0%,
+    44% {
+        opacity: 1;
+    }
+
+    45%,
+    100% {
+        opacity: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .project-terminal-cursor {
+        animation: none;
+    }
 }
 
 .project-command-output .ansi-bold {

@@ -462,7 +462,8 @@
     opacity: 1;
 }
 
-textarea#prompt {
+textarea#prompt,
+.project-page-chat-input {
     width: 100%;
     max-height: 180px;
     min-height: 42px;
@@ -475,7 +476,8 @@ textarea#prompt {
     line-height: 1.5;
 }
 
-textarea#prompt::placeholder {
+textarea#prompt::placeholder,
+.project-page-chat-input::placeholder {
     color: color-mix(in srgb, var(--text-muted) 90%, var(--text));
     opacity: 1;
 }

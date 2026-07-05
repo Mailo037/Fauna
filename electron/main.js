@@ -336,11 +336,14 @@ async function openWorkspaceProjectTerminal(projectPath) {
 
 function getTerminalShellLaunch() {
   if (process.platform === "win32") {
-    if (canLaunchExecutable("pwsh.exe")) {
-      return { command: "pwsh.exe", args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"], newline: "\r\n" };
-    }
+    // The embedded terminal is pipe-backed, not a real PTY. Windows PowerShell
+    // handles Clear-Host over pipes more reliably than pwsh, which can throw
+    // RawUI CursorPosition errors without a console handle.
     if (canLaunchExecutable("powershell.exe")) {
       return { command: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"], newline: "\r\n" };
+    }
+    if (canLaunchExecutable("pwsh.exe")) {
+      return { command: "pwsh.exe", args: ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit"], newline: "\r\n" };
     }
     return { command: "cmd.exe", args: [], newline: "\r\n" };
   }

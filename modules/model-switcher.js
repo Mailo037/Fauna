@@ -8,12 +8,14 @@ export function createModelSwitcher({
     reasoningModes = [],
     activeReasoning,
     onReasoningSelect,
-    onSelect
+    onSelect,
+    idPrefix = ""
 } = {}) {
     const selectTemplate = document.getElementById("customSelectTemplate");
     const optionTemplate = document.getElementById("customSelectOptionTemplate");
     let currentModels = models;
     let currentReasoningModes = reasoningModes;
+    const getScopedId = (id) => idPrefix ? `${idPrefix}${id.charAt(0).toUpperCase()}${id.slice(1)}` : id;
 
     if (host && selectTemplate) {
         const select = selectTemplate.content.firstElementChild.cloneNode(true);
@@ -22,11 +24,11 @@ export function createModelSwitcher({
         label = select.querySelector(".custom-select-value");
 
         select.classList.add("model-select");
-        button.id = "modelBtn";
+        button.id = getScopedId("modelBtn");
         button.classList.add("model-current");
         button.dataset.tooltip = "Choose model";
-        label.id = "modelLabel";
-        dropdown.id = "modelDropdown";
+        label.id = getScopedId("modelLabel");
+        dropdown.id = getScopedId("modelDropdown");
         dropdown.classList.add("model-dropdown");
         dropdown.setAttribute("aria-label", "Available models");
 

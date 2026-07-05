@@ -408,6 +408,7 @@ if (toolsBtn && toolsDropdown) {
             }
             return;
         }
+        projectPageChatToolsDropdown?.classList.remove("open");
         toolsDropdown.classList.toggle("open");
     };
     
@@ -2410,6 +2411,7 @@ if (toggleSandbox) {
     toggleSandbox.checked = isSandboxEnabled;
     toggleSandbox.onchange = (e) => {
         isSandboxEnabled = e.target.checked;
+        if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
     };
 }
 
@@ -2431,6 +2433,7 @@ if (toggleGoogleGrounding) {
     toggleGoogleGrounding.checked = isGoogleGroundingEnabled;
     toggleGoogleGrounding.onchange = (e) => {
         isGoogleGroundingEnabled = e.target.checked;
+        if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
     };
 }
 
@@ -2439,6 +2442,7 @@ if (toggleApproxLocation) {
     toggleApproxLocation.onchange = (e) => {
         isApproxLocationEnabled = e.target.checked;
         updatePotatoSettingsUi();
+        if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
     };
 }
 
@@ -2505,6 +2509,7 @@ if (toggleWorkspaceBridge) {
         safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, isWorkspaceBridgeEnabled ? "true" : "false");
         updateWorkspaceBridgeSettingsUi();
         updateProviderSettingsUi();
+        if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
     };
 }
 

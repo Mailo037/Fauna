@@ -159,10 +159,99 @@
                 </div>
             </div>
             <div class="project-page-chat-composer input-container-floating">
-                <textarea id="projectPageChatInput" class="project-page-chat-input" rows="1" spellcheck="true" placeholder="Ask about this project..." aria-label="Page chat prompt"></textarea>
+                <div id="projectPageChatPreviewContainer" class="preview-container"></div>
+                <input type="file" id="projectPageChatFileInput" multiple style="display: none;" />
+
+                <div id="projectPageChatSlashCommandPalette" class="slash-command-palette" role="listbox" aria-label="Slash commands" hidden></div>
+
+                <textarea id="projectPageChatInput" class="project-page-chat-input" rows="1" spellcheck="true" placeholder="Message Fauna" aria-label="Page chat prompt" aria-controls="projectPageChatSlashCommandPalette" aria-autocomplete="list"></textarea>
                 <div class="input-action-bar">
-                    <div class="action-bar-left"></div>
+                    <div class="action-bar-left">
+                        <div class="attachment-menu-wrap">
+                            <button id="projectPageChatUploadButton" class="action-circle-btn" type="button" aria-label="Attach" aria-haspopup="menu" aria-expanded="false" aria-controls="projectPageChatAttachmentMenu">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            </button>
+                            <div id="projectPageChatAttachmentMenu" class="attachment-menu" role="menu" aria-label="Attach options" hidden>
+                                <button id="projectPageChatAttachmentUploadFile" class="attachment-menu-item" type="button" role="menuitem">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+                                    <span>Upload file</span>
+                                </button>
+                                <button id="projectPageChatAttachmentChooseLibrary" class="attachment-menu-item" type="button" role="menuitem">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-1.5Z"></path><path d="M10 3h8a2 2 0 0 1 2 2v14.5A2 2 0 0 1 18 21h-8"></path><path d="M14 8h3"></path><path d="M14 12h3"></path></svg>
+                                    <span>Choose from Library</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="tools-container">
+                            <button id="projectPageChatToolsBtn" class="action-pill-btn" type="button">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="3" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="14" width="7" height="7"></rect>
+                                    <rect x="3" y="14" width="7" height="7"></rect>
+                                </svg>
+                                <span>Tools</span>
+                            </button>
+                            <div id="projectPageChatToolsDropdown" class="tools-dropdown">
+                                <div class="tools-header">
+                                    <span>Tools</span>
+                                    <small>Agent behavior for this chat</small>
+                                </div>
+                                <div class="tools-section">
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Code Sandbox</span>
+                                            <span class="setting-desc">Preview HTML, CSS & JS in interactive sandbox</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="projectPageChatToggleSandbox" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Google Grounding</span>
+                                            <span class="setting-desc">Search Google and inspect site content when available</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="projectPageChatToggleGoogleGrounding" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Approx Location</span>
+                                            <span class="setting-desc">Allow IP-based weather and rough location tools when asked</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="projectPageChatToggleApproxLocation" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="setting-info">
+                                            <span class="setting-title">Local Workspace</span>
+                                            <span class="setting-desc">Tell the AI it can read this PC's workspace and run terminal commands through the local bridge</span>
+                                        </div>
+                                        <label class="switch">
+                                            <input type="checkbox" id="projectPageChatToggleWorkspaceBridge">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="action-bar-right">
+                        <div id="projectPageChatModelSwitcherHost" class="model-switcher"></div>
+                        <button id="projectPageChatVoiceButton" class="voice-btn" type="button" aria-label="Voice Input">
+                            <svg id="projectPageChatVoiceBtnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                                <line x1="12" y1="19" x2="12" y2="23"></line>
+                                <line x1="8" y1="23" x2="16" y2="23"></line>
+                            </svg>
+                        </button>
                         <button id="projectPageChatSendBtn" class="run-btn project-page-chat-send" type="button" aria-label="Send page chat message" data-tooltip="Send page chat message">
                             <span class="send-btn-idle-state" data-send-state="idle">
                                 <span class="send-btn-icon" aria-hidden="true">
@@ -172,9 +261,21 @@
                                     </svg>
                                 </span>
                                 <span class="send-btn-label">Send</span>
-                                <span class="shortcut-badge">Enter</span>
+                                <span class="shortcut-badge">Ctrl Enter</span>
+                            </span>
+                            <span class="send-btn-loading-state" data-send-state="loading" hidden>
+                                <span class="send-btn-loader" aria-hidden="true"></span>
+                                <span class="send-btn-label">Working...</span>
                             </span>
                         </button>
+                        <button id="projectPageChatStopBtn" class="stop-btn" type="button" hidden aria-label="Stop generation" data-tooltip="Stop generation">
+                            <span class="stop-btn-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" focusable="false">
+                                    <rect x="5" y="5" width="14" height="14" rx="2.5"></rect>
+                                </svg>
+                            </span>
+                        </button>
+                        <button id="projectPageChatVoiceStopButton" class="voice-stop-btn" type="button" hidden aria-label="Stop voice chat">Stop</button>
                     </div>
                 </div>
             </div>

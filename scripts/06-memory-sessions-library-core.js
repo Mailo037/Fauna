@@ -511,6 +511,7 @@ let pendingProjectChatRootId = "";
 let projectPageChatRootId = "";
 let projectPageChatHistory = [];
 const projectPageChatStates = new Map();
+let projectPageChatAbortController = null;
 const projectFileStates = new Map();
 const projectTerminalStates = new Map();
 let activeProjectGitInfo = null;
@@ -2748,6 +2749,11 @@ function getProjectTerminalPrompt() {
     return `PS ${rootLabel}${pathLabel}>`;
 }
 
+function isProjectTerminalClearCommand(value = "") {
+    const command = String(value || "").trim().toLowerCase();
+    return command === "cls" || command === "clear" || command === "clear-host";
+}
+
 function getProjectTerminalApi() {
     const projectsApi = getFaunaDesktopApi()?.projects;
     if (
@@ -2890,10 +2896,15 @@ function formatAnsiTerminalOutput(value = "") {
     return html;
 }
 
+function getProjectTerminalCursorHtml() {
+    return '<span class="project-terminal-cursor" aria-hidden="true"></span>';
+}
+
 function renderProjectTerminalOutput(text = "") {
     if (!projectCommandOutput) return;
     projectCommandOutput.hidden = false;
-    projectCommandOutput.innerHTML = formatAnsiTerminalOutput(text) || escapeHtml(`${getProjectTerminalPrompt()} `);
+    const outputHtml = formatAnsiTerminalOutput(text) || escapeHtml(`${getProjectTerminalPrompt()} `);
+    projectCommandOutput.innerHTML = `${outputHtml}${getProjectTerminalCursorHtml()}`;
     projectCommandOutput.scrollTop = projectCommandOutput.scrollHeight;
 }
 
@@ -2974,7 +2985,13 @@ function renderProjectTerminal({ includeDraft = true } = {}) {
     if (!projectCommandOutput) return;
     if (state.sessionId || state.starting || state.buffer) {
         const draft = includeDraft && state.draft ? state.draft : "";
-        renderProjectTerminalOutput(`${state.buffer || ""}${draft}` || "Starting terminal...");
+        if (state.buffer) {
+            renderProjectTerminalOutput(`${state.buffer}${draft}`);
+        } else if (state.starting) {
+            renderProjectTerminalOutput("Starting terminal...");
+        } else {
+            renderProjectTerminalOutput(`${getProjectTerminalPrompt()} ${draft}`);
+        }
         return;
     }
     state.lines = state.lines.slice(-260);
@@ -3016,6 +3033,13 @@ function handleProjectTerminalKeydown(event) {
         if (event.metaKey || event.altKey || (event.ctrlKey && event.key.toLowerCase() !== "v")) return;
         if (event.key === "Enter") {
             event.preventDefault();
+            if (isProjectTerminalClearCommand(state.draft)) {
+                state.buffer = "";
+                state.lines = [];
+                state.draft = "";
+                renderProjectTerminal();
+                return;
+            }
             const data = `${state.draft}${state.newline || "\n"}`;
             state.draft = "";
             void terminalApi.writeTerminalSession({ sessionId: state.sessionId, data });
@@ -3076,6 +3100,14 @@ function handleProjectTerminalPaste(event) {
 async function runProjectCommandFromPanel() {
     const state = getProjectTerminalState();
     const command = String(state.draft || projectCommandInput?.value || "").trim();
+    if (isProjectTerminalClearCommand(command)) {
+        state.lines = [];
+        state.buffer = "";
+        state.draft = "";
+        if (projectCommandInput) projectCommandInput.value = "";
+        renderProjectTerminal();
+        return;
+    }
     if (!command) {
         showToast("Enter a command first.", "warning");
         return;
@@ -3203,14 +3235,177 @@ function appendProjectPageChatMessage(role, content = "") {
     return body;
 }
 
+function isDuplicateProjectPageChatAttachment(file) {
+    const incomingPath = String(file?.__faunaDesktopFilePath || "").trim();
+    return projectPageChatAttachedFiles.some(existing => (
+        incomingPath && incomingPath === String(existing.__faunaDesktopFilePath || "").trim()
+    ) || (
+        existing.name === file.name
+        && existing.size === file.size
+        && existing.type === file.type
+    ));
+}
+
+function renderProjectPageChatPreviewPill(file) {
+    if (!projectPageChatPreviewContainer) return;
+    const isImage = file.type?.startsWith("image/");
+    const pill = document.createElement("div");
+    pill.className = `preview-pill ${isImage ? "preview-image-tile" : "preview-file-pill"}`;
+
+    const icon = document.createElement("span");
+    icon.className = "preview-file-icon";
+    icon.setAttribute("aria-hidden", "true");
+
+    if (isImage) {
+        const img = document.createElement("img");
+        const desktopPreview = getDesktopFilePreviewSource(file);
+        const objectUrl = desktopPreview || URL.createObjectURL(file);
+        img.src = objectUrl;
+        img.className = "preview-file-thumb";
+        img.onload = () => {
+            if (!desktopPreview) URL.revokeObjectURL(objectUrl);
+        };
+        icon.appendChild(img);
+    } else if (isCodeLikeAttachment(file)) {
+        icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>`;
+    } else {
+        icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>`;
+    }
+
+    const meta = document.createElement("span");
+    meta.className = "preview-file-meta";
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "preview-file-name";
+    nameSpan.textContent = file.name;
+    const kindSpan = document.createElement("span");
+    kindSpan.className = "preview-file-type";
+    kindSpan.textContent = getAttachmentKindLabel(file);
+    meta.append(nameSpan, kindSpan);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "remove-preview";
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", `Remove ${file.name}`);
+    closeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
+    closeBtn.onclick = () => {
+        projectPageChatAttachedFiles = projectPageChatAttachedFiles.filter(item => item !== file);
+        pill.remove();
+    };
+
+    pill.append(icon, meta, closeBtn);
+    projectPageChatPreviewContainer.appendChild(pill);
+}
+
+function addProjectPageChatAttachedFile(file, { notify = true } = {}) {
+    if (!(file instanceof File)) return false;
+    prepareDesktopFileReference(file);
+    const unsupportedReason = getUnsupportedAttachmentReason(file);
+    if (unsupportedReason) {
+        if (notify) showUnsupportedAttachmentToast([{ file, reason: unsupportedReason }]);
+        return false;
+    }
+    if (isDuplicateProjectPageChatAttachment(file)) return false;
+    projectPageChatAttachedFiles.push(file);
+    renderProjectPageChatPreviewPill(file);
+    return true;
+}
+
+function addProjectPageChatAttachedFiles(files) {
+    let added = 0;
+    const rejected = [];
+    Array.from(files || []).forEach(file => {
+        const unsupportedReason = getUnsupportedAttachmentReason(file);
+        if (unsupportedReason) {
+            rejected.push({ file, reason: unsupportedReason });
+            return;
+        }
+        if (addProjectPageChatAttachedFile(file, { notify: false })) added += 1;
+    });
+    showUnsupportedAttachmentToast(rejected);
+    return added;
+}
+
+function clearProjectPageChatAttachments() {
+    projectPageChatAttachedFiles = [];
+    if (projectPageChatPreviewContainer) projectPageChatPreviewContainer.innerHTML = "";
+    if (projectPageChatFileInput) projectPageChatFileInput.value = "";
+}
+
+function setProjectPageChatAttachmentMenuOpen(open, { focusMenu = false } = {}) {
+    if (!projectPageChatAttachmentMenu || !projectPageChatUploadButton) return;
+    if (open && !canUseComposerAttachments()) {
+        showToast(`${getActiveComposerModelLabel()} cannot read attachments. Choose a file- or vision-capable model first.`, "warning");
+        return;
+    }
+    const isOpen = Boolean(open);
+    projectPageChatAttachmentMenu.hidden = !isOpen;
+    projectPageChatUploadButton.setAttribute("aria-expanded", String(isOpen));
+    projectPageChatUploadButton.classList.toggle("active", isOpen);
+    if (isOpen) {
+        projectPageChatToolsDropdown?.classList.remove("open");
+        toolsDropdown?.classList.remove("open");
+        if (typeof closeAttachmentMenu === "function") closeAttachmentMenu();
+        if (focusMenu) {
+            window.setTimeout(() => projectPageChatAttachmentMenu.querySelector(".attachment-menu-item")?.focus({ preventScroll: true }), 0);
+        }
+    }
+}
+
+function closeProjectPageChatAttachmentMenu() {
+    setProjectPageChatAttachmentMenuOpen(false);
+}
+
+function toggleProjectPageChatAttachmentMenu() {
+    setProjectPageChatAttachmentMenuOpen(projectPageChatAttachmentMenu?.hidden !== false, { focusMenu: true });
+}
+
+async function buildProjectPageChatAttachmentMessageContent(prompt, files = [], signal = null) {
+    let content = String(prompt || "").trim();
+    const images = [];
+    const openAiImageFileIds = [];
+
+    for (const file of files) {
+        const unsupportedReason = getUnsupportedAttachmentReason(file);
+        if (unsupportedReason) throw new Error(unsupportedReason);
+        if (file.type?.startsWith("image/")) {
+            if (isOpenAiProvider()) {
+                const preparedImage = await prepareOpenAiVisionImage(file, signal);
+                openAiImageFileIds.push(preparedImage.fileId);
+            } else {
+                images.push(await fileToBase64(file));
+            }
+            continue;
+        }
+
+        try {
+            const textContent = await file.text();
+            content += `\n\n--- Attached File Content: ${file.name} ---\n${textContent}\n-----------------------`;
+        } catch {
+            content += `\n\n[Error reading file context item: ${file.name}]`;
+        }
+    }
+
+    return { content: content || `[${files.length} attachment${files.length === 1 ? "" : "s"}]`, images, openAiImageFileIds };
+}
+
 function setProjectPageChatBusy(busy) {
-    if (projectPageChatSendBtn) projectPageChatSendBtn.disabled = Boolean(busy);
+    if (projectPageChatSendBtn) {
+        const isBusy = Boolean(busy);
+        const idleState = projectPageChatSendBtn.querySelector("[data-send-state='idle']");
+        const loadingState = projectPageChatSendBtn.querySelector("[data-send-state='loading']");
+        projectPageChatSendBtn.disabled = isBusy;
+        projectPageChatSendBtn.setAttribute("aria-busy", String(isBusy));
+        if (idleState) idleState.hidden = isBusy;
+        if (loadingState) loadingState.hidden = !isBusy;
+    }
     if (projectPageChatInput) projectPageChatInput.disabled = Boolean(busy);
+    if (projectPageChatStopBtn) projectPageChatStopBtn.hidden = !busy;
 }
 
 async function sendProjectPageChatMessage() {
     const prompt = String(projectPageChatInput?.value || "").trim();
-    if (!prompt) return;
+    const files = [...projectPageChatAttachedFiles];
+    if (!prompt && files.length === 0) return;
     const root = syncProjectPageChatStateForActiveTab({ render: false });
     if (!root) {
         showToast("Start or select a project chat first.", "warning");
@@ -3225,22 +3420,40 @@ async function sendProjectPageChatMessage() {
         return;
     }
 
+    const controller = new AbortController();
+    projectPageChatAbortController = controller;
+    let attachmentPayload;
+    try {
+        attachmentPayload = await buildProjectPageChatAttachmentMessageContent(prompt, files, controller.signal);
+    } catch (err) {
+        projectPageChatAbortController = null;
+        showToast(`Attachment failed: ${err.message}`, "error");
+        return;
+    }
+
+    const visiblePrompt = [
+        prompt,
+        files.length > 0 ? `Attached: ${files.map(file => file.name || "file").join(", ")}` : ""
+    ].filter(Boolean).join("\n\n");
+
     const userMessage = {
         role: "user",
-        content: prompt,
+        content: attachmentPayload.content,
         createdAt: new Date().toISOString()
     };
+    if (attachmentPayload.images.length > 0) userMessage.images = attachmentPayload.images;
+    if (attachmentPayload.openAiImageFileIds.length > 0) userMessage.openAiImageFileIds = attachmentPayload.openAiImageFileIds;
     projectPageChatHistory.push(userMessage);
-    appendProjectPageChatMessage("user", prompt);
+    appendProjectPageChatMessage("user", visiblePrompt || userMessage.content);
     if (projectPageChatInput) {
         projectPageChatInput.value = "";
         projectPageChatInput.style.height = "";
     }
+    clearProjectPageChatAttachments();
 
     const assistantBody = appendProjectPageChatMessage("assistant", "Thinking...");
-    const controller = new AbortController();
     setProjectPageChatBusy(true);
-    const routedModel = chooseModelForRequest(prompt, [], null, null);
+    const routedModel = chooseModelForRequest(prompt, files, null, null);
     const activityId = recordAgentActivity({
         kind: "chat",
         label: "Side chat",
@@ -3278,6 +3491,7 @@ async function sendProjectPageChatMessage() {
         updateAgentActivityEvent(activityId, { status: "failed", detail: err.message });
         showToast(`Side chat failed: ${err.message}`, "error");
     } finally {
+        projectPageChatAbortController = null;
         setProjectPageChatBusy(false);
         projectPageChatInput?.focus?.();
         projectPageChatLog.scrollTop = projectPageChatLog.scrollHeight;
@@ -4598,19 +4812,143 @@ projectCommandInput?.addEventListener("keydown", event => {
     event.preventDefault();
     void runProjectCommandFromPanel();
 });
+
+function syncProjectPageChatToolToggles() {
+    if (projectPageChatToggleSandbox) projectPageChatToggleSandbox.checked = Boolean(isSandboxEnabled);
+    if (projectPageChatToggleGoogleGrounding) projectPageChatToggleGoogleGrounding.checked = Boolean(isGoogleGroundingEnabled);
+    if (projectPageChatToggleApproxLocation) projectPageChatToggleApproxLocation.checked = Boolean(isApproxLocationEnabled);
+    if (projectPageChatToggleWorkspaceBridge) projectPageChatToggleWorkspaceBridge.checked = Boolean(isWorkspaceBridgeEnabled);
+}
+
+function setProjectPageChatToolsOpen(open) {
+    if (!projectPageChatToolsDropdown || !projectPageChatToolsBtn) return;
+    const archived = typeof isActiveChatArchived === "function" && isActiveChatArchived();
+    if (open && (isGenerating || archived || !canUseComposerTools())) {
+        projectPageChatToolsDropdown.classList.remove("open");
+        if (archived) {
+            showToast("Archived chats are read-only.", "warning");
+        } else if (!isGenerating && !canUseComposerTools()) {
+            showToast(`${getActiveComposerModelLabel()} cannot call tools. Choose a tool-capable model first.`, "warning");
+        }
+        return;
+    }
+    projectPageChatToolsDropdown.classList.toggle("open", Boolean(open));
+    if (open) {
+        toolsDropdown?.classList.remove("open");
+        if (typeof closeAttachmentMenu === "function") closeAttachmentMenu();
+        closeProjectPageChatAttachmentMenu();
+    }
+}
+
+projectPageChatUploadButton?.addEventListener("click", event => {
+    event.stopPropagation();
+    if (isGenerating) return;
+    toggleProjectPageChatAttachmentMenu();
+});
+projectPageChatUploadButton?.addEventListener("keydown", event => {
+    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (!isGenerating) setProjectPageChatAttachmentMenuOpen(true, { focusMenu: true });
+    }
+});
+projectPageChatAttachmentMenu?.addEventListener("click", event => event.stopPropagation());
+projectPageChatAttachmentMenu?.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+        event.preventDefault();
+        closeProjectPageChatAttachmentMenu();
+        projectPageChatUploadButton?.focus({ preventScroll: true });
+        return;
+    }
+
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const items = Array.from(projectPageChatAttachmentMenu.querySelectorAll(".attachment-menu-item"));
+    const currentIndex = Math.max(0, items.indexOf(document.activeElement));
+    const nextIndex = event.key === "ArrowDown"
+        ? (currentIndex + 1) % items.length
+        : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex]?.focus({ preventScroll: true });
+});
+projectPageChatAttachmentUploadFileButton?.addEventListener("click", () => {
+    if (isGenerating || !canUseComposerAttachments()) {
+        if (!isGenerating) showToast(`${getActiveComposerModelLabel()} cannot read attachments. Choose a file- or vision-capable model first.`, "warning");
+        return;
+    }
+    closeProjectPageChatAttachmentMenu();
+    projectPageChatFileInput?.click();
+});
+projectPageChatAttachmentChooseLibraryButton?.addEventListener("click", () => {
+    if (isGenerating || !canUseComposerAttachments()) {
+        if (!isGenerating) showToast(`${getActiveComposerModelLabel()} cannot read attachments. Choose a file- or vision-capable model first.`, "warning");
+        return;
+    }
+    openLibraryPickerModal({ attachmentTarget: "projectPageChat" });
+});
+projectPageChatFileInput?.addEventListener("change", event => {
+    if (isGenerating) return;
+    if (!canUseComposerAttachments()) {
+        showToast(`${getActiveComposerModelLabel()} cannot read attachments. Choose a file- or vision-capable model first.`, "warning");
+        projectPageChatFileInput.value = "";
+        return;
+    }
+    addProjectPageChatAttachedFiles(event.target.files);
+    projectPageChatFileInput.value = "";
+});
+projectPageChatToolsBtn?.addEventListener("click", event => {
+    event.stopPropagation();
+    setProjectPageChatToolsOpen(!projectPageChatToolsDropdown?.classList.contains("open"));
+});
+projectPageChatToolsDropdown?.addEventListener("click", event => event.stopPropagation());
+projectPageChatToggleSandbox?.addEventListener("change", event => {
+    isSandboxEnabled = event.target.checked;
+    if (toggleSandbox) toggleSandbox.checked = isSandboxEnabled;
+    syncProjectPageChatToolToggles();
+});
+projectPageChatToggleGoogleGrounding?.addEventListener("change", event => {
+    isGoogleGroundingEnabled = event.target.checked;
+    if (toggleGoogleGrounding) toggleGoogleGrounding.checked = isGoogleGroundingEnabled;
+    syncProjectPageChatToolToggles();
+});
+projectPageChatToggleApproxLocation?.addEventListener("change", event => {
+    isApproxLocationEnabled = event.target.checked;
+    if (toggleApproxLocation) toggleApproxLocation.checked = isApproxLocationEnabled;
+    if (typeof updatePotatoSettingsUi === "function") updatePotatoSettingsUi();
+    syncProjectPageChatToolToggles();
+});
+projectPageChatToggleWorkspaceBridge?.addEventListener("change", event => {
+    isWorkspaceBridgeEnabled = event.target.checked;
+    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
+    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, isWorkspaceBridgeEnabled ? "true" : "false");
+    if (typeof updateWorkspaceBridgeSettingsUi === "function") updateWorkspaceBridgeSettingsUi();
+    if (typeof updateProviderSettingsUi === "function") updateProviderSettingsUi();
+    syncProjectPageChatToolToggles();
+});
+projectPageChatVoiceButton?.addEventListener("click", () => {
+    voiceButton?.click();
+});
+projectPageChatVoiceStopButton?.addEventListener("click", () => {
+    voiceStopButton?.click();
+});
+projectPageChatStopBtn?.addEventListener("click", () => {
+    projectPageChatAbortController?.abort();
+});
+syncProjectPageChatToolToggles();
+
 projectPageChatSendBtn?.addEventListener("click", () => {
     void sendProjectPageChatMessage();
 });
 projectPageChatInput?.addEventListener("input", () => {
     projectPageChatInput.style.height = "auto";
-    projectPageChatInput.style.height = `${Math.min(118, projectPageChatInput.scrollHeight)}px`;
+    projectPageChatInput.style.height = `${projectPageChatInput.scrollHeight}px`;
 });
 projectPageChatInput?.addEventListener("keydown", event => {
-    if (event.key !== "Enter" || event.shiftKey) return;
+    if (!isKeyboardShortcutEvent(event, "sendPrompt")) return;
     event.preventDefault();
     void sendProjectPageChatMessage();
 });
 document.addEventListener("click", event => {
+    if (!event.target?.closest?.("#projectPageChatToolsBtn") && !event.target?.closest?.("#projectPageChatToolsDropdown")) projectPageChatToolsDropdown?.classList.remove("open");
+    if (!event.target?.closest?.("#projectPageChatAttachmentMenu") && !event.target?.closest?.("#projectPageChatUploadButton")) closeProjectPageChatAttachmentMenu();
     if (!event.target?.closest?.(".agent-task-mode-wrap")) closeAgentTaskModeMenu();
     if (!event.target?.closest?.(".composer-project-wrap")) closeComposerProjectMenu();
     if (!event.target?.closest?.(".composer-branch-menu") && !event.target?.closest?.("#composerBranchBtn")) closeComposerBranchMenu();
@@ -5936,11 +6274,18 @@ function updateStoredSessionFromGeneration(sessionId, {
     if (isChatSessionVisible(sessionId)) {
         conversationHistory = cloneConversationHistory(history);
         sessionTotalTokens = tokenTotal;
-        if (shouldRenderVisibleGenerationHistory(conversationHistory, sessionId)) {
+        const keepLiveGenerationDom = typeof isSessionGenerating === "function"
+            && isSessionGenerating(sessionId)
+            && typeof findVisibleGenerationBubble === "function"
+            && Boolean(findVisibleGenerationBubble());
+        if (keepLiveGenerationDom) {
+            extendChatRenderWindowToHistory(conversationHistory);
+        } else if (shouldRenderVisibleGenerationHistory(conversationHistory, sessionId)) {
             renderInitialChatHistoryWindow(conversationHistory, sessionId);
         } else {
             extendChatRenderWindowToHistory(conversationHistory);
         }
+        ensureVisibleGenerationProgress?.(sessionId);
         snapshotVisibleChatIntoSession(session, { history, tokenTotal });
         updateTokenDisplay();
         updateActiveChatTitle();
@@ -6822,7 +7167,14 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
     restoreWorkspacePanelState(session.workspacePanelState);
 
     if (chat) {
-        if (conversationHistory.length > 0) {
+        const shouldRestoreLiveGenerationDom = typeof isSessionGenerating === "function"
+            && isSessionGenerating(session.id)
+            && Array.isArray(session.domNodes)
+            && session.domNodes.length > 0;
+        if (shouldRestoreLiveGenerationDom) {
+            resetChatRenderWindowState(session.id);
+            chat.replaceChildren(...session.domNodes);
+        } else if (conversationHistory.length > 0) {
             renderInitialChatHistoryWindow(conversationHistory, session.id);
         } else if (session.domNodes?.length) {
             resetChatRenderWindowState(session.id);
@@ -6840,6 +7192,7 @@ function restoreChatSessionToView(session, { closeWorkbench = true } = {}) {
         applyActiveVoiceOrbTheme();
     }
     if (welcome) welcome.style.display = activeChatHasContent() ? "none" : "flex";
+    ensureVisibleGenerationProgress?.(session.id);
     updateComposerChatContentLayoutState();
 
     updateTokenDisplay();
@@ -6901,6 +7254,7 @@ function activateChatSession(sessionId, { captureCurrent = true, closeSidebar = 
     if (activeWorkspaceView !== WORKSPACE_VIEW_PLAYGROUND) {
         setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { closeSidebar: false, updateUrl: false });
     }
+    ensureVisibleGenerationProgress?.(sessionId);
     persistChatSessions();
     renderChatHistory();
     updateGenerationUi?.({ renderHistory: false });

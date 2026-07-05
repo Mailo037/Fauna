@@ -67,6 +67,15 @@ function createVoiceRecordingPlayer(recording) {
 function addRenderNode(text, type, fileArray = [], options = {}) {
     const target = options.container instanceof Element ? options.container : chat;
     if (!target) return null;
+    if (
+        target === chat
+        && type === "output"
+        && text === "__thinking__"
+        && options.liveGenerationPlaceholder !== true
+        && typeof removeLiveGenerationPlaceholders === "function"
+    ) {
+        removeLiveGenerationPlaceholders(activeSessionId);
+    }
     const node = document.createElement("div");
     node.className = `message-node ${type}-node`;
     if (Number.isInteger(options.historyIndex) && options.historyIndex >= 0) {

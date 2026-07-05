@@ -1087,6 +1087,14 @@ button.turn-duration-pill[aria-expanded="true"] {
     margin: var(--density-markdown-block-gap) 0;
 }
 
+.bubble.markdown > :first-child {
+    margin-top: 0;
+}
+
+.bubble.markdown > :last-child {
+    margin-bottom: 0;
+}
+
 .markdown ul,
 .markdown ol {
     margin: var(--density-markdown-list-gap) 0 var(--density-markdown-list-gap) 1.4em;
@@ -1237,8 +1245,8 @@ button.turn-duration-pill[aria-expanded="true"] {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
-    margin-top: 6px;
+    gap: 2px;
+    margin-top: 0;
     padding-left: 0;
 }
 
@@ -1252,8 +1260,8 @@ button.turn-duration-pill[aria-expanded="true"] {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     padding: 0;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
@@ -1283,9 +1291,9 @@ button.turn-duration-pill[aria-expanded="true"] {
 }
 
 .assistant-action-btn svg {
-    width: 13px;
-    height: 13px;
-    flex: 0 0 13px;
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
 }
 
 .assistant-action-btn.copied {
@@ -1519,8 +1527,8 @@ button.turn-duration-pill[aria-expanded="true"] {
 }
 
 :root[data-density="compact"] .assistant-message-actions {
-    gap: 2px;
-    margin-top: 4px;
+    gap: 1px;
+    margin-top: 0;
 }
 
 :root[data-density="compact"] .copy-action-btn {

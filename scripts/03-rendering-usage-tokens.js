@@ -504,12 +504,7 @@ function renderToolActivityDetailField(label, value, { code = false } = {}) {
         ? `<code class="tool-activity-query">${escapeHtml(cleanValue)}</code>`
         : `<span class="tool-activity-detail-value">${escapeHtml(cleanValue)}</span>`;
 
-    return `
-        <div class="tool-activity-detail-field">
-            <span class="tool-activity-detail-label">${escapeHtml(label)}</span>
-            ${valueMarkup}
-        </div>
-    `;
+    return `<div class="tool-activity-detail-field"><span class="tool-activity-detail-label">${escapeHtml(label)}</span>${valueMarkup}</div>`;
 }
 
 function renderToolActivityDetails(item) {
@@ -532,11 +527,7 @@ function renderToolActivityDetails(item) {
     ].filter(Boolean).join("");
 
     if (item.kind !== "web") {
-        return `
-            <div class="tool-activity-details">
-                ${fields || `<p class="tool-activity-detail-empty">No additional tool details were returned.</p>`}
-            </div>
-        `;
+        return `<div class="tool-activity-details">${fields || `<p class="tool-activity-detail-empty">No additional tool details were returned.</p>`}</div>`;
     }
 
     const query = item.query || item.detail || "";
@@ -547,33 +538,13 @@ function renderToolActivityDetails(item) {
         const title = source.url
             ? `<a class="tool-activity-result-title" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
             : `<span class="tool-activity-result-title">${escapeHtml(label)}</span>`;
-        return `
-            <li class="tool-activity-result">
-                <div class="tool-activity-result-head">
-                    <span class="tool-activity-result-index">${index + 1}</span>
-                    <div class="tool-activity-result-copy">
-                        ${title}
-                        ${host ? `<span class="tool-activity-result-host">${escapeHtml(host)}</span>` : ""}
-                    </div>
-                </div>
-                ${source.snippet ? `<p class="tool-activity-result-snippet">${escapeHtml(source.snippet)}</p>` : ""}
-            </li>
-        `;
+        return `<li class="tool-activity-result"><div class="tool-activity-result-head"><span class="tool-activity-result-index">${index + 1}</span><div class="tool-activity-result-copy">${title}${host ? `<span class="tool-activity-result-host">${escapeHtml(host)}</span>` : ""}</div></div>${source.snippet ? `<p class="tool-activity-result-snippet">${escapeHtml(source.snippet)}</p>` : ""}</li>`;
     }).join("");
     const emptyText = item.error
         ? `Search failed: ${item.error}`
         : "No result details were returned.";
 
-    return `
-        <div class="tool-activity-details">
-            ${fields}
-            ${query ? renderToolActivityDetailField("Query", query, { code: true }) : ""}
-            <div class="tool-activity-detail-field">
-                <span class="tool-activity-detail-label">Returned</span>
-                ${sourceRows ? `<ol class="tool-activity-results">${sourceRows}</ol>` : `<p class="tool-activity-detail-empty">${escapeHtml(emptyText)}</p>`}
-            </div>
-        </div>
-    `;
+    return `<div class="tool-activity-details">${fields}${query ? renderToolActivityDetailField("Query", query, { code: true }) : ""}<div class="tool-activity-detail-field"><span class="tool-activity-detail-label">Returned</span>${sourceRows ? `<ol class="tool-activity-results">${sourceRows}</ol>` : `<p class="tool-activity-detail-empty">${escapeHtml(emptyText)}</p>`}</div></div>`;
 }
 
 function getToolActivityItemId(item, index, panelId) {
@@ -592,13 +563,7 @@ function renderToolActivityRow(item, index, extraClass = "", {
         const thoughtHtml = typeof renderMarkdown === "function"
             ? renderMarkdown(thought)
             : `<p>${escapeHtml(thought)}</p>`;
-        return `
-            <div class="tool-activity-row-wrap tool-activity-thinking-wrap ${preview ? "tool-activity-row-wrap-preview" : ""}" data-tool-activity-item-id="${escapeAttribute(itemId)}">
-                <div class="tool-activity-thinking-block ${extraClass}" data-tool-kind="thinking">
-                    ${thoughtHtml}
-                </div>
-            </div>
-        `;
+        return `<div class="tool-activity-row-wrap tool-activity-thinking-wrap ${preview ? "tool-activity-row-wrap-preview" : ""}" data-tool-activity-item-id="${escapeAttribute(itemId)}"><div class="tool-activity-thinking-block ${extraClass}" data-tool-kind="thinking">${thoughtHtml}</div></div>`;
     }
 
     const title = getToolActivityRowTitle(item);
@@ -614,38 +579,16 @@ function renderToolActivityRow(item, index, extraClass = "", {
     const controls = preview ? panelId : detailsId;
     const ariaLabel = `${expanded ? "Hide" : "Show"} details for ${title}`;
 
-    return `
-        <div class="tool-activity-row-wrap ${expanded ? "expanded" : ""} ${preview ? "tool-activity-row-wrap-preview" : ""}" data-tool-activity-item-id="${escapeAttribute(itemId)}">
-            <button class="tool-activity-row ${extraClass}" type="button" data-tool-activity-row-toggle data-tool-activity-item-id="${escapeAttribute(itemId)}" data-tool-kind="${escapeAttribute(item.kind)}" data-tool-name="${escapeAttribute(item.tool)}" aria-expanded="${expanded ? "true" : "false"}" ${controls ? `aria-controls="${escapeAttribute(controls)}"` : ""} aria-label="${escapeAttribute(ariaLabel)}">
-                <span class="tool-activity-icon-wrap" aria-hidden="true">
-                    <svg class="tool-activity-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">${getToolActivityIcon(item.kind)}</svg>
-                </span>
-                <span class="tool-activity-row-body">
-                    <span class="tool-activity-label">${escapeHtml(title)}</span>
-                    ${badges ? `<span class="tool-activity-badges">${badges}</span>` : ""}
-                </span>
-                <span class="tool-activity-row-chevron" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="m9 6 6 6-6 6"></path>
-                    </svg>
-                </span>
-            </button>
-            ${details ? `<div id="${escapeAttribute(detailsId)}" class="tool-activity-detail-panel" ${expanded ? "" : "hidden"}>${details}</div>` : ""}
-        </div>
-    `;
+    const iconMarkup = `<span class="tool-activity-icon-wrap" aria-hidden="true"><svg class="tool-activity-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">${getToolActivityIcon(item.kind)}</svg></span>`;
+    const bodyMarkup = `<span class="tool-activity-row-body"><span class="tool-activity-label">${escapeHtml(title)}</span>${badges ? `<span class="tool-activity-badges">${badges}</span>` : ""}</span>`;
+    const chevronMarkup = `<span class="tool-activity-row-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"></path></svg></span>`;
+    const buttonMarkup = `<button class="tool-activity-row ${extraClass}" type="button" data-tool-activity-row-toggle data-tool-activity-item-id="${escapeAttribute(itemId)}" data-tool-kind="${escapeAttribute(item.kind)}" data-tool-name="${escapeAttribute(item.tool)}" aria-expanded="${expanded ? "true" : "false"}" ${controls ? `aria-controls="${escapeAttribute(controls)}"` : ""} aria-label="${escapeAttribute(ariaLabel)}">${iconMarkup}${bodyMarkup}${chevronMarkup}</button>`;
+    const detailsMarkup = details ? `<div id="${escapeAttribute(detailsId)}" class="tool-activity-detail-panel" ${expanded ? "" : "hidden"}>${details}</div>` : "";
+    return `<div class="tool-activity-row-wrap ${expanded ? "expanded" : ""} ${preview ? "tool-activity-row-wrap-preview" : ""}" data-tool-activity-item-id="${escapeAttribute(itemId)}">${buttonMarkup}${detailsMarkup}</div>`;
 }
 
 function renderToolActivityDoneRow() {
-    return `
-        <div class="tool-activity-row tool-activity-row-done">
-            <span class="tool-activity-icon-wrap" aria-hidden="true">
-                <svg class="tool-activity-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">${getToolActivityIcon("done")}</svg>
-            </span>
-            <div class="tool-activity-row-body">
-                <div class="tool-activity-label">Done</div>
-            </div>
-        </div>
-    `;
+    return `<div class="tool-activity-row tool-activity-row-done"><span class="tool-activity-icon-wrap" aria-hidden="true"><svg class="tool-activity-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">${getToolActivityIcon("done")}</svg></span><div class="tool-activity-row-body"><div class="tool-activity-label">Done</div></div></div>`;
 }
 
 function isToolActivityThinkingItem(item = {}) {
@@ -788,7 +731,7 @@ function renderToolActivity(container, options = {}) {
 
     const timeline = createToolActivityTimeline(items);
     const lastToolSegmentIndex = getLastToolActivitySegmentIndex(timeline);
-    const timelineMarkup = timeline.map((segment, segmentIndex) => {
+    const timelineMarkup = (timeline.map((segment, segmentIndex) => {
         if (segment.type === "message") {
             return renderToolActivityMessage(segment.item);
         }
@@ -803,7 +746,7 @@ function renderToolActivity(container, options = {}) {
             panelId,
             openItemIds
         });
-    }).join("") || `<div class="tool-activity-empty">Preparing tools...</div>`;
+    }).map(markup => String(markup || "").trim()).join("") || `<div class="tool-activity-empty">Preparing tools...</div>`).trim();
 
     container._faunaToolActivityState = {
         title,
@@ -817,10 +760,7 @@ function renderToolActivity(container, options = {}) {
         responseBusy
     };
 
-    container.innerHTML = `
-        ${timelineMarkup}
-        ${responseHtml ? `<div class="tool-activity-response ${responseBusy ? "typewriter-active" : ""}">${responseHtml}</div>` : ""}
-    `;
+    container.innerHTML = `${timelineMarkup}${responseHtml ? `<div class="tool-activity-response ${responseBusy ? "typewriter-active" : ""}">${responseHtml}</div>` : ""}`;
     scrollChatToBottom();
 }
 

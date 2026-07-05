@@ -882,6 +882,7 @@ function setSpeechRecognitionState(recording, { keepVoiceChatActive = isOpenAiVo
             voiceButton.setAttribute("aria-label", idleLabel);
         }
     }
+    syncProjectPageChatVoiceButton();
 }
 
 function getBrowserSpeechRecognitionConstructor() {
@@ -941,6 +942,19 @@ function updateVoiceButtonAvailability() {
     } else {
         voiceButton.dataset.tooltip = tooltip || "Voice input is not supported in this browser";
         voiceButton.setAttribute("aria-label", voiceButton.dataset.tooltip);
+    }
+    syncProjectPageChatVoiceButton();
+}
+
+function syncProjectPageChatVoiceButton() {
+    if (!projectPageChatVoiceButton || !voiceButton) return;
+    projectPageChatVoiceButton.disabled = voiceButton.disabled;
+    projectPageChatVoiceButton.classList.toggle("recording", voiceButton.classList.contains("recording"));
+    projectPageChatVoiceButton.setAttribute("aria-busy", voiceButton.getAttribute("aria-busy") || "false");
+    projectPageChatVoiceButton.setAttribute("aria-label", voiceButton.getAttribute("aria-label") || "Voice Input");
+    if (voiceButton.dataset.tooltip) projectPageChatVoiceButton.dataset.tooltip = voiceButton.dataset.tooltip;
+    if (projectPageChatVoiceBtnIcon && voiceBtnIcon) {
+        projectPageChatVoiceBtnIcon.innerHTML = voiceBtnIcon.innerHTML;
     }
 }
 

@@ -174,7 +174,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260705-chat-tool-ui");
+        await import("./script.js?v=20260705-side-chat-composer-full");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));

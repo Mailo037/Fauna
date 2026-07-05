@@ -1289,6 +1289,18 @@ modelSwitcher = createModelSwitcher({
     onReasoningSelect: setOpenAiReasoningMode,
     onSelect: setActiveModel
 });
+if (projectPageChatModelSwitcherHost) {
+    projectPageChatModelSwitcher = createModelSwitcher({
+        host: projectPageChatModelSwitcherHost,
+        models: getLocalModelSwitcherOptions(),
+        activeModel: OLLAMA_MODEL,
+        reasoningModes: isOpenAiProvider() ? getOpenAiReasoningOptionsForModel(getOpenAiChatModel()) : [],
+        activeReasoning: isOpenAiProvider() ? getOpenAiReasoningMode(getOpenAiChatModel()) : "",
+        onReasoningSelect: setOpenAiReasoningMode,
+        onSelect: setActiveModel,
+        idPrefix: "projectPageChat"
+    });
+}
 updateModelSwitcherForProvider();
 refreshOpenRouterCapabilities();
 
@@ -1373,21 +1385,21 @@ chat.addEventListener("click", (e) => {
     if (toolActivityToggle) {
         const bubble = toolActivityToggle.closest(".tool-activity-bubble");
         const state = bubble?._faunaToolActivityState;
-        if (bubble && state) {
-            renderToolActivity(bubble, {
-                ...state,
-                collapsed: !state.collapsed
-            });
-            bubble.querySelector("[data-tool-activity-toggle]")?.focus();
+        const card = toolActivityToggle.closest(".tool-activity-card");
+        const nextCollapsed = toolActivityToggle.getAttribute("aria-expanded") === "true";
+        if (typeof setToolActivityCardCollapsed === "function") {
+            setToolActivityCardCollapsed(card, nextCollapsed);
         } else {
-            const card = toolActivityToggle.closest(".tool-activity-card");
             const list = card?.querySelector(".tool-activity-list");
-            const nextCollapsed = toolActivityToggle.getAttribute("aria-expanded") === "true";
             toolActivityToggle.setAttribute("aria-expanded", nextCollapsed ? "false" : "true");
             card?.classList.toggle("collapsed", nextCollapsed);
             card?.classList.toggle("expanded", !nextCollapsed);
             if (list) list.hidden = nextCollapsed;
         }
+        if (state) {
+            state.collapsed = !bubble.querySelector(".tool-activity-card.expanded .tool-activity-list:not([hidden])");
+        }
+        toolActivityToggle.focus();
         return;
     }
 
@@ -1396,30 +1408,36 @@ chat.addEventListener("click", (e) => {
         const bubble = toolActivityRowToggle.closest(".tool-activity-bubble");
         const state = bubble?._faunaToolActivityState;
         const itemId = toolActivityRowToggle.dataset.toolActivityItemId || "";
+        const card = toolActivityRowToggle.closest(".tool-activity-card");
+        if (card?.classList.contains("collapsed")) {
+            if (typeof setToolActivityCardCollapsed === "function") {
+                setToolActivityCardCollapsed(card, false);
+            } else {
+                card.classList.remove("collapsed");
+                card.classList.add("expanded");
+                const list = card.querySelector(".tool-activity-list");
+                const toggle = card.querySelector("[data-tool-activity-toggle]");
+                if (list) list.hidden = false;
+                toggle?.setAttribute("aria-expanded", "true");
+            }
+        }
+        const controls = toolActivityRowToggle.getAttribute("aria-controls");
+        const details = controls ? document.getElementById(controls) : null;
+        const isOpen = toolActivityRowToggle.getAttribute("aria-expanded") === "true";
+        toolActivityRowToggle.setAttribute("aria-expanded", isOpen ? "false" : "true");
+        toolActivityRowToggle.closest(".tool-activity-row-wrap")?.classList.toggle("expanded", !isOpen);
+        if (details) details.hidden = isOpen;
         if (bubble && state && itemId) {
             const openItemIds = new Set(Array.isArray(state.openItemIds) ? state.openItemIds : []);
-            const isOpen = toolActivityRowToggle.getAttribute("aria-expanded") === "true";
             if (isOpen) {
                 openItemIds.delete(itemId);
             } else {
                 openItemIds.add(itemId);
             }
-            renderToolActivity(bubble, {
-                ...state,
-                collapsed: false,
-                openItemIds: Array.from(openItemIds)
-            });
-            const nextFocus = Array.from(bubble.querySelectorAll("[data-tool-activity-row-toggle]"))
-                .find(button => button.dataset.toolActivityItemId === itemId);
-            nextFocus?.focus();
-        } else {
-            const controls = toolActivityRowToggle.getAttribute("aria-controls");
-            const details = controls ? document.getElementById(controls) : null;
-            const isOpen = toolActivityRowToggle.getAttribute("aria-expanded") === "true";
-            toolActivityRowToggle.setAttribute("aria-expanded", isOpen ? "false" : "true");
-            toolActivityRowToggle.closest(".tool-activity-row-wrap")?.classList.toggle("expanded", !isOpen);
-            if (details) details.hidden = isOpen;
+            state.openItemIds = Array.from(openItemIds);
+            state.collapsed = !bubble.querySelector(".tool-activity-card.expanded .tool-activity-list:not([hidden])");
         }
+        toolActivityRowToggle.focus();
         return;
     }
 
@@ -1771,10 +1789,14 @@ async function attachSelectedLibraryItems() {
     let added = 0;
     let fallbackCount = 0;
     let failed = 0;
+    const attachmentTarget = libraryPickerAttachmentTarget;
+    const addFileToTarget = attachmentTarget === "projectPageChat"
+        ? addProjectPageChatAttachedFile
+        : addAttachedFile;
     for (const item of selectedItems) {
         try {
             const result = await createAttachmentFileFromLibraryItem(item);
-            if (addAttachedFile(result.file)) {
+            if (addFileToTarget(result.file)) {
                 added += 1;
                 if (result.fallback) fallbackCount += 1;
             }
@@ -1786,7 +1808,11 @@ async function attachSelectedLibraryItems() {
 
     updateTokenDisplay();
     closeLibraryPickerModal();
-    focusComposerInput({ force: true });
+    if (attachmentTarget === "projectPageChat") {
+        projectPageChatInput?.focus?.({ preventScroll: true });
+    } else {
+        focusComposerInput({ force: true });
+    }
 
     if (added > 0) {
         const suffix = fallbackCount > 0 ? ` ${fallbackCount} attached as references.` : "";
@@ -2016,6 +2042,56 @@ function getGenerationRecordForSession(sessionId = activeSessionId) {
     return sessionId ? activeGenerationRecords.get(sessionId) || null : null;
 }
 
+function findVisibleGenerationBubble() {
+    if (!chat) return null;
+    return chat.querySelector([
+        ".message-node.output-node:not([data-history-index]) .bubble[aria-busy=\"true\"]",
+        ".message-node.output-node:not([data-history-index]) .tool-activity-bubble",
+        ".message-node.output-node:not([data-history-index]) .thinking-label"
+    ].join(", "))?.closest(".bubble") || null;
+}
+
+function isLiveGenerationPlaceholderNode(node) {
+    return node instanceof HTMLElement
+        && node.matches(".message-node.output-node[data-live-generation-placeholder=\"true\"]");
+}
+
+function removeLiveGenerationPlaceholders(sessionId = activeSessionId) {
+    if (!sessionId) return;
+    const session = typeof getChatSessionById === "function" ? getChatSessionById(sessionId) : null;
+    if (session && Array.isArray(session.domNodes)) {
+        session.domNodes = session.domNodes.filter(node => !isLiveGenerationPlaceholderNode(node));
+    }
+    if (session?.chatHtml?.includes("data-live-generation-placeholder")) {
+        const host = document.createElement("div");
+        host.innerHTML = session.chatHtml;
+        host.querySelectorAll(".message-node.output-node[data-live-generation-placeholder=\"true\"]").forEach(node => node.remove());
+        session.chatHtml = sanitizeChatHtmlMediaSources(host.innerHTML || "");
+    }
+    if (sessionId !== activeSessionId || !chat) return;
+    chat.querySelectorAll(".message-node.output-node[data-live-generation-placeholder=\"true\"]").forEach(node => node.remove());
+    if (!activeChatHasContent?.()) {
+        chat.style.display = "none";
+        if (welcome) welcome.style.display = "flex";
+    }
+    updateComposerChatContentLayoutState?.();
+}
+
+function ensureVisibleGenerationProgress(sessionId = activeSessionId) {
+    if (!sessionId || sessionId !== activeSessionId || !chat || !isSessionGenerating(sessionId)) return null;
+    const existingBubble = findVisibleGenerationBubble();
+    if (existingBubble) return existingBubble;
+    if (welcome) welcome.style.display = "none";
+    chat.style.display = "block";
+    const bubble = addRenderNode("__thinking__", "output", [], {
+        forceScroll: true,
+        liveGenerationPlaceholder: true
+    });
+    const node = bubble?.closest?.(".message-node.output-node");
+    if (node) node.dataset.liveGenerationPlaceholder = "true";
+    return bubble;
+}
+
 function getGenerationRecordForSignal(signal = null) {
     if (!signal) return null;
     for (const record of activeGenerationRecords.values()) {
@@ -2069,6 +2145,7 @@ function finishChatGeneration(sessionId, controller = null) {
     if (record && (!controller || record.controller === controller)) {
         activeGenerationRecords.delete(sessionId);
     }
+    removeLiveGenerationPlaceholders(sessionId);
     if (wasRunning && !wasAborted) {
         if (!wasVisibleSession) {
             markUnreadGenerationCompletion(sessionId, { notify: false });

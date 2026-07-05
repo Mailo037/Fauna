@@ -1431,22 +1431,29 @@ function updateComposerCapabilityUi() {
     const toolReason = `${modelLabel} cannot call tools. Choose a tool-capable model first.`;
     const readOnlyReason = archived ? "Archived chats are read-only." : "Wait for this chat to finish generating.";
 
-    if (fileInput) {
+    [fileInput, projectPageChatFileInput].forEach(targetFileInput => {
+        if (!targetFileInput) return;
         const accepted = [
             canAttachImages ? "image/*" : "",
             canAttachFiles ? ".pdf,.txt,.md,.js,.py,.json,.csv" : ""
         ].filter(Boolean).join(",");
-        fileInput.setAttribute("accept", accepted);
-    }
+        targetFileInput.setAttribute("accept", accepted);
+    });
 
-    if (uploadButton) {
-        uploadButton.disabled = !canAttach || composerLocked;
-        uploadButton.classList.toggle("composer-control-unavailable", !canAttach);
-        uploadButton.dataset.tooltip = composerLocked ? readOnlyReason : canAttach ? "Attach" : attachmentReason;
-        uploadButton.setAttribute("aria-label", uploadButton.dataset.tooltip);
-    }
+    [uploadButton, projectPageChatUploadButton].forEach(button => {
+        if (!button) return;
+        button.disabled = !canAttach || composerLocked;
+        button.classList.toggle("composer-control-unavailable", !canAttach);
+        button.dataset.tooltip = composerLocked ? readOnlyReason : canAttach ? "Attach" : attachmentReason;
+        button.setAttribute("aria-label", button.dataset.tooltip);
+    });
 
-    [attachmentUploadFileButton, attachmentChooseLibraryButton].forEach(button => {
+    [
+        attachmentUploadFileButton,
+        attachmentChooseLibraryButton,
+        projectPageChatAttachmentUploadFileButton,
+        projectPageChatAttachmentChooseLibraryButton
+    ].forEach(button => {
         if (!button) return;
         button.disabled = !canAttach || composerLocked;
         button.classList.toggle("composer-control-unavailable", !canAttach);
@@ -1455,24 +1462,39 @@ function updateComposerCapabilityUi() {
 
     if (!canAttach || composerLocked) {
         closeAttachmentMenu();
+        if (typeof closeProjectPageChatAttachmentMenu === "function") closeProjectPageChatAttachmentMenu();
     }
 
-    if (toolsBtn) {
-        toolsBtn.disabled = !canUseTools || composerLocked;
-        toolsBtn.classList.toggle("composer-control-unavailable", !canUseTools);
-        toolsBtn.dataset.tooltip = composerLocked ? readOnlyReason : canUseTools ? "Tools" : toolReason;
-        toolsBtn.setAttribute("aria-label", toolsBtn.dataset.tooltip);
-    }
+    [toolsBtn, projectPageChatToolsBtn].forEach(button => {
+        if (!button) return;
+        button.disabled = !canUseTools || composerLocked;
+        button.classList.toggle("composer-control-unavailable", !canUseTools);
+        button.dataset.tooltip = composerLocked ? readOnlyReason : canUseTools ? "Tools" : toolReason;
+        button.setAttribute("aria-label", button.dataset.tooltip);
+    });
 
-    if (toolsDropdown) {
-        toolsDropdown.classList.toggle("composer-tools-unavailable", !canUseTools);
-        if (!canUseTools || composerLocked) toolsDropdown.classList.remove("open");
-    }
+    [toolsDropdown, projectPageChatToolsDropdown].forEach(dropdown => {
+        if (!dropdown) return;
+        dropdown.classList.toggle("composer-tools-unavailable", !canUseTools);
+        if (!canUseTools || composerLocked) dropdown.classList.remove("open");
+    });
 
-    [toggleSandbox, toggleWebSearch, toggleGrounding, toggleGoogleGrounding, toggleApproxLocation, toggleWorkspaceBridge].forEach(control => {
+    [
+        toggleSandbox,
+        toggleWebSearch,
+        toggleGrounding,
+        toggleGoogleGrounding,
+        toggleApproxLocation,
+        toggleWorkspaceBridge,
+        projectPageChatToggleSandbox,
+        projectPageChatToggleGoogleGrounding,
+        projectPageChatToggleApproxLocation,
+        projectPageChatToggleWorkspaceBridge
+    ].forEach(control => {
         if (!control) return;
         control.disabled = !canUseTools || composerLocked;
     });
+    if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
 }
 
 function setSettingsControlUnavailable(control, unavailable, reason = "") {
@@ -1941,10 +1963,12 @@ function setOpenAiReasoningMode(mode, { persist = true } = {}) {
     if (!option) {
         if (persist) safeLocalStorageRemove(OPENAI_REASONING_MODE_STORAGE_KEY);
         modelSwitcher?.setActiveReasoning?.("");
+        projectPageChatModelSwitcher?.setActiveReasoning?.("");
         return;
     }
     if (persist) safeLocalStorageSet(OPENAI_REASONING_MODE_STORAGE_KEY, option.id);
     modelSwitcher?.setActiveReasoning?.(option.id);
+    projectPageChatModelSwitcher?.setActiveReasoning?.(option.id);
 }
 
 function getReasoningLabelForMessage(model = getCurrentModelLabel()) {
