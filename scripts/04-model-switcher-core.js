@@ -304,6 +304,36 @@ const KEYBOARD_SHORTCUT_ACTIONS = [
         title: "Check updates",
         description: "Run a Fauna update check.",
         defaultShortcut: "Ctrl+Shift+U"
+    },
+    {
+        id: "openWorkspaceInspect",
+        title: "Workspace inspect",
+        description: "Open the workspace inspect tab.",
+        defaultShortcut: "Ctrl+Shift+G"
+    },
+    {
+        id: "openWorkspaceTerminal",
+        title: "Workspace terminal",
+        description: "Open a workspace terminal tab.",
+        defaultShortcut: "Ctrl+Shift+E"
+    },
+    {
+        id: "openWorkspaceBrowser",
+        title: "Workspace browser",
+        description: "Open the workspace browser tab.",
+        defaultShortcut: "Ctrl+T"
+    },
+    {
+        id: "openWorkspaceFiles",
+        title: "Workspace files",
+        description: "Open a workspace files tab.",
+        defaultShortcut: "Ctrl+P"
+    },
+    {
+        id: "openWorkspaceSideChat",
+        title: "Workspace side chat",
+        description: "Open a workspace side chat tab.",
+        defaultShortcut: "Ctrl+Alt+S"
     }
 ];
 const IMAGE_TOOL_NAME_ALIASES = {
@@ -836,6 +866,15 @@ activeContextCompactionThresholdPercent = normalizeContextCompactionThresholdPer
 isContextCompactionReviewEnabled = safeLocalStorageGet(CONTEXT_COMPACTION_REVIEW_STORAGE_KEY) === "true";
 activeContextCompactionRotationLimit = normalizeContextCompactionRotationLimit(safeLocalStorageGet(CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY));
 isAiCachingEnabled = safeLocalStorageGet(AI_CACHING_STORAGE_KEY) === "true";
+isPotatoModeEnabled = readStoredPreferenceBoolean(POTATO_MODE_ENABLED_STORAGE_KEY, false);
+isPotatoParallelChatsEnabled = readStoredPreferenceBoolean(POTATO_PARALLEL_CHATS_STORAGE_KEY, !isPotatoModeEnabled);
+isPotatoAutoWebContextEnabled = readStoredPreferenceBoolean(POTATO_AUTO_WEB_CONTEXT_STORAGE_KEY, !isPotatoModeEnabled);
+isPotatoAutoWorkspaceContextEnabled = readStoredPreferenceBoolean(POTATO_AUTO_WORKSPACE_CONTEXT_STORAGE_KEY, !isPotatoModeEnabled);
+isPotatoMediaGenerationEnabled = readStoredPreferenceBoolean(POTATO_MEDIA_GENERATION_STORAGE_KEY, !isPotatoModeEnabled);
+isPotatoShortOutputsEnabled = readStoredPreferenceBoolean(POTATO_SHORT_OUTPUTS_STORAGE_KEY, isPotatoModeEnabled);
+isPotatoTrimHistoryEnabled = readStoredPreferenceBoolean(POTATO_TRIM_HISTORY_STORAGE_KEY, isPotatoModeEnabled);
+isPotatoReduceMotionEnabled = readStoredPreferenceBoolean(POTATO_REDUCE_MOTION_STORAGE_KEY, isPotatoModeEnabled);
+applyPotatoDocumentMode();
 activeVoiceSpeed = normalizeStoredVoiceSpeed(safeLocalStorageGet(VOICE_SPEED_STORAGE_KEY));
 isVoiceReplyEnabled = safeLocalStorageGet(VOICE_REPLY_ENABLED_STORAGE_KEY) !== "false";
 selectedVoiceMicDeviceId = safeLocalStorageGet(VOICE_MIC_DEVICE_STORAGE_KEY) || "default";
@@ -856,6 +895,49 @@ function createSessionId() {
 
 function normalizeAiProvider(provider) {
     return provider === AI_PROVIDER_OPENAI ? AI_PROVIDER_OPENAI : AI_PROVIDER_LOCAL;
+}
+
+function readStoredPreferenceBoolean(key, fallback = false) {
+    const value = safeLocalStorageGet(key);
+    if (value === "true") return true;
+    if (value === "false") return false;
+    return Boolean(fallback);
+}
+
+function persistPreferenceBoolean(key, value) {
+    safeLocalStorageSet(key, value ? "true" : "false");
+}
+
+function applyPotatoDocumentMode() {
+    document.documentElement?.toggleAttribute("data-potato-mode", isPotatoModeEnabled);
+    document.documentElement?.toggleAttribute("data-potato-reduced-motion", isPotatoReduceMotionEnabled);
+}
+
+function getEffectiveMaxOutputTokens() {
+    if (!isPotatoShortOutputsEnabled) return activeMaxOutputTokens;
+    const configured = activeMaxOutputTokens > 0 ? activeMaxOutputTokens : POTATO_SHORT_OUTPUT_MAX_TOKENS;
+    return Math.min(configured, POTATO_SHORT_OUTPUT_MAX_TOKENS);
+}
+
+function getMaxStoredChatSessions() {
+    return isPotatoTrimHistoryEnabled ? POTATO_MAX_CHAT_SESSIONS : MAX_CHAT_SESSIONS;
+}
+
+function getPreferredChatStorageProfile() {
+    return isPotatoTrimHistoryEnabled ? CHAT_STORAGE_PROFILE_HISTORY_ONLY : chatStorageProfile;
+}
+
+function getActiveBackgroundGenerationCount(sessionId = activeSessionId) {
+    let count = 0;
+    activeGenerationRecords.forEach((record, recordSessionId) => {
+        if (recordSessionId !== sessionId && !record?.controller?.signal?.aborted) count += 1;
+    });
+    return count;
+}
+
+function shouldBlockNewGenerationForPotatoMode(sessionId = activeSessionId) {
+    if (isPotatoParallelChatsEnabled) return false;
+    return getActiveBackgroundGenerationCount(sessionId) > 0;
 }
 
 function normalizeAiTemperature(value) {
@@ -1460,7 +1542,8 @@ function updateAiCallSettingsUi() {
     );
 
     if (maxOutputTokensInput) {
-        maxOutputTokensInput.value = String(activeMaxOutputTokens);
+        maxOutputTokensInput.max = isPotatoShortOutputsEnabled ? String(POTATO_SHORT_OUTPUT_MAX_TOKENS) : "128000";
+        maxOutputTokensInput.value = String(getEffectiveMaxOutputTokens());
         setSettingsControlUnavailable(maxOutputTokensInput, !maxTokensSupported, getActiveModelCapabilityReason("max output tokens"));
     }
     if (topPInput) {
@@ -1477,7 +1560,9 @@ function updateAiCallSettingsUi() {
     }
     setSettingStatus(
         aiOutputLimitsStatus,
-        isOpenAiProvider()
+        isPotatoShortOutputsEnabled
+            ? `Potato PC clamps supported replies to ${POTATO_SHORT_OUTPUT_MAX_TOKENS.toLocaleString()} tokens.`
+            : isOpenAiProvider()
             ? "OpenAI uses max output tokens and supported sampling controls."
             : "Ollama uses num_predict, top_p, and top_k.",
         !(maxTokensSupported || topPSupported || topKSupported)
@@ -1546,11 +1631,12 @@ function getActiveChatRequestOptions() {
         options.temperature = activeTemperature;
     }
 
-    if (activeModelSupportsMaxOutputTokens() && activeMaxOutputTokens > 0) {
+    const maxOutputTokens = getEffectiveMaxOutputTokens();
+    if (activeModelSupportsMaxOutputTokens() && maxOutputTokens > 0) {
         if (isOpenAiProvider()) {
-            options.max_output_tokens = activeMaxOutputTokens;
+            options.max_output_tokens = maxOutputTokens;
         } else {
-            options.num_predict = activeMaxOutputTokens;
+            options.num_predict = maxOutputTokens;
         }
     }
 

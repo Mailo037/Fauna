@@ -175,7 +175,9 @@ async function generateImageIntoBubble(container, prompt, {
     return {
         imageUrl: generatedImageUrl,
         prompt: effectivePrompt,
-        options: imageOptions
+        options: imageOptions,
+        label,
+        sensitive: isSensitiveImagePrompt(effectivePrompt)
     };
 }
 
@@ -271,7 +273,15 @@ async function renderImageGenerationAttempt(aiBubble, prompt, signal = null, opt
         const assistantIndex = pushGenerationHistoryMessage(options, {
             role: "assistant",
             content: historyContent,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            faunaGeneratedMedia: [
+                createGeneratedImageMediaItem({
+                    src: generated.imageUrl,
+                    prompt: generated.prompt,
+                    label: "Generated image",
+                    sensitive: generated.sensitive
+                })
+            ].filter(Boolean)
         });
         setupAssistantActions(aiBubble.parentElement, getGeneratedMediaCopyText(generated.imageUrl, historyContent), {
             messageIndex: assistantIndex,
@@ -284,6 +294,9 @@ async function renderImageGenerationAttempt(aiBubble, prompt, signal = null, opt
         renderErrorCard(aiBubble, e, {
             title: e.name === "AbortError" ? "Image generation stopped" : "Image generation failed",
             message: getImageGenerationFailureMessage(e),
+            sessionId: options.sessionId || getGenerationSessionIdForSignal(signal),
+            history: getGenerationHistory(options),
+            getTokenTotal: options.getTokenTotal,
             retryLabel: "Retry generation",
             onRetry: () => retryImageGenerationInBubble(aiBubble, prompt, options)
         });
@@ -401,7 +414,15 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
             const assistantIndex = pushGenerationHistoryMessage(options, {
                 role: "assistant",
                 content: historyContent,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                faunaGeneratedMedia: [
+                    createGeneratedImageMediaItem({
+                        src: imageUrl,
+                        prompt: requestText,
+                        label: "Generated edit",
+                        sensitive: isSensitiveImagePrompt(requestText)
+                    })
+                ].filter(Boolean)
             });
             setupAssistantActions(aiBubble.parentElement, getGeneratedMediaCopyText(imageUrl, historyContent), {
                 messageIndex: assistantIndex,
@@ -436,7 +457,15 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
         const assistantIndex = pushGenerationHistoryMessage(options, {
             role: "assistant",
             content: historyContent,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            faunaGeneratedMedia: [
+                createGeneratedImageMediaItem({
+                    src: imageUrl,
+                    prompt: editPrompt,
+                    label: "Generated edit",
+                    sensitive: isSensitiveImagePrompt(`${requestText} ${editPrompt}`)
+                })
+            ].filter(Boolean)
         });
         setupAssistantActions(aiBubble.parentElement, getGeneratedMediaCopyText(imageUrl, historyContent), {
             messageIndex: assistantIndex,
@@ -449,6 +478,9 @@ async function renderImageEditAttempt(aiBubble, requestText, imageFiles, signal 
         renderErrorCard(aiBubble, e, {
             title: e.name === "AbortError" ? "Image edit stopped" : "Image edit failed",
             message: getImageEditFailureMessage(e),
+            sessionId: options.sessionId || getGenerationSessionIdForSignal(signal),
+            history: getGenerationHistory(options),
+            getTokenTotal: options.getTokenTotal,
             retryLabel: "Retry edit",
             onRetry: () => retryImageEditInBubble(aiBubble, requestText, imageFiles)
         });
@@ -559,7 +591,15 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
         const assistantIndex = pushGenerationHistoryMessage(options, {
             role: "assistant",
             content: `Generated Wan video clip for: ${prompt}\n\n${videoUrl}`,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            faunaGeneratedMedia: [
+                createGeneratedVideoMediaItem({
+                    src: videoUrl,
+                    prompt,
+                    label: videoResult.label || "Wan generated video",
+                    extension: videoResult.extension || "mp4"
+                })
+            ].filter(Boolean)
         });
         setupAssistantActions(aiBubble.parentElement, videoUrl, {
             messageIndex: assistantIndex,
@@ -570,7 +610,10 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
         if (e.name === "AbortError") {
             renderErrorCard(aiBubble, e, {
                 title: "Video generation stopped",
-                message: "Your video prompt is safe to edit and run again."
+                message: "Your video prompt is safe to edit and run again.",
+                sessionId: options.sessionId || getGenerationSessionIdForSignal(signal),
+                history: getGenerationHistory(options),
+                getTokenTotal: options.getTokenTotal
             });
             return;
         }
@@ -601,7 +644,15 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
             const assistantIndex = pushGenerationHistoryMessage(options, {
                 role: "assistant",
                 content: `Wan was unavailable, so Fauna generated a fallback 10 second animated clip for: ${prompt}\n\n${videoUrl}`,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                faunaGeneratedMedia: [
+                    createGeneratedVideoMediaItem({
+                        src: videoUrl,
+                        prompt,
+                        label: "Fallback animated clip",
+                        extension: videoResult.extension || "mp4"
+                    })
+                ].filter(Boolean)
             });
             setupAssistantActions(aiBubble.parentElement, videoUrl, {
                 messageIndex: assistantIndex,
@@ -613,7 +664,10 @@ async function processVideoGeneration(prompt, currentFiles, signal = null, optio
                 title: fallbackError.name === "AbortError" ? "Video generation stopped" : "Video generation failed",
                 message: fallbackError.name === "AbortError"
                     ? "Your video prompt is safe to edit and run again."
-                    : "Fauna could not complete the Wan request or the local fallback clip."
+                    : "Fauna could not complete the Wan request or the local fallback clip.",
+                sessionId: options.sessionId || getGenerationSessionIdForSignal(signal),
+                history: getGenerationHistory(options),
+                getTokenTotal: options.getTokenTotal
             });
         }
     }

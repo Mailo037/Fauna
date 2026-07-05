@@ -648,6 +648,109 @@ function renderToolActivityDoneRow() {
     `;
 }
 
+function isToolActivityThinkingItem(item = {}) {
+    return item?.kind === "thinking" || String(item?.tool || "").trim().toLowerCase() === "thinking";
+}
+
+function getToolActivityThinkingText(item = {}) {
+    return item.input || item.detail || item.label || "Thinking through next steps.";
+}
+
+function renderToolActivityMessage(item = {}, extraClass = "") {
+    const thought = getToolActivityThinkingText(item);
+    const thoughtHtml = typeof renderMarkdown === "function"
+        ? renderMarkdown(thought)
+        : `<p>${escapeHtml(thought)}</p>`;
+
+    return `<div class="tool-activity-message ${extraClass}" data-tool-kind="thinking">${thoughtHtml}</div>`;
+}
+
+function createToolActivityTimeline(items = []) {
+    const segments = [];
+    let pendingToolEntries = [];
+
+    const flushToolEntries = () => {
+        if (pendingToolEntries.length === 0) return;
+        segments.push({
+            type: "tools",
+            entries: pendingToolEntries
+        });
+        pendingToolEntries = [];
+    };
+
+    items.forEach((item, index) => {
+        if (isToolActivityThinkingItem(item)) {
+            flushToolEntries();
+            segments.push({ type: "message", item, index });
+            return;
+        }
+        pendingToolEntries.push({ item, index });
+    });
+    flushToolEntries();
+
+    return segments;
+}
+
+function getLastToolActivitySegmentIndex(segments = []) {
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+        if (segments[index]?.type === "tools") return index;
+    }
+    return -1;
+}
+
+function renderToolActivityCardSegment({
+    entries = [],
+    segmentIndex = 0,
+    lastToolSegmentIndex = -1,
+    title = "Thinking about",
+    summaryOverride = "",
+    isRunning = false,
+    collapsed = true,
+    panelId = "",
+    openItemIds = new Set()
+} = {}) {
+    const segmentItems = entries.map(entry => entry.item);
+    const segmentPanelId = segmentIndex === 0 ? panelId : `${panelId}-${segmentIndex}`;
+    const segmentIsRunning = isRunning && segmentIndex === lastToolSegmentIndex;
+    const segmentStatusClass = segmentIsRunning ? "running" : "done";
+    const segmentSummary = (summaryOverride && entries.length === 1)
+        ? summaryOverride
+        : getToolActivitySummary(segmentItems, title);
+    const previewEntries = segmentIsRunning && collapsed ? entries.slice(-2) : [];
+    const previewRows = previewEntries
+        .map(entry => renderToolActivityRow(entry.item, entry.index, "tool-activity-row-preview", {
+            showDetails: false,
+            panelId: segmentPanelId,
+            preview: true
+        }))
+        .join("");
+    const rows = [
+        ...entries.map(entry => {
+            const itemId = getToolActivityItemId(entry.item, entry.index, segmentPanelId);
+            return renderToolActivityRow(entry.item, entry.index, "", {
+                isOpen: openItemIds.has(itemId),
+                panelId: segmentPanelId
+            });
+        }),
+        !segmentIsRunning ? renderToolActivityDoneRow() : ""
+    ].filter(Boolean).join("") || `<div class="tool-activity-empty">Preparing tools...</div>`;
+
+    return `
+        <div class="tool-activity-card ${collapsed ? "collapsed" : "expanded"} ${segmentStatusClass}">
+            <button class="tool-activity-toggle" type="button" data-tool-activity-toggle aria-expanded="${collapsed ? "false" : "true"}" aria-controls="${escapeAttribute(segmentPanelId)}">
+                <svg class="tool-activity-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m9 6 6 6-6 6"></path>
+                </svg>
+                <span>${escapeHtml(segmentSummary)}</span>
+            </button>
+            ${previewRows ? `<div class="tool-activity-live-preview ${previewEntries.length > 1 ? "has-multiple" : "has-single"}" aria-label="Recent tool activity">${previewRows}</div>` : ""}
+            <div id="${escapeAttribute(segmentPanelId)}" class="tool-activity-list ${entries.length > 1 || !segmentIsRunning ? "has-multiple" : "has-single"}" ${collapsed ? "hidden" : ""}>
+                ${rows}
+            </div>
+        </div>
+    `;
+}
+
 function renderToolActivity(container, options = {}) {
     if (!container) return;
     const previousState = container._faunaToolActivityState || {};
@@ -683,26 +786,24 @@ function renderToolActivity(container, options = {}) {
         container.removeAttribute("aria-busy");
     }
 
-    const summary = summaryOverride || getToolActivitySummary(items, title);
-    const previewItems = isRunning && collapsed ? items.slice(-2) : [];
-    const previewStartIndex = Math.max(0, items.length - previewItems.length);
-    const previewRows = previewItems
-        .map((item, previewIndex) => renderToolActivityRow(item, previewStartIndex + previewIndex, "tool-activity-row-preview", {
-            showDetails: false,
+    const timeline = createToolActivityTimeline(items);
+    const lastToolSegmentIndex = getLastToolActivitySegmentIndex(timeline);
+    const timelineMarkup = timeline.map((segment, segmentIndex) => {
+        if (segment.type === "message") {
+            return renderToolActivityMessage(segment.item);
+        }
+        return renderToolActivityCardSegment({
+            entries: segment.entries,
+            segmentIndex,
+            lastToolSegmentIndex,
+            title,
+            summaryOverride,
+            isRunning,
+            collapsed,
             panelId,
-            preview: true
-        }))
-        .join("");
-    const rows = [
-        ...items.map((item, index) => {
-            const itemId = getToolActivityItemId(item, index, panelId);
-            return renderToolActivityRow(item, index, "", {
-                isOpen: openItemIds.has(itemId),
-                panelId
-            });
-        }),
-        !isRunning ? renderToolActivityDoneRow() : ""
-    ].filter(Boolean).join("") || `<div class="tool-activity-empty">Preparing tools...</div>`;
+            openItemIds
+        });
+    }).join("") || `<div class="tool-activity-empty">Preparing tools...</div>`;
 
     container._faunaToolActivityState = {
         title,
@@ -717,18 +818,7 @@ function renderToolActivity(container, options = {}) {
     };
 
     container.innerHTML = `
-        <div class="tool-activity-card ${collapsed ? "collapsed" : "expanded"} ${isRunning ? "running" : "done"}">
-            <button class="tool-activity-toggle" type="button" data-tool-activity-toggle aria-expanded="${collapsed ? "false" : "true"}" aria-controls="${panelId}">
-                <svg class="tool-activity-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="m9 6 6 6-6 6"></path>
-                </svg>
-                <span>${escapeHtml(summary)}</span>
-            </button>
-            ${previewRows ? `<div class="tool-activity-live-preview ${previewItems.length > 1 ? "has-multiple" : "has-single"}" aria-label="Recent tool activity">${previewRows}</div>` : ""}
-            <div id="${panelId}" class="tool-activity-list ${items.length > 1 || !isRunning ? "has-multiple" : "has-single"}" ${collapsed ? "hidden" : ""}>
-                ${rows || `<div class="tool-activity-empty">Preparing tools...</div>`}
-            </div>
-        </div>
+        ${timelineMarkup}
         ${responseHtml ? `<div class="tool-activity-response ${responseBusy ? "typewriter-active" : ""}">${responseHtml}</div>` : ""}
     `;
     scrollChatToBottom();

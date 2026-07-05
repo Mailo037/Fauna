@@ -422,6 +422,7 @@ function openSettingsModal() {
     if (!settingsModal) return;
     toolsDropdown?.classList.remove("open");
     updatePersonaSettingsUi();
+    updatePotatoSettingsUi();
     void updateAppInfoPane();
     renderKeyboardShortcutSettings();
     updateShortcutBadges();
@@ -543,6 +544,9 @@ function setSettingsPane(paneName = "general") {
     if (normalized === "task-models") {
         refreshLocalTaskModelsPane();
     }
+    if (normalized === "potato") {
+        updatePotatoSettingsUi();
+    }
     scheduleAnimatedSegmentIndicators();
 }
 
@@ -552,6 +556,204 @@ function readStoredBoolean(key, fallback) {
     if (value === "false") return false;
     return fallback;
 }
+
+function persistCoreAiCallSettings() {
+    safeLocalStorageSet(AI_STREAMING_ENABLED_STORAGE_KEY, isAiStreamingEnabled ? "true" : "false");
+    safeLocalStorageSet(AI_TEMPERATURE_STORAGE_KEY, String(activeTemperature));
+    safeLocalStorageSet(AI_MAX_OUTPUT_TOKENS_STORAGE_KEY, String(activeMaxOutputTokens));
+    safeLocalStorageSet(AI_TOP_P_STORAGE_KEY, String(activeTopP));
+    safeLocalStorageSet(OLLAMA_TOP_K_STORAGE_KEY, String(activeOllamaTopK));
+    safeLocalStorageSet(OPENAI_VERBOSITY_STORAGE_KEY, activeOpenAiVerbosity);
+    safeLocalStorageSet(AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY, String(activeAgentMaxStepsAtATime));
+    safeLocalStorageSet(AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY, String(activeAgentMaxStepsPerRun));
+    safeLocalStorageSet(CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY, String(activeContextCompactionThresholdPercent));
+    safeLocalStorageSet(CONTEXT_COMPACTION_REVIEW_STORAGE_KEY, isContextCompactionReviewEnabled ? "true" : "false");
+    safeLocalStorageSet(CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY, String(activeContextCompactionRotationLimit));
+}
+
+function persistPotatoSettings() {
+    persistPreferenceBoolean(POTATO_MODE_ENABLED_STORAGE_KEY, isPotatoModeEnabled);
+    persistPreferenceBoolean(POTATO_PARALLEL_CHATS_STORAGE_KEY, isPotatoParallelChatsEnabled);
+    persistPreferenceBoolean(POTATO_AUTO_WEB_CONTEXT_STORAGE_KEY, isPotatoAutoWebContextEnabled);
+    persistPreferenceBoolean(POTATO_AUTO_WORKSPACE_CONTEXT_STORAGE_KEY, isPotatoAutoWorkspaceContextEnabled);
+    persistPreferenceBoolean(POTATO_MEDIA_GENERATION_STORAGE_KEY, isPotatoMediaGenerationEnabled);
+    persistPreferenceBoolean(POTATO_SHORT_OUTPUTS_STORAGE_KEY, isPotatoShortOutputsEnabled);
+    persistPreferenceBoolean(POTATO_TRIM_HISTORY_STORAGE_KEY, isPotatoTrimHistoryEnabled);
+    persistPreferenceBoolean(POTATO_REDUCE_MOTION_STORAGE_KEY, isPotatoReduceMotionEnabled);
+}
+
+function updatePotatoSettingsUi() {
+    applyPotatoDocumentMode();
+    if (potatoModeToggle) potatoModeToggle.checked = isPotatoModeEnabled;
+    if (potatoParallelChatsToggle) potatoParallelChatsToggle.checked = isPotatoParallelChatsEnabled;
+    if (potatoAutoWebContextToggle) potatoAutoWebContextToggle.checked = isPotatoAutoWebContextEnabled;
+    if (potatoAutoWorkspaceContextToggle) potatoAutoWorkspaceContextToggle.checked = isPotatoAutoWorkspaceContextEnabled;
+    if (potatoMediaGenerationToggle) potatoMediaGenerationToggle.checked = isPotatoMediaGenerationEnabled;
+    if (potatoVoiceRepliesToggle) potatoVoiceRepliesToggle.checked = isVoiceReplyEnabled;
+    if (potatoApproxLocationToggle) potatoApproxLocationToggle.checked = isApproxLocationEnabled;
+    if (potatoShortOutputsToggle) potatoShortOutputsToggle.checked = isPotatoShortOutputsEnabled;
+    if (potatoTrimHistoryToggle) potatoTrimHistoryToggle.checked = isPotatoTrimHistoryEnabled;
+    if (potatoReduceMotionToggle) potatoReduceMotionToggle.checked = isPotatoReduceMotionEnabled;
+
+    if (potatoModeStatus) {
+        potatoModeStatus.textContent = isPotatoModeEnabled ? "On" : "Off";
+        potatoModeStatus.dataset.state = isPotatoModeEnabled ? "configured" : "missing";
+    }
+    if (potatoModeSummary) {
+        const activeSavings = [
+            !isPotatoParallelChatsEnabled ? "single chat" : "",
+            !isPotatoAutoWebContextEnabled ? "no auto web" : "",
+            !isPotatoAutoWorkspaceContextEnabled ? "no auto workspace" : "",
+            !isPotatoMediaGenerationEnabled ? "media off" : "",
+            isPotatoShortOutputsEnabled ? "short replies" : "",
+            isPotatoTrimHistoryEnabled ? "lighter history" : "",
+            isPotatoReduceMotionEnabled ? "reduced motion" : ""
+        ].filter(Boolean);
+        potatoModeSummary.textContent = activeSavings.length
+            ? `Saving now: ${activeSavings.join(", ")}.`
+            : "Keep Fauna responsive on weaker hardware by cutting background work, network calls, and UI motion.";
+    }
+}
+
+function syncPotatoDependentUi() {
+    applyPotatoDocumentMode();
+    updatePotatoSettingsUi();
+    updateAiCallSettingsUi();
+    updateProviderSettingsUi();
+    updateComposerCapabilityUi();
+    updateVoiceQuickUi();
+    if (toggleGoogleGrounding) toggleGoogleGrounding.checked = isGoogleGroundingEnabled;
+    if (toggleApproxLocation) toggleApproxLocation.checked = isApproxLocationEnabled;
+}
+
+function applyPotatoSavingsPreset({ notify = false } = {}) {
+    isPotatoModeEnabled = true;
+    isPotatoParallelChatsEnabled = false;
+    isPotatoAutoWebContextEnabled = false;
+    isPotatoAutoWorkspaceContextEnabled = false;
+    isPotatoMediaGenerationEnabled = false;
+    isPotatoShortOutputsEnabled = true;
+    isPotatoTrimHistoryEnabled = true;
+    isPotatoReduceMotionEnabled = true;
+    isAiStreamingEnabled = false;
+    isGoogleGroundingEnabled = false;
+    isApproxLocationEnabled = false;
+    activeTemperature = 0.2;
+    activeMaxOutputTokens = POTATO_SHORT_OUTPUT_MAX_TOKENS;
+    activeTopP = 0.8;
+    activeOllamaTopK = 20;
+    activeOpenAiVerbosity = "low";
+    activeAgentMaxStepsAtATime = 1;
+    activeAgentMaxStepsPerRun = 4;
+    activeContextCompactionThresholdPercent = 45;
+    isContextCompactionReviewEnabled = false;
+    activeContextCompactionRotationLimit = 1;
+    setAiCachingEnabled(true, { persist: true });
+    setVoiceReplyEnabled(false, { persist: true });
+    setTypewriterDurationSeconds(0);
+    persistPotatoSettings();
+    persistCoreAiCallSettings();
+    persistChatSessions();
+    syncPotatoDependentUi();
+    if (notify) showToast("Potato PC mode enabled.", "success");
+}
+
+function restorePotatoDefaults({ notify = false } = {}) {
+    isPotatoModeEnabled = false;
+    isPotatoParallelChatsEnabled = true;
+    isPotatoAutoWebContextEnabled = true;
+    isPotatoAutoWorkspaceContextEnabled = true;
+    isPotatoMediaGenerationEnabled = true;
+    isPotatoShortOutputsEnabled = false;
+    isPotatoTrimHistoryEnabled = false;
+    isPotatoReduceMotionEnabled = false;
+    isAiStreamingEnabled = true;
+    isGoogleGroundingEnabled = true;
+    isApproxLocationEnabled = true;
+    activeTemperature = 0.7;
+    activeMaxOutputTokens = 0;
+    activeTopP = 1;
+    activeOllamaTopK = 40;
+    activeOpenAiVerbosity = "medium";
+    activeAgentMaxStepsAtATime = DEFAULT_AGENT_MAX_STEPS_AT_A_TIME;
+    activeAgentMaxStepsPerRun = DEFAULT_AGENT_MAX_STEPS_PER_RUN;
+    activeContextCompactionThresholdPercent = DEFAULT_CONTEXT_COMPACTION_THRESHOLD_PERCENT;
+    isContextCompactionReviewEnabled = false;
+    activeContextCompactionRotationLimit = DEFAULT_CONTEXT_COMPACTION_ROTATION_LIMIT;
+    setAiCachingEnabled(false, { persist: true });
+    setVoiceReplyEnabled(true, { persist: true });
+    setTypewriterDurationSeconds(TYPEWRITER_DEFAULT_DURATION_SECONDS);
+    persistPotatoSettings();
+    persistCoreAiCallSettings();
+    syncPotatoDependentUi();
+    if (notify) showToast("Potato PC defaults restored.", "info");
+}
+
+function setPotatoPreference(key, enabled, { notify = false } = {}) {
+    const value = Boolean(enabled);
+    if (key === "parallel") isPotatoParallelChatsEnabled = value;
+    if (key === "web") isPotatoAutoWebContextEnabled = value;
+    if (key === "workspace") isPotatoAutoWorkspaceContextEnabled = value;
+    if (key === "media") isPotatoMediaGenerationEnabled = value;
+    if (key === "short") {
+        isPotatoShortOutputsEnabled = value;
+        if (value) {
+            activeMaxOutputTokens = Math.min(getEffectiveMaxOutputTokens(), POTATO_SHORT_OUTPUT_MAX_TOKENS);
+            activeOpenAiVerbosity = "low";
+        } else if (activeMaxOutputTokens <= POTATO_SHORT_OUTPUT_MAX_TOKENS) {
+            activeMaxOutputTokens = 0;
+            activeOpenAiVerbosity = "medium";
+        }
+        safeLocalStorageSet(AI_MAX_OUTPUT_TOKENS_STORAGE_KEY, String(activeMaxOutputTokens));
+        safeLocalStorageSet(OPENAI_VERBOSITY_STORAGE_KEY, activeOpenAiVerbosity);
+    }
+    if (key === "trim") {
+        isPotatoTrimHistoryEnabled = value;
+        if (value) persistChatSessions();
+    }
+    if (key === "motion") {
+        isPotatoReduceMotionEnabled = value;
+        if (value) {
+            setTypewriterDurationSeconds(0);
+        } else if (activeTypewriterDurationSeconds === 0) {
+            setTypewriterDurationSeconds(TYPEWRITER_DEFAULT_DURATION_SECONDS);
+        }
+    }
+    persistPotatoSettings();
+    syncPotatoDependentUi();
+    if (notify) showToast("Potato PC setting updated.", "success");
+}
+
+function applyCompactModeUi() {
+    if (isCompactModeEnabled) {
+        document.documentElement.dataset.density = "compact";
+    } else {
+        delete document.documentElement.dataset.density;
+    }
+    if (compactModeToggle) {
+        compactModeToggle.checked = isCompactModeEnabled;
+    }
+    if (compactModeStatus) {
+        compactModeStatus.textContent = isCompactModeEnabled
+            ? "Chat and controls use tighter spacing."
+            : "Use standard spacing across the workspace.";
+    }
+}
+
+function setCompactModeEnabled(enabled, { persist = true, notify = false } = {}) {
+    isCompactModeEnabled = Boolean(enabled);
+    if (persist) {
+        safeLocalStorageSet(UI_COMPACT_MODE_STORAGE_KEY, isCompactModeEnabled ? "true" : "false");
+    }
+    applyCompactModeUi();
+    scheduleComposerSafeAreaUpdate();
+    if (notify) {
+        showToast(isCompactModeEnabled ? "Compact mode enabled." : "Compact mode disabled.", "info");
+    }
+}
+
+isCompactModeEnabled = readStoredBoolean(UI_COMPACT_MODE_STORAGE_KEY, false);
+applyCompactModeUi();
 
 let hasRunOllamaStartupCheck = false;
 let hasShownOllamaStartPrompt = false;
@@ -1801,10 +2003,26 @@ function renderKeyboardShortcutSettings() {
 }
 
 function updateShortcutBadges() {
-    const sendShortcut = getEffectiveKeyboardShortcuts().sendPrompt;
-    if (!sendShortcutBadge) return;
-    sendShortcutBadge.hidden = !sendShortcut;
-    sendShortcutBadge.textContent = formatShortcutText(sendShortcut);
+    const shortcuts = getEffectiveKeyboardShortcuts();
+    const sendShortcut = shortcuts.sendPrompt;
+    if (sendShortcutBadge) {
+        sendShortcutBadge.hidden = !sendShortcut;
+        sendShortcutBadge.textContent = formatShortcutText(sendShortcut);
+    }
+    document.querySelectorAll("[data-shortcut-badge]").forEach(badge => {
+        const actionId = badge.dataset.shortcutBadge;
+        const shortcut = shortcuts[actionId];
+        badge.hidden = !shortcut;
+        badge.textContent = formatShortcutText(shortcut);
+        const actionButton = badge.closest("[data-shortcut-action]");
+        if (actionButton) {
+            if (shortcut) {
+                actionButton.setAttribute("aria-keyshortcuts", getShortcutParts(shortcut).join("+"));
+            } else {
+                actionButton.removeAttribute("aria-keyshortcuts");
+            }
+        }
+    });
 }
 
 function updateShortcutRecorderUi() {
@@ -1965,6 +2183,21 @@ function executeKeyboardShortcutAction(actionId) {
             return true;
         case "checkUpdates":
             void checkFaunaAppUpdate({ manual: true });
+            return true;
+        case "openWorkspaceInspect":
+            handleWorkspacePanelAction("inspect");
+            return true;
+        case "openWorkspaceTerminal":
+            handleWorkspacePanelAction("terminal");
+            return true;
+        case "openWorkspaceBrowser":
+            handleWorkspacePanelAction("browser");
+            return true;
+        case "openWorkspaceFiles":
+            handleWorkspacePanelAction("files");
+            return true;
+        case "openWorkspaceSideChat":
+            handleWorkspacePanelAction("page-chat");
             return true;
         default:
             return false;
@@ -2205,8 +2438,65 @@ if (toggleApproxLocation) {
     toggleApproxLocation.checked = isApproxLocationEnabled;
     toggleApproxLocation.onchange = (e) => {
         isApproxLocationEnabled = e.target.checked;
+        updatePotatoSettingsUi();
     };
 }
+
+potatoModeToggle?.addEventListener("change", event => {
+    if (event.target.checked) {
+        applyPotatoSavingsPreset({ notify: true });
+    } else {
+        restorePotatoDefaults({ notify: true });
+    }
+});
+
+potatoApplyPresetBtn?.addEventListener("click", () => {
+    applyPotatoSavingsPreset({ notify: true });
+});
+
+potatoRestoreDefaultsBtn?.addEventListener("click", () => {
+    restorePotatoDefaults({ notify: true });
+});
+
+potatoParallelChatsToggle?.addEventListener("change", event => {
+    setPotatoPreference("parallel", event.target.checked, { notify: true });
+});
+
+potatoMediaGenerationToggle?.addEventListener("change", event => {
+    setPotatoPreference("media", event.target.checked, { notify: true });
+});
+
+potatoVoiceRepliesToggle?.addEventListener("change", event => {
+    setVoiceReplyEnabled(event.target.checked, { persist: true });
+    updatePotatoSettingsUi();
+});
+
+potatoAutoWebContextToggle?.addEventListener("change", event => {
+    setPotatoPreference("web", event.target.checked, { notify: true });
+});
+
+potatoAutoWorkspaceContextToggle?.addEventListener("change", event => {
+    setPotatoPreference("workspace", event.target.checked, { notify: true });
+});
+
+potatoApproxLocationToggle?.addEventListener("change", event => {
+    isApproxLocationEnabled = Boolean(event.target.checked);
+    if (toggleApproxLocation) toggleApproxLocation.checked = isApproxLocationEnabled;
+    updatePotatoSettingsUi();
+    showToast(isApproxLocationEnabled ? "Approx location tools enabled." : "Approx location tools disabled.", isApproxLocationEnabled ? "success" : "info");
+});
+
+potatoShortOutputsToggle?.addEventListener("change", event => {
+    setPotatoPreference("short", event.target.checked, { notify: true });
+});
+
+potatoTrimHistoryToggle?.addEventListener("change", event => {
+    setPotatoPreference("trim", event.target.checked, { notify: true });
+});
+
+potatoReduceMotionToggle?.addEventListener("change", event => {
+    setPotatoPreference("motion", event.target.checked, { notify: true });
+});
 
 if (toggleWorkspaceBridge) {
     toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
@@ -2224,6 +2514,10 @@ if (toggleMemoryBeta) {
         setMemoryEnabled(e.target.checked);
     };
 }
+
+compactModeToggle?.addEventListener("change", event => {
+    setCompactModeEnabled(event.target.checked, { notify: true });
+});
 
 memoryOpenCommandBtn?.addEventListener("click", () => {
     closeSettingsModal();
@@ -2337,6 +2631,7 @@ toggleAiStreaming?.addEventListener("change", event => {
     isAiStreamingEnabled = Boolean(event.target.checked);
     safeLocalStorageSet(AI_STREAMING_ENABLED_STORAGE_KEY, isAiStreamingEnabled ? "true" : "false");
     updateAiCallSettingsUi();
+    updatePotatoSettingsUi();
 });
 
 aiCachingToggle?.addEventListener("click", () => {

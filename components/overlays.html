@@ -101,6 +101,10 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19V5"></path><path d="M4 19h16"></path><rect x="7" y="11" width="3" height="5" rx="1"></rect><rect x="12" y="7" width="3" height="9" rx="1"></rect><rect x="17" y="9" width="3" height="7" rx="1"></rect></svg>
                     <span>Usage</span>
                 </button>
+                <button class="settings-nav-item" type="button" data-settings-pane="potato" aria-selected="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 4h8"></path><path d="M9 4v4"></path><path d="M15 4v4"></path><rect x="5" y="8" width="14" height="11" rx="3"></rect><path d="M8 12h.01"></path><path d="M12 12h.01"></path><path d="M16 12h.01"></path><path d="M9 16h6"></path></svg>
+                    <span>Potato PC</span>
+                </button>
                 <button class="settings-nav-item" type="button" data-settings-pane="services" aria-selected="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path><circle cx="8" cy="6" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="10" cy="18" r="1"></circle></svg>
                     <span>Local Services</span>
@@ -135,6 +139,16 @@
                                 <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
                                 <span id="themeLabel">Dark</span>
                             </button>
+                        </div>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Compact mode</span>
+                                <span id="compactModeStatus" class="setting-desc">Use standard spacing across the workspace.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="compactModeToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
                         </div>
                         <div class="settings-control-card settings-control-card-stacked">
                             <div class="setting-info">
@@ -714,6 +728,140 @@
                         </section>
                     </div>
                 </section>
+            </div>
+
+            <div class="settings-pane" data-settings-pane-panel="potato" hidden>
+                <div class="provider-model-section settings-panel-section settings-panel-section-first">
+                    <div class="settings-section-heading potato-heading">
+                        <div>
+                            <p class="provider-section-label">Low resource mode</p>
+                            <p id="potatoModeSummary" class="settings-section-desc">Keep Fauna responsive on weaker hardware by cutting background work, network calls, and UI motion.</p>
+                        </div>
+                        <span id="potatoModeStatus" class="settings-status-badge" data-state="missing">Off</span>
+                    </div>
+                    <div class="settings-control-card potato-mode-card">
+                        <div class="setting-info">
+                            <span class="setting-title">Potato PC mode</span>
+                            <span class="setting-desc">Apply the most conservative data, CPU, and memory settings.</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="potatoModeToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="potato-preset-actions">
+                        <button id="potatoApplyPresetBtn" class="provider-btn provider-btn-primary settings-inline-btn" type="button">Max savings</button>
+                        <button id="potatoRestoreDefaultsBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Restore defaults</button>
+                    </div>
+                </div>
+
+                <div class="provider-model-section settings-panel-section">
+                    <p class="provider-section-label">Workload</p>
+                    <div class="settings-control-stack">
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Multiple chats at once</span>
+                                <span class="setting-desc">Allow a new chat to run while another chat is still generating.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoParallelChatsToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Media generation</span>
+                                <span class="setting-desc">Allow image, image edit, and video generation commands.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoMediaGenerationToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Voice replies</span>
+                                <span class="setting-desc">Let Fauna speak assistant replies when voice mode asks for audio.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoVoiceRepliesToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="provider-model-section settings-panel-section">
+                    <p class="provider-section-label">Automatic context</p>
+                    <div class="settings-control-stack">
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Auto web context</span>
+                                <span class="setting-desc">Fetch web/search context automatically from prompts that look current or online.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoAutoWebContextToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Auto workspace context</span>
+                                <span class="setting-desc">Read local files automatically from prompts that mention project files.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoAutoWorkspaceContextToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Approx location tools</span>
+                                <span class="setting-desc">Allow IP-based weather and rough location calls when a prompt asks for them.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoApproxLocationToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="provider-model-section settings-panel-section">
+                    <p class="provider-section-label">Output and memory</p>
+                    <div class="settings-control-stack">
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Short answers</span>
+                                <span class="setting-desc">Clamp supported replies to a smaller token budget and low verbosity.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoShortOutputsToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Aggressive chat trimming</span>
+                                <span class="setting-desc">Keep fewer stored chats and save lighter snapshots when possible.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoTrimHistoryToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Reduced motion</span>
+                                <span class="setting-desc">Disable extra animation and render replies instantly.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="potatoReduceMotionToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="settings-pane" data-settings-pane-panel="services" hidden>

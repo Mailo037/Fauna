@@ -889,6 +889,7 @@ function shouldUseWorkspaceBridge(text) {
     if (!canUseComposerTools()) return false;
     if (!isWorkspaceBridgeEnabled || !text) return false;
     if (/^\/(?:tree|files|dir|ls|read|run|cmd|shell|terminal|ps)\b/i.test(text)) return true;
+    if (!isPotatoAutoWorkspaceContextEnabled) return false;
     return /\b(local directory|local workspace|workspace files|project files|repo files|repository files|file tree|directory tree|directory listing|folder tree|list files|list directory|read directory|show directory|read file|open file|show file|inspect file|terminal command|shell command|powershell|command output|run tests?|execute command)\b/i.test(text);
 }
 
@@ -1979,6 +1980,9 @@ async function executeFaunaToolCall(toolCall, signal = null) {
     }
 
     if (isWebToolName(toolCall?.tool)) {
+        if (!isPotatoAutoWebContextEnabled) {
+            throw new Error("Auto web context is disabled in Potato PC settings.");
+        }
         if (toolCall.tool === "web_search") {
             const query = String(toolCall.query || toolCall.text || toolCall.prompt || "").trim();
             if (!query) throw new Error("web_search requires a query.");
@@ -2004,6 +2008,9 @@ async function executeFaunaToolCall(toolCall, signal = null) {
     }
 
     if (isLocationToolName(toolCall?.tool)) {
+        if (!isApproxLocationEnabled) {
+            throw new Error("Approx location tools are disabled in Potato PC settings.");
+        }
         return executeLocationToolCall(toolCall, signal);
     }
 
@@ -2094,19 +2101,29 @@ async function retryImageToolCallInBubble(target, request, visibleText = "") {
         });
         const historyContent = getGeneratedImageHistoryContent("Generated image", generated.prompt);
         const content = [String(visibleText || "").trim(), historyContent].filter(Boolean).join("\n\n");
+        const generatedMedia = [
+            createGeneratedImageMediaItem?.({
+                src: generated.imageUrl,
+                prompt: generated.prompt,
+                label: "Generated image",
+                sensitive: isSensitiveImagePrompt(generated.prompt)
+            })
+        ].filter(Boolean);
         let messageIndex = updateAssistantHistoryForBubble(target, content);
         if (messageIndex !== null && runHistory[messageIndex]?.role === "assistant") {
             runHistory[messageIndex] = {
                 ...runHistory[messageIndex],
                 content,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                faunaGeneratedMedia: generatedMedia
             };
         }
         if (messageIndex === null) {
             runHistory.push({
                 role: "assistant",
                 content,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                faunaGeneratedMedia: generatedMedia
             });
             messageIndex = runHistory.length - 1;
         }
@@ -2124,6 +2141,9 @@ async function retryImageToolCallInBubble(target, request, visibleText = "") {
         renderErrorCard(target, err, {
             title: err.name === "AbortError" ? "Image generation stopped" : "Image generation failed",
             message: getImageGenerationFailureMessage(err),
+            sessionId: generationSessionId,
+            history: runHistory,
+            getTokenTotal: () => runTokenTotal,
             retryLabel: "Retry generation",
             onRetry: () => retryImageToolCallInBubble(target, request, visibleText)
         });
@@ -2144,6 +2164,9 @@ async function executeImageGenerationToolCall(toolCall, signal = null, {
     const request = normalizeImageGenerationToolCall(toolCall);
     if (!request.prompt) {
         throw new Error("generate_image requires a prompt.");
+    }
+    if (!isPotatoMediaGenerationEnabled) {
+        throw new Error("Media generation is disabled in Potato PC settings.");
     }
 
     let anchorBubble = progressTarget;
@@ -2176,10 +2199,19 @@ async function executeImageGenerationToolCall(toolCall, signal = null, {
             sessionId: getGenerationSessionIdForSignal(signal)
         });
         const historyContent = getGeneratedImageHistoryContent("Generated image", generated.prompt);
+        const generatedMedia = [
+            createGeneratedImageMediaItem?.({
+                src: generated.imageUrl,
+                prompt: generated.prompt,
+                label: "Generated image",
+                sensitive: isSensitiveImagePrompt(generated.prompt)
+            })
+        ].filter(Boolean);
         return {
             ok: true,
             imageUrl: generated.imageUrl,
             prompt: generated.prompt,
+            generatedMedia,
             historyContent,
             content: [cleanVisibleText, historyContent].filter(Boolean).join("\n\n")
         };

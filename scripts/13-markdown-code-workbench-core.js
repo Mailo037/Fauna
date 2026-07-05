@@ -10,9 +10,44 @@ function getFileReferenceExtension(path) {
 function isLikelyFileReferencePath(path) {
     const cleanPath = String(path || "").trim();
     if (!cleanPath || /^https?:/i.test(cleanPath)) return false;
-    if (/^[A-Za-z]:[\\/]/.test(cleanPath)) return true;
-    if (/[\\/]/.test(cleanPath)) return true;
+    if (hasExplicitFileReferenceSyntax(cleanPath)) return true;
+    if (/[\\/]/.test(cleanPath)) return isKnownWorkspaceReferencePath(cleanPath);
     return FILE_REFERENCE_EXTENSIONS.has(getFileReferenceExtension(cleanPath));
+}
+
+function hasExplicitFileReferenceSyntax(path) {
+    const cleanPath = String(path || "").trim();
+    if (/^[A-Za-z]:[\\/]/.test(cleanPath)) return true;
+    if (/^\.{1,2}[\\/]/.test(cleanPath)) return true;
+    if (FILE_REFERENCE_EXTENSIONS.has(getFileReferenceExtension(cleanPath))) return true;
+    return /[\\/][A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12}$/.test(cleanPath);
+}
+
+function normalizeFileReferenceLookupPath(path = "") {
+    return String(path || "")
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\.\/+/, "")
+        .replace(/\/+$/, "")
+        .toLowerCase();
+}
+
+function getKnownWorkspaceReferenceEntry(path = "") {
+    const lookupPath = normalizeFileReferenceLookupPath(path);
+    if (!lookupPath) return null;
+
+    if (activeProjectFile?.path && normalizeFileReferenceLookupPath(activeProjectFile.path) === lookupPath) {
+        return { type: "file", path: activeProjectFile.path };
+    }
+
+    const entries = Array.isArray(currentProjectExplorerResult?.entries)
+        ? currentProjectExplorerResult.entries
+        : [];
+    return entries.find(entry => normalizeFileReferenceLookupPath(entry?.path || "") === lookupPath) || null;
+}
+
+function isKnownWorkspaceReferencePath(path = "") {
+    return Boolean(getKnownWorkspaceReferenceEntry(path));
 }
 
 function cleanFileReferencePath(value) {
@@ -62,6 +97,22 @@ function parseFileReferenceTarget(value) {
 
     const splitPath = splitTrailingFileReferencePunctuation(path);
     path = cleanFileReferencePath(splitPath.path);
+    if (!line) {
+        const hashLineAfterSuffix = path.match(/^(.*?)#L(\d+)(?:[-:](\d+))?$/i);
+        if (hashLineAfterSuffix) {
+            path = hashLineAfterSuffix[1].trim();
+            line = hashLineAfterSuffix[2];
+            endLine = hashLineAfterSuffix[3] || "";
+        }
+    }
+    if (!line) {
+        const colonLineAfterSuffix = path.match(/^(.*):(\d+)(?:[-:](\d+))?$/);
+        if (colonLineAfterSuffix && !/^[A-Za-z]$/.test(colonLineAfterSuffix[1])) {
+            path = colonLineAfterSuffix[1].trim();
+            line = colonLineAfterSuffix[2];
+            endLine = colonLineAfterSuffix[3] || "";
+        }
+    }
     if (!isLikelyFileReferencePath(path)) return null;
     return { path, line, endLine, suffix: splitPath.suffix };
 }
@@ -82,7 +133,8 @@ function renderFileReference(path, line = "", endLine = "", label = "") {
         getFileReferenceLineLabel(line, endLine) ? `(${getFileReferenceLineLabel(line, endLine)})` : ""
     ].filter(Boolean).join(" ");
     const extension = getFileReferenceExtension(path);
-    const iconLabel = (extension || (/[\\/]$/.test(path) ? "dir" : "file")).slice(0, 4).toUpperCase();
+    const knownEntry = getKnownWorkspaceReferenceEntry(path);
+    const iconLabel = (extension || (knownEntry?.type === "directory" || /[\\/]$/.test(path) ? "dir" : "file")).slice(0, 4).toUpperCase();
     const tooltip = [
         path,
         getFileReferenceLineLabel(line, endLine) ? `(${getFileReferenceLineLabel(line, endLine)})` : ""
@@ -206,6 +258,23 @@ function formatInlinePlainText(segment) {
     return decorateHexColorsInFormattedText(safe);
 }
 
+function absorbReferenceMarkdownEmphasis(text, candidate) {
+    const source = String(text || "");
+    const start = candidate.index || 0;
+    const end = start + candidate.length;
+    for (const marker of ["***", "**", "*"]) {
+        if (start < marker.length) continue;
+        if (source.slice(start - marker.length, start) !== marker) continue;
+        if (source.slice(end, end + marker.length) !== marker) continue;
+        return {
+            ...candidate,
+            index: start - marker.length,
+            length: candidate.length + marker.length * 2
+        };
+    }
+    return candidate;
+}
+
 function getInlineReferenceCandidates(text) {
     const candidates = [];
 
@@ -213,13 +282,13 @@ function getInlineReferenceCandidates(text) {
         const matchIndex = match.index || 0;
         const reference = parseWebsiteReferenceTarget(match[0]);
         if (!reference) continue;
-        candidates.push({
+        candidates.push(absorbReferenceMarkdownEmphasis(text, {
             type: "website",
             index: matchIndex,
             length: match[0].length,
             url: reference.url,
             suffix: reference.suffix
-        });
+        }));
     }
 
     for (const match of text.matchAll(FILE_REFERENCE_PATH_RE)) {
@@ -229,7 +298,7 @@ function getInlineReferenceCandidates(text) {
 
         const reference = parseFileReferenceTarget(match[1]);
         if (!reference) continue;
-        candidates.push({
+        candidates.push(absorbReferenceMarkdownEmphasis(text, {
             type: "file",
             index: matchIndex,
             length: match[0].length,
@@ -237,7 +306,7 @@ function getInlineReferenceCandidates(text) {
             line: match[3] || match[2] || reference.line || "",
             endLine: match[4] || reference.endLine || "",
             suffix: reference.suffix
-        });
+        }));
     }
 
     return candidates

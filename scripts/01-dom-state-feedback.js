@@ -169,6 +169,8 @@ const typewriterDurationNumber = document.getElementById("typewriterDurationNumb
 const typewriterDurationValue = document.getElementById("typewriterDurationValue");
 const toggleAiStreaming = document.getElementById("toggleAiStreaming");
 const aiStreamingStatus = document.getElementById("aiStreamingStatus");
+const compactModeToggle = document.getElementById("compactModeToggle");
+const compactModeStatus = document.getElementById("compactModeStatus");
 const temperatureStatus = document.getElementById("temperatureStatus");
 const maxOutputTokensInput = document.getElementById("maxOutputTokensInput");
 const topPInput = document.getElementById("topPInput");
@@ -344,6 +346,20 @@ const appInfoStoredKeys = document.getElementById("appInfoStoredKeys");
 const appInfoOnboardingBtn = document.getElementById("appInfoOnboardingBtn");
 const appCacheClearBtn = document.getElementById("appCacheClearBtn");
 const appResetBtn = document.getElementById("appResetBtn");
+const potatoModeToggle = document.getElementById("potatoModeToggle");
+const potatoModeStatus = document.getElementById("potatoModeStatus");
+const potatoModeSummary = document.getElementById("potatoModeSummary");
+const potatoApplyPresetBtn = document.getElementById("potatoApplyPresetBtn");
+const potatoRestoreDefaultsBtn = document.getElementById("potatoRestoreDefaultsBtn");
+const potatoParallelChatsToggle = document.getElementById("potatoParallelChatsToggle");
+const potatoMediaGenerationToggle = document.getElementById("potatoMediaGenerationToggle");
+const potatoVoiceRepliesToggle = document.getElementById("potatoVoiceRepliesToggle");
+const potatoAutoWebContextToggle = document.getElementById("potatoAutoWebContextToggle");
+const potatoAutoWorkspaceContextToggle = document.getElementById("potatoAutoWorkspaceContextToggle");
+const potatoApproxLocationToggle = document.getElementById("potatoApproxLocationToggle");
+const potatoShortOutputsToggle = document.getElementById("potatoShortOutputsToggle");
+const potatoTrimHistoryToggle = document.getElementById("potatoTrimHistoryToggle");
+const potatoReduceMotionToggle = document.getElementById("potatoReduceMotionToggle");
 const onboardingModal = document.getElementById("onboardingModal");
 const onboardingDialog = onboardingModal?.querySelector(".onboarding-dialog");
 const onboardingStepLabel = document.getElementById("onboardingStepLabel");
@@ -369,6 +385,7 @@ let isApproxLocationEnabled = true;
 let isWorkspaceBridgeEnabled = false;
 let isMemoryEnabled = false;
 let isAiStreamingEnabled = true;
+let isCompactModeEnabled = false;
 let completionNotificationsEnabled = false;
 let completionSoundEnabled = false;
 let completionOnlyUnfocused = true;
@@ -387,6 +404,14 @@ let activeContextCompactionThresholdPercent = 70;
 let isContextCompactionReviewEnabled = false;
 let activeContextCompactionRotationLimit = 2;
 let isAiCachingEnabled = false;
+let isPotatoModeEnabled = false;
+let isPotatoParallelChatsEnabled = true;
+let isPotatoAutoWebContextEnabled = true;
+let isPotatoAutoWorkspaceContextEnabled = true;
+let isPotatoMediaGenerationEnabled = true;
+let isPotatoShortOutputsEnabled = false;
+let isPotatoTrimHistoryEnabled = false;
+let isPotatoReduceMotionEnabled = false;
 const TOKEN_COUNTER_DEBOUNCE_MS = 280;
 const TOKEN_COUNTER_TIMEOUT_MS = 2500;
 const TOKEN_USAGE_SOURCE_PROVIDER = "provider_usage";
@@ -476,7 +501,7 @@ const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
 const FAUNA_APP_VERSION = "0.1.11";
-const FAUNA_APP_BUILD_ID = "20260705-hex-color-swatches";
+const FAUNA_APP_BUILD_ID = "20260705-all-updates";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
@@ -485,11 +510,12 @@ const FAUNA_CHANGELOG_ENTRIES = [
         version: "0.1.11",
         date: "2026-07-05",
         commit: "v0.1.11",
-        title: "Hex color previews",
+        title: "Potato mode, workspace tools, and color previews",
         changes: [
-            "Added inline color swatches for CSS hex values in AI answers and rendered Markdown files.",
-            "Kept fenced code blocks untouched while previewing inline code and prose colors.",
-            "Refreshed static cache keys so the Markdown renderer and swatch styling load cleanly."
+            "Added Potato Mode controls for faster, shorter, more automated local workflows.",
+            "Expanded workspace bridge, access policy, and agent loop settings for local project work.",
+            "Improved tool activity rendering, command handling, file references, media routing, and compact UI polish.",
+            "Added inline color swatches for CSS hex values in AI answers and rendered Markdown files."
         ]
     },
     {
@@ -619,6 +645,7 @@ const TYPEWRITER_FADE_MIN_TRAILING_CHARS = 18;
 const TYPEWRITER_FADE_MAX_TRAILING_CHARS = 96;
 const TYPEWRITER_DURATION_STORAGE_KEY = "faunaTypewriterDuration";
 const AI_STREAMING_ENABLED_STORAGE_KEY = "faunaAiStreamingEnabled";
+const UI_COMPACT_MODE_STORAGE_KEY = "faunaUiCompactMode";
 const AI_TEMPERATURE_STORAGE_KEY = "faunaAiTemperature";
 const AI_MAX_OUTPUT_TOKENS_STORAGE_KEY = "faunaAiMaxOutputTokens";
 const AI_TOP_P_STORAGE_KEY = "faunaAiTopP";
@@ -629,6 +656,16 @@ const AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY = "faunaAgentMaxStepsPerRun";
 const CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY = "faunaContextCompactionThresholdPercent";
 const CONTEXT_COMPACTION_REVIEW_STORAGE_KEY = "faunaContextCompactionReviewEnabled";
 const CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY = "faunaContextCompactionRotationLimit";
+const POTATO_MODE_ENABLED_STORAGE_KEY = "faunaPotatoModeEnabled";
+const POTATO_PARALLEL_CHATS_STORAGE_KEY = "faunaPotatoParallelChatsEnabled";
+const POTATO_AUTO_WEB_CONTEXT_STORAGE_KEY = "faunaPotatoAutoWebContextEnabled";
+const POTATO_AUTO_WORKSPACE_CONTEXT_STORAGE_KEY = "faunaPotatoAutoWorkspaceContextEnabled";
+const POTATO_MEDIA_GENERATION_STORAGE_KEY = "faunaPotatoMediaGenerationEnabled";
+const POTATO_SHORT_OUTPUTS_STORAGE_KEY = "faunaPotatoShortOutputsEnabled";
+const POTATO_TRIM_HISTORY_STORAGE_KEY = "faunaPotatoTrimHistoryEnabled";
+const POTATO_REDUCE_MOTION_STORAGE_KEY = "faunaPotatoReduceMotionEnabled";
+const POTATO_SHORT_OUTPUT_MAX_TOKENS = 1024;
+const POTATO_MAX_CHAT_SESSIONS = 12;
 const LOCAL_TASK_REASONING_MODEL_STORAGE_KEY = "faunaLocalTaskReasoningModel";
 const LOCAL_TASK_VISION_MODEL_STORAGE_KEY = "faunaLocalTaskVisionModel";
 const LOCAL_TASK_CODE_MODEL_STORAGE_KEY = "faunaLocalTaskCodeModel";
@@ -653,6 +690,10 @@ const CHAT_AUTO_SCROLL_THRESHOLD = 96;
 const CHAT_INITIAL_RENDER_COUNT = 24;
 const CHAT_HISTORY_RENDER_BATCH_SIZE = 16;
 const CHAT_HISTORY_PRELOAD_SCROLL_PX = 220;
+const CHAT_RENDER_WINDOW_MAX_COUNT = 72;
+const CHAT_RENDER_WINDOW_TARGET_COUNT = 48;
+const CHAT_RENDER_WINDOW_VISIBLE_BUFFER_PX = 420;
+const CHAT_RENDER_WINDOW_ESTIMATED_MESSAGE_HEIGHT_PX = 126;
 const CONTEXT_COMPACTION_MESSAGE_TYPE = "context_compaction";
 const DEFAULT_CONTEXT_COMPACTION_THRESHOLD_PERCENT = 70;
 const MIN_CONTEXT_COMPACTION_THRESHOLD_PERCENT = 10;
@@ -1390,7 +1431,15 @@ let isChatPinnedToBottom = true;
 let chatRenderWindowStart = 0;
 let chatRenderWindowEnd = 0;
 let chatRenderWindowSessionId = "";
+let isChatInitialRenderSettling = false;
+let hasChatUserScrolledSinceRender = false;
 let isChatHistoryPrepending = false;
+let isChatHistoryAppending = false;
+let isChatHistoryPruning = false;
+let chatRenderWindowPruneFrame = 0;
+let chatRenderHeightCacheSessionId = "";
+let chatRenderAverageMessageHeight = CHAT_RENDER_WINDOW_ESTIMATED_MESSAGE_HEIGHT_PX;
+const chatRenderHeightCache = new Map();
 let composerDraftSaveTimer = null;
 let composerDraftRestoreToken = 0;
 let isRestoringComposerDraft = false;
@@ -1455,10 +1504,14 @@ function scrollChatToBottom({ force = false, behavior = "auto" } = {}) {
     if (!chat) return;
     if (!force && !isChatPinnedToBottom && !isChatNearBottom()) return;
 
-    chat.scrollTo({
-        top: chat.scrollHeight,
-        behavior
-    });
+    if (behavior === "auto") {
+        chat.scrollTop = chat.scrollHeight;
+    } else {
+        chat.scrollTo({
+            top: chat.scrollHeight,
+            behavior
+        });
+    }
     isChatPinnedToBottom = true;
 }
 
@@ -1567,6 +1620,25 @@ chat?.addEventListener("scroll", () => {
     updateChatAutoScrollState();
     if (typeof loadOlderChatMessagesIfNeeded === "function") {
         loadOlderChatMessagesIfNeeded();
+    }
+    if (typeof loadNewerChatMessagesIfNeeded === "function") {
+        loadNewerChatMessagesIfNeeded();
+    }
+    if (typeof scheduleChatRenderWindowPrune === "function") {
+        scheduleChatRenderWindowPrune();
+    }
+}, { passive: true });
+
+function markChatUserScrollIntent() {
+    hasChatUserScrolledSinceRender = true;
+}
+
+chat?.addEventListener("wheel", markChatUserScrollIntent, { passive: true });
+chat?.addEventListener("touchmove", markChatUserScrollIntent, { passive: true });
+chat?.addEventListener("pointerdown", markChatUserScrollIntent, { passive: true });
+document.addEventListener("keydown", event => {
+    if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+        markChatUserScrollIntent();
     }
 }, { passive: true });
 window.addEventListener("resize", () => {
@@ -2566,6 +2638,83 @@ function getFriendlyError(error, fallbackTitle = "Something went wrong") {
     };
 }
 
+function normalizeErrorHistoryMetadata(raw = {}) {
+    if (!raw || typeof raw !== "object") return null;
+    const title = String(raw.title || "Something went wrong").trim();
+    const message = String(raw.message || "Fauna could not complete this request.").trim();
+    const detail = String(raw.detail || "").trim();
+    if (!title && !message && !detail) return null;
+    return {
+        title: title || "Something went wrong",
+        message: message || "Fauna could not complete this request.",
+        detail,
+        canCheckOllama: Boolean(raw.canCheckOllama),
+        canCheckProvider: Boolean(raw.canCheckProvider),
+        createdAt: String(raw.createdAt || new Date().toISOString())
+    };
+}
+
+function getErrorHistoryContent(errorInfo = {}) {
+    const info = normalizeErrorHistoryMetadata(errorInfo);
+    if (!info) return "Fauna could not complete this request.";
+    return [
+        `[Error] ${info.title}`,
+        info.message,
+        info.detail ? `Details: ${info.detail}` : ""
+    ].filter(Boolean).join("\n\n");
+}
+
+function createErrorHistoryMessage(error, info = {}) {
+    const detailText = info.detail || error?.message || "";
+    const errorInfo = normalizeErrorHistoryMetadata({
+        ...info,
+        detail: detailText,
+        createdAt: new Date().toISOString()
+    });
+    return {
+        role: "assistant",
+        content: getErrorHistoryContent(errorInfo),
+        createdAt: errorInfo.createdAt,
+        faunaError: errorInfo
+    };
+}
+
+function persistErrorCardToHistory(target, errorMessage, options = {}) {
+    if (options.persist === false || options.persistError === false) return null;
+    const history = Array.isArray(options.history) ? options.history : null;
+    const sessionId = options.sessionId || activeSessionId || "";
+    if (!history) return null;
+
+    let messageIndex = getAssistantHistoryIndexForBubble(target);
+    if (messageIndex !== null && history[messageIndex]?.role === "assistant") {
+        history[messageIndex] = {
+            ...history[messageIndex],
+            ...errorMessage
+        };
+    } else {
+        history.push(errorMessage);
+        messageIndex = history.length - 1;
+    }
+
+    const messageNode = target?.closest?.(".message-node.output-node");
+    if (messageNode && messageIndex !== null) {
+        messageNode.dataset.historyIndex = String(messageIndex);
+        messageNode.dataset.createdAt = errorMessage.createdAt;
+    }
+
+    if (sessionId) {
+        updateStoredSessionFromGeneration?.(sessionId, {
+            history,
+            tokenTotal: typeof options.getTokenTotal === "function"
+                ? options.getTokenTotal()
+                : Number(options.tokenTotal ?? sessionTotalTokens) || 0
+        });
+    } else {
+        conversationHistory = cloneConversationHistory(history);
+    }
+    return messageIndex;
+}
+
 function renderErrorCard(target, error, options = {}) {
     if (!target) return;
     const info = {
@@ -2700,6 +2849,7 @@ function renderErrorCard(target, error, options = {}) {
     card.appendChild(icon);
     card.appendChild(body);
     target.appendChild(card);
+    persistErrorCardToHistory(target, createErrorHistoryMessage(error, info), options);
 }
 
 function prepareBubbleForRetry(target) {
@@ -2793,6 +2943,9 @@ async function retryAssistantGenerationFromBubble(target, {
         showToast("Generation retried.", "success");
     } catch (err) {
         renderErrorCard(target, err, {
+            sessionId: generationSessionId,
+            history: runHistory,
+            getTokenTotal: () => runTokenTotal,
             retryLabel: "Retry generation",
             onRetry: () => retryAssistantGenerationFromBubble(target, { model, webSources, speakThisReply })
         });
@@ -2824,7 +2977,7 @@ function prefersReducedMotion() {
 }
 
 function shouldUseTypewriterMotion() {
-    return !prefersReducedMotion() && activeTypewriterDurationSeconds > 0;
+    return !isPotatoReduceMotionEnabled && !prefersReducedMotion() && activeTypewriterDurationSeconds > 0;
 }
 
 function normalizeTypewriterDurationSeconds(value) {

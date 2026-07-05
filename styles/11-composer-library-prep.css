@@ -5,7 +5,7 @@
     gap: 0;
     padding: 14px 12px 5px;
     border-color: rgba(255, 255, 255, 0.1);
-    border-radius: 14px;
+    border-radius: 20px;
     background: #202020;
     color: #f5f5f5;
     box-shadow: 0 18px 44px rgba(0, 0, 0, 0.2), 0 3px 10px rgba(0, 0, 0, 0.14);
@@ -960,7 +960,7 @@ textarea#prompt::placeholder {
     .input-container-floating {
         min-height: 96px;
         padding: 11px;
-        border-radius: 14px;
+        border-radius: 20px;
     }
 
     .input-action-bar {
@@ -1982,5 +1982,105 @@ textarea#prompt::placeholder {
 .message-node .assistant-tts-player {
     position: relative;
     z-index: 2;
+}
+
+:root[data-density="compact"] .input-container-floating {
+    gap: 8px;
+    min-height: 98px;
+    padding: 10px;
+    border-radius: var(--radius-lg);
+}
+
+:root[data-density="compact"] textarea#prompt {
+    min-height: 36px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+:root[data-density="compact"] .preview-container {
+    gap: 7px;
+    padding-bottom: 4px;
+}
+
+:root[data-density="compact"] .chat-stream {
+    padding: 54px 18px max(172px, var(--composer-safe-area));
+}
+
+:root[data-density="compact"] .message-node {
+    margin-bottom: 10px;
+}
+
+:root[data-density="compact"] .bubble {
+    font-size: 13.5px;
+    line-height: 1.5;
+}
+
+:root[data-density="compact"] .user-node .bubble {
+    padding: 7px 11px;
+    border-radius: 16px 16px 5px 16px;
+}
+
+:root[data-density="compact"] .markdown p {
+    margin: 0.42em 0;
+}
+
+:root[data-density="compact"] .markdown ul,
+:root[data-density="compact"] .markdown ol {
+    margin: 0.46em 0 0.46em 1.3em;
+}
+
+:root[data-density="compact"] .markdown li + li {
+    margin-top: 0.18em;
+}
+
+:root[data-density="compact"] .bubble-block > .bubble.tool-activity-bubble:not(:first-child) {
+    margin-top: 8px;
+}
+
+:root[data-density="compact"] .bubble-block > .bubble.tool-activity-bubble + .bubble {
+    margin-top: 6px;
+}
+
+:root[data-density="compact"] .input-action-bar {
+    gap: 8px;
+    padding-top: 8px;
+}
+
+:root[data-density="compact"] .action-bar-left,
+:root[data-density="compact"] .action-bar-right {
+    gap: 6px;
+}
+
+:root[data-density="compact"] .input-container-floating .action-circle-btn,
+:root[data-density="compact"] .input-container-floating .voice-btn,
+:root[data-density="compact"] .input-container-floating .run-btn,
+:root[data-density="compact"] .input-container-floating .stop-btn {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+}
+
+:root[data-density="compact"] .input-container-floating .action-pill-btn,
+:root[data-density="compact"] .input-container-floating .model-current {
+    min-height: 36px !important;
+    padding-right: 10px !important;
+    padding-left: 10px !important;
+}
+
+:root[data-density="compact"] .chat-history-list {
+    gap: 2px;
+    padding-bottom: 6px;
+}
+
+:root[data-density="compact"] .chat-session-row,
+:root[data-density="compact"] .chat-session-main {
+    min-height: 34px;
+}
+
+:root[data-density="compact"] .chat-session-main {
+    gap: 7px;
+    padding-right: 8px;
+    padding-left: 8px;
 }
 

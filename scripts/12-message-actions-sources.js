@@ -1035,7 +1035,11 @@ async function regenerateAssistantFromAction(control) {
         });
         showToast("Response regenerated.", "success");
     } catch (err) {
-        renderErrorCard(context.bubble, err);
+        renderErrorCard(context.bubble, err, {
+            sessionId: generationSessionId,
+            history: runHistory,
+            getTokenTotal: () => runTokenTotal
+        });
     } finally {
         finishChatGeneration(generationSessionId, generationController);
         updateTokenDisplay();

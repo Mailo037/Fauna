@@ -77,6 +77,43 @@
     max-width: 220px;
 }
 
+.potato-heading {
+    align-items: start;
+}
+
+.potato-mode-card {
+    margin-top: 10px;
+}
+
+.potato-preset-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.settings-pane[data-settings-pane-panel="potato"] .settings-control-card {
+    min-height: 54px;
+}
+
+.settings-pane[data-settings-pane-panel="potato"] .setting-desc {
+    max-width: 34ch;
+}
+
+:root[data-potato-mode] .chat-generation-background-active .status-dot,
+:root[data-potato-mode] .chat-session-generating-spinner {
+    animation-duration: 1.6s;
+}
+
+:root[data-potato-reduced-motion] *,
+:root[data-potato-reduced-motion] *::before,
+:root[data-potato-reduced-motion] *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+}
+
 .context-compaction-node {
     width: min(860px, 100%);
     display: block;
@@ -398,7 +435,11 @@
 
 .chat-rename-dialog,
 .chat-info-dialog {
-    width: min(460px, calc(100vw - 36px));
+    width: min(500px, calc(100vw - 36px));
+}
+
+.chat-info-dialog {
+    gap: 14px;
 }
 
 .chat-rename-field {
@@ -408,11 +449,11 @@
 
 .chat-rename-field span,
 .chat-info-row span {
-    color: rgba(255, 255, 255, 0.44);
-    font-size: 10.5px;
-    font-weight: 780;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 11px;
+    font-weight: 680;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
 .chat-rename-input {
@@ -423,34 +464,46 @@
 .chat-info-title {
     margin-top: -4px;
     color: rgba(255, 255, 255, 0.64);
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 680;
 }
 
 .chat-info-grid {
     display: grid;
-    gap: 8px;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.025);
 }
 
 .chat-info-row {
     display: grid;
-    gap: 5px;
+    grid-template-columns: minmax(112px, 0.42fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
     min-width: 0;
-    padding: 10px 11px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.025);
+    min-height: 46px;
+    padding: 11px 13px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.chat-info-row:not(:last-child) {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.065);
 }
 
 .chat-info-row strong {
+    justify-self: end;
     min-width: 0;
     overflow: hidden;
     color: #f3f3f3;
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 720;
     line-height: 1.35;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    text-align: right;
+    overflow-wrap: anywhere;
 }
 
 .openai-voice-cost-dialog {
@@ -1796,6 +1849,29 @@
 
 .settings-section-desc {
     margin: -2px 0 2px;
+}
+
+:root[data-density="compact"] .settings-panel-section {
+    gap: 8px;
+    padding: 12px 0 4px;
+}
+
+:root[data-density="compact"] .settings-panel-section-first {
+    padding-top: 10px;
+}
+
+:root[data-density="compact"] .settings-control-stack {
+    gap: 6px;
+}
+
+:root[data-density="compact"] .settings-control-card {
+    min-height: 48px;
+    gap: 12px;
+    padding: 8px 10px;
+}
+
+:root[data-density="compact"] .settings-control-card-stacked {
+    gap: 8px;
 }
 
 .settings-section-heading {

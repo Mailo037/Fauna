@@ -1031,15 +1031,23 @@ async function processWorkspaceEntry(options = {}) {
     if (!generationSession) return;
     const generationSessionId = generationSession.id;
     if (isSessionGenerating(generationSessionId)) return;
+    if (shouldBlockNewGenerationForPotatoMode(generationSessionId)) {
+        showToast("Potato PC mode allows one chat to generate at a time.", "warning");
+        return;
+    }
 
     let runHistory = cloneConversationHistory(conversationHistory);
     let runTokenTotal = sessionTotalTokens;
-    const generationController = new AbortController();
-    activeRequestController = generationController;
-    const generationSignal = generationController.signal;
     const speakThisReply = shouldSpeakNextReply && textValue.length > 0;
     const videoPrompt = getVideoCommandPrompt(textValue);
     const imagePrompt = getImageCommandPrompt(textValue);
+    if (!isPotatoMediaGenerationEnabled && (videoPrompt !== null || imagePrompt !== null || isImageEditRequest(textValue, sourceFiles))) {
+        showToast("Media generation is disabled in Potato PC settings.", "warning");
+        return;
+    }
+    const generationController = new AbortController();
+    activeRequestController = generationController;
+    const generationSignal = generationController.signal;
     shouldSpeakNextReply = false;
 
     setGeneratingBusy(true, { sessionId: generationSessionId, controller: generationController });
@@ -1153,6 +1161,9 @@ async function processWorkspaceEntry(options = {}) {
                     message: err.name === "AbortError"
                         ? "Your prompt is safe to edit and run again."
                         : `Fauna could not analyze the image with ${getLocalTaskModel("vision")}. Make sure that model is installed or choose another Vision task model in Settings.`,
+                    sessionId: generationSessionId,
+                    history: runHistory,
+                    getTokenTotal: () => runTokenTotal,
                     retryLabel: "Retry generation",
                     onRetry: () => processWorkspaceEntry({
                         textValue,
@@ -1203,6 +1214,9 @@ async function processWorkspaceEntry(options = {}) {
                             message: err.name === "AbortError"
                                 ? "Your prompt is safe to edit and run again."
                                 : "Fauna could not upload the image to OpenAI. Check the API key, file type, and file size.",
+                            sessionId: generationSessionId,
+                            history: runHistory,
+                            getTokenTotal: () => runTokenTotal,
                             retryLabel: "Retry generation",
                             onRetry: () => processWorkspaceEntry({
                                 textValue,
@@ -1368,6 +1382,9 @@ async function processWorkspaceEntry(options = {}) {
                 message: err.name === "AbortError"
                     ? "Your prompt is safe to edit and run again."
                     : "Fauna could not compact this chat before sending it to the model.",
+                sessionId: generationSessionId,
+                history: runHistory,
+                getTokenTotal: () => runTokenTotal,
                 retryLabel: "Retry generation",
                 onRetry: () => processWorkspaceEntry({
                     textValue,
@@ -1466,6 +1483,9 @@ async function processWorkspaceEntry(options = {}) {
 
         } catch (e) {
             renderErrorCard(aiBubble, e, {
+                sessionId: generationSessionId,
+                history: runHistory,
+                getTokenTotal: () => runTokenTotal,
                 retryLabel: "Retry generation",
                 onRetry: () => retryAssistantGenerationFromBubble(aiBubble, {
                     model: routedModel,

@@ -1285,6 +1285,32 @@ function setActiveChatProject(rootId = "", { notify = true } = {}) {
     const root = getWorkspaceProjectRootById(cleanRootId);
 
     if (!session && root) {
+        const draft = captureComposerDraft();
+        if (composerDraftHasContent(draft)) {
+            session = createChatSessionForCurrentDraft({
+                workspaceMode: "project",
+                projectContext: createProjectContextForRoot(root),
+                composerDraft: draft
+            });
+            chatSessions.unshift(session);
+            activeSessionId = session.id;
+            clearPendingProjectChatRoot();
+            restoreComposerDraft(draft);
+            setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: true, closeSidebar: false, updateUrl: false });
+            enableWorkspaceBridgeForProject();
+            persistChatSessions();
+            renderChatHistory();
+            renderProjectList();
+            renderComposerProjectPicker();
+            updateProjectAgentPanel();
+            updateActiveChatTitle();
+            updateWorkspaceUrlFragment?.({ replace: true });
+            void refreshProjectExplorer({ silent: true, refreshBranch: true });
+            sidebarController.close();
+            focusComposerInput({ force: true });
+            if (notify) showToast(`${root.name} selected for this chat.`, "success");
+            return;
+        }
         startNewChatSession({
             notify: false,
             workspaceMode: "project",
@@ -5112,14 +5138,163 @@ function toggleTurnToolActivityDetails(control) {
     messageNode.classList.toggle("turn-tools-expanded", shouldExpand);
 }
 
-function updateChatRenderWindowState(start = 0, end = 0, sessionId = activeSessionId) {
+function getHistoryIndexFromChatNode(node) {
+    const value = Number(node?.dataset?.historyIndex);
+    return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function ensureChatRenderHeightCacheSession(sessionId = activeSessionId) {
+    const normalized = sessionId || "";
+    if (chatRenderHeightCacheSessionId === normalized) return;
+    chatRenderHeightCache.clear();
+    chatRenderHeightCacheSessionId = normalized;
+    chatRenderAverageMessageHeight = CHAT_RENDER_WINDOW_ESTIMATED_MESSAGE_HEIGHT_PX;
+}
+
+function getRenderedChatNodeOuterHeight(node) {
+    if (!(node instanceof HTMLElement)) return 0;
+    const rect = node.getBoundingClientRect();
+    const style = window.getComputedStyle(node);
+    const marginTop = Number.parseFloat(style.marginTop) || 0;
+    const marginBottom = Number.parseFloat(style.marginBottom) || 0;
+    return Math.max(0, rect.height + marginTop + marginBottom);
+}
+
+function cacheRenderedChatNodeHeight(node, sessionId = activeSessionId) {
+    ensureChatRenderHeightCacheSession(sessionId);
+    const index = getHistoryIndexFromChatNode(node);
+    if (index === null) return 0;
+    const height = getRenderedChatNodeOuterHeight(node);
+    if (height <= 0) return 0;
+    chatRenderHeightCache.set(index, height);
+    return height;
+}
+
+function measureRenderedChatMessageHeights(sessionId = activeSessionId) {
+    if (!chat) return;
+    ensureChatRenderHeightCacheSession(sessionId);
+    const heights = [];
+    chat.querySelectorAll(".message-node[data-history-index]").forEach(node => {
+        const height = cacheRenderedChatNodeHeight(node, sessionId);
+        if (height > 0) heights.push(height);
+    });
+    if (heights.length > 0) {
+        const average = heights.reduce((total, height) => total + height, 0) / heights.length;
+        chatRenderAverageMessageHeight = Math.min(420, Math.max(72, average));
+    }
+}
+
+function getEstimatedChatSegmentHeight(start, end, sessionId = activeSessionId) {
+    ensureChatRenderHeightCacheSession(sessionId);
+    const safeStart = Math.max(0, Number(start) || 0);
+    const safeEnd = Math.max(safeStart, Number(end) || 0);
+    let height = 0;
+    for (let index = safeStart; index < safeEnd; index += 1) {
+        height += chatRenderHeightCache.get(index) || chatRenderAverageMessageHeight;
+    }
+    return Math.round(height);
+}
+
+function getChatWindowSpacer(kind) {
+    if (!chat) return null;
+    const normalized = kind === "bottom" ? "bottom" : "top";
+    let spacer = chat.querySelector(`.chat-window-spacer[data-chat-window-spacer="${normalized}"]`);
+    if (!spacer) {
+        spacer = document.createElement("div");
+        spacer.className = `chat-window-spacer chat-window-spacer-${normalized}`;
+        spacer.dataset.chatWindowSpacer = normalized;
+        spacer.setAttribute("aria-hidden", "true");
+        spacer.hidden = true;
+    }
+    return spacer;
+}
+
+function getTopChatWindowSpacer() {
+    return getChatWindowSpacer("top");
+}
+
+function getBottomChatWindowSpacer() {
+    return getChatWindowSpacer("bottom");
+}
+
+function ensureChatWindowSpacers() {
+    if (!chat) return { top: null, bottom: null };
+    const top = getTopChatWindowSpacer();
+    const bottom = getBottomChatWindowSpacer();
+    if (top && top.parentElement !== chat) {
+        chat.insertBefore(top, chat.firstChild);
+    } else if (top && chat.firstChild !== top) {
+        chat.insertBefore(top, chat.firstChild);
+    }
+    if (bottom && bottom.parentElement !== chat) {
+        chat.appendChild(bottom);
+    } else if (bottom && chat.lastChild !== bottom) {
+        chat.appendChild(bottom);
+    }
+    return { top, bottom };
+}
+
+function removeChatWindowSpacers() {
+    chat?.querySelectorAll(".chat-window-spacer").forEach(spacer => spacer.remove());
+}
+
+function setChatWindowSpacerHeight(spacer, height, count) {
+    if (!(spacer instanceof HTMLElement)) return;
+    const safeCount = Math.max(0, Number(count) || 0);
+    const safeHeight = Math.max(0, Math.round(Number(height) || 0));
+    spacer.dataset.messageCount = String(safeCount);
+    if (safeCount <= 0 || safeHeight <= 0) {
+        spacer.style.height = "0px";
+        spacer.hidden = true;
+        spacer.remove();
+        return;
+    }
+    spacer.style.height = `${safeHeight}px`;
+    spacer.hidden = false;
+}
+
+function updateChatWindowSpacers(history = conversationHistory, sessionId = activeSessionId) {
+    if (!chat) return;
+    const source = Array.isArray(history) ? history : [];
+    const total = source.length;
+    const isWindowed = Boolean(
+        total > 0
+        && chatRenderWindowSessionId === (sessionId || "")
+        && chatRenderWindowEnd > 0
+        && (chatRenderWindowStart > 0 || chatRenderWindowEnd < total)
+    );
+    chat.classList.toggle("chat-windowed", isWindowed);
+    if (!isWindowed) {
+        removeChatWindowSpacers();
+        return;
+    }
+
+    const { top, bottom } = ensureChatWindowSpacers();
+    measureRenderedChatMessageHeights(sessionId);
+    const bottomCount = Math.max(0, total - chatRenderWindowEnd);
+    setChatWindowSpacerHeight(top, 0, 0);
+    setChatWindowSpacerHeight(bottom, getEstimatedChatSegmentHeight(chatRenderWindowEnd, total, sessionId), bottomCount);
+}
+
+function getFirstRenderedChatMessageNode() {
+    return chat?.querySelector(".message-node[data-history-index]") || null;
+}
+
+function getLastRenderedChatMessageNode() {
+    const nodes = chat ? Array.from(chat.querySelectorAll(".message-node[data-history-index]")) : [];
+    return nodes[nodes.length - 1] || null;
+}
+
+function updateChatRenderWindowState(start = 0, end = 0, sessionId = activeSessionId, history = conversationHistory) {
+    const normalizedSessionId = sessionId || "";
+    ensureChatRenderHeightCacheSession(normalizedSessionId);
     chatRenderWindowStart = Math.max(0, Number(start) || 0);
     chatRenderWindowEnd = Math.max(chatRenderWindowStart, Number(end) || 0);
-    chatRenderWindowSessionId = sessionId || "";
+    chatRenderWindowSessionId = normalizedSessionId;
     if (!chat) return;
     chat.dataset.renderWindowStart = String(chatRenderWindowStart);
     chat.dataset.renderWindowEnd = String(chatRenderWindowEnd);
-    chat.classList.toggle("chat-windowed", chatRenderWindowStart > 0);
+    updateChatWindowSpacers(history, normalizedSessionId);
 }
 
 function resetChatRenderWindowState(sessionId = activeSessionId) {
@@ -5128,6 +5303,7 @@ function resetChatRenderWindowState(sessionId = activeSessionId) {
         delete chat.dataset.renderWindowStart;
         delete chat.dataset.renderWindowEnd;
         chat.classList.remove("chat-windowed");
+        removeChatWindowSpacers();
     }
 }
 
@@ -5141,7 +5317,15 @@ function isChatDomFullyRendered(history = conversationHistory) {
 function extendChatRenderWindowToHistory(history = conversationHistory) {
     const total = Array.isArray(history) ? history.length : 0;
     if (!total || chatRenderWindowSessionId !== activeSessionId || chatRenderWindowEnd <= 0) return;
-    updateChatRenderWindowState(chatRenderWindowStart, Math.max(chatRenderWindowEnd, total), activeSessionId);
+    updateChatRenderWindowState(chatRenderWindowStart, Math.max(chatRenderWindowEnd, total), activeSessionId, history);
+    scheduleChatRenderWindowPrune();
+}
+
+function shouldRenderVisibleGenerationHistory(history = [], sessionId = activeSessionId) {
+    if (!chat || !Array.isArray(history) || history.length === 0) return false;
+    if (chatRenderWindowSessionId !== sessionId || chatRenderWindowEnd <= 0) return true;
+    const latestIndex = history.length - 1;
+    return !chat.querySelector(`.message-node[data-history-index="${latestIndex}"]`);
 }
 
 function renderContextCompactionDivider(message, { beforeNode = null, index = null } = {}) {
@@ -5199,6 +5383,62 @@ function renderContextCompactionDivider(message, { beforeNode = null, index = nu
     return node;
 }
 
+function getGeneratedMediaVisibleContent(content = "", mediaItems = []) {
+    let text = String(content || "");
+    if (typeof stripAssistantControlBlocks === "function") {
+        text = stripAssistantControlBlocks(text);
+    }
+    if (!Array.isArray(mediaItems) || mediaItems.length === 0) {
+        return text.trim();
+    }
+    text = text
+        .replace(/(?:^|\n{2,})Generated image(?: edit)? for:[\s\S]*?\n\n\[Generated image preview is visible in the chat\. Image data is omitted from model context\.\]/gi, "\n\n")
+        .replace(/(?:^|\n{2,})(?:Generated Wan video clip for:|Wan was unavailable, so Fauna generated a fallback 10 second animated clip for:)[\s\S]*?\n\n\S+/gi, "\n\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    return text;
+}
+
+function renderGeneratedMediaItemsIntoBubble(bubble, mediaItems = [], visibleContent = "") {
+    const items = typeof normalizeGeneratedMediaItems === "function"
+        ? normalizeGeneratedMediaItems(mediaItems)
+        : [];
+    if (!bubble || items.length === 0) return null;
+
+    let targetBubble = bubble;
+    if (visibleContent) {
+        renderAssistantContentHtml(bubble, renderMarkdown(visibleContent), { final: true, busy: false });
+        targetBubble = createSiblingBubble(bubble) || bubble;
+    } else {
+        bubble.innerHTML = "";
+    }
+
+    let lastBubble = targetBubble;
+    items.forEach((item, index) => {
+        const mediaBubble = index === 0 ? targetBubble : (createSiblingBubble(lastBubble) || lastBubble);
+        if (item.type === "video" && typeof renderGeneratedVideo === "function") {
+            renderGeneratedVideo(mediaBubble, item.prompt, item.src, item.extension || "mp4", item.label || "Generated video");
+        } else if (item.type === "image" && typeof renderGeneratedImage === "function") {
+            renderGeneratedImage(mediaBubble, item.prompt, item.src, item.label || "Generated image", item.sensitive);
+        } else {
+            renderAssistantContentHtml(mediaBubble, renderMarkdown(item.src), { final: true, busy: false });
+        }
+        lastBubble = mediaBubble;
+    });
+    return lastBubble;
+}
+
+function getAssistantCopyTextForHistoryMessage(message, visibleContent, rawContent, mediaItems = []) {
+    const items = typeof normalizeGeneratedMediaItems === "function"
+        ? normalizeGeneratedMediaItems(mediaItems)
+        : [];
+    const firstMedia = items[0];
+    if (firstMedia?.src && typeof getGeneratedMediaCopyText === "function") {
+        return getGeneratedMediaCopyText(firstMedia.src, visibleContent || rawContent);
+    }
+    return visibleContent || String(message?.content || rawContent || "");
+}
+
 function renderHistoryMessageIntoChat(history, index, { beforeNode = null } = {}) {
     if (!chat || !Array.isArray(history)) return null;
     const message = history[index];
@@ -5210,11 +5450,17 @@ function renderHistoryMessageIntoChat(history, index, { beforeNode = null } = {}
     const activityItems = role === "output" && typeof normalizeToolActivityItems === "function"
         ? normalizeToolActivityItems(message?.faunaToolActivity || [])
         : [];
-    if (!rawContent && activityItems.length === 0) return null;
+    const errorInfo = role === "output" && typeof normalizeErrorHistoryMetadata === "function"
+        ? normalizeErrorHistoryMetadata(message?.faunaError || message?.errorInfo || null)
+        : null;
+    const generatedMediaItems = role === "output" && typeof normalizeGeneratedMediaItems === "function"
+        ? normalizeGeneratedMediaItems(message?.faunaGeneratedMedia || message?.generatedMedia || [])
+        : [];
+    if (!rawContent && !errorInfo && activityItems.length === 0 && generatedMediaItems.length === 0) return null;
 
     const toolRequest = parseFaunaToolCall(rawContent);
     const visibleContent = role === "output"
-        ? stripAssistantControlBlocks(rawContent) || (toolRequest ? getAssistantToolPlaceholder(toolRequest) : rawContent)
+        ? getGeneratedMediaVisibleContent(rawContent, generatedMediaItems) || (toolRequest ? getAssistantToolPlaceholder(toolRequest) : "")
         : rawContent;
     const bubble = addRenderNode(visibleContent, role, [], {
         historyIndex: index,
@@ -5227,7 +5473,12 @@ function renderHistoryMessageIntoChat(history, index, { beforeNode = null } = {}
     if (!bubble) return null;
 
     if (role === "output") {
-        if (activityItems.length > 0) {
+        if (errorInfo) {
+            renderErrorCard(bubble, new Error(errorInfo.detail || errorInfo.message), {
+                ...errorInfo,
+                persist: false
+            });
+        } else if (activityItems.length > 0) {
             renderToolActivity(bubble, {
                 title: getToolActivitySummary(activityItems, "Tool activity"),
                 items: activityItems,
@@ -5235,10 +5486,15 @@ function renderHistoryMessageIntoChat(history, index, { beforeNode = null } = {}
                 collapsed: true,
                 responseHtml: visibleContent ? renderMarkdown(visibleContent) : ""
             });
+            if (generatedMediaItems.length > 0) {
+                renderGeneratedMediaItemsIntoBubble(createSiblingBubble(bubble) || bubble, generatedMediaItems);
+            }
+        } else if (generatedMediaItems.length > 0) {
+            renderGeneratedMediaItemsIntoBubble(bubble, generatedMediaItems, visibleContent);
         } else {
             renderAssistantContentHtml(bubble, renderMarkdown(visibleContent), { final: true, busy: false });
         }
-        setupAssistantActions(bubble.parentElement, visibleContent, {
+        setupAssistantActions(bubble.parentElement, getAssistantCopyTextForHistoryMessage(message, visibleContent, rawContent, generatedMediaItems), {
             messageIndex: index,
             canRegenerate: true,
             canFork: true,
@@ -5261,24 +5517,36 @@ function renderChatHistoryWindow(history = conversationHistory, {
     const source = Array.isArray(history) ? history : [];
     const safeEnd = Math.min(source.length, Math.max(0, Number(end) || 0));
     const safeStart = Math.min(safeEnd, Math.max(0, Number(start) || 0));
-    const anchor = beforeNode instanceof Node && beforeNode.parentElement === chat ? beforeNode : null;
+    const shouldWindow = safeStart > 0 || safeEnd < source.length;
 
-    if (replace) chat.replaceChildren();
+    if (replace) {
+        chat.replaceChildren();
+        if (shouldWindow) ensureChatWindowSpacers();
+    }
+    const anchor = beforeNode instanceof Node && beforeNode.parentElement === chat
+        ? beforeNode
+        : shouldWindow
+            ? getBottomChatWindowSpacer()
+            : null;
     for (let index = safeStart; index < safeEnd; index += 1) {
         renderHistoryMessageIntoChat(source, index, { beforeNode: anchor });
     }
 
     if (replace) {
-        updateChatRenderWindowState(safeStart, safeEnd, sessionId);
+        updateChatRenderWindowState(safeStart, safeEnd, sessionId, source);
+    } else {
+        measureRenderedChatMessageHeights(sessionId);
     }
     rehydrateRenderedChat(chat);
     return { start: safeStart, end: safeEnd };
 }
 
 function scheduleChatHistoryBackfillIfNeeded() {
-    if (!chat || chatRenderWindowStart <= 0) return;
+    if (!chat || chatRenderWindowStart <= 0 || isChatInitialRenderSettling) return;
+    if (chatRenderWindowEnd - chatRenderWindowStart >= CHAT_RENDER_WINDOW_TARGET_COUNT) return;
     window.requestAnimationFrame(() => {
-        if (!chat || chatRenderWindowStart <= 0) return;
+        if (!chat || chatRenderWindowStart <= 0 || isChatInitialRenderSettling) return;
+        if (chatRenderWindowEnd - chatRenderWindowStart >= CHAT_RENDER_WINDOW_TARGET_COUNT) return;
         if (chat.scrollHeight <= chat.clientHeight + CHAT_HISTORY_PRELOAD_SCROLL_PX) {
             loadOlderChatMessagesIfNeeded({ force: true });
         }
@@ -5287,6 +5555,8 @@ function scheduleChatHistoryBackfillIfNeeded() {
 
 function renderInitialChatHistoryWindow(history = conversationHistory, sessionId = activeSessionId) {
     if (!chat) return;
+    isChatInitialRenderSettling = true;
+    hasChatUserScrolledSinceRender = false;
     const source = Array.isArray(history) ? history : [];
     const end = source.length;
     const start = Math.max(0, end - CHAT_INITIAL_RENDER_COUNT);
@@ -5296,20 +5566,47 @@ function renderInitialChatHistoryWindow(history = conversationHistory, sessionId
         replace: true,
         sessionId
     });
-    scheduleChatHistoryBackfillIfNeeded();
+    if (end > start) {
+        scrollChatToBottom({ force: true, behavior: "auto" });
+        window.requestAnimationFrame(() => {
+            updateChatWindowSpacers(source, sessionId);
+            scrollChatToBottom({ force: true, behavior: "auto" });
+            window.requestAnimationFrame(() => {
+                updateChatWindowSpacers(source, sessionId);
+                scrollChatToBottom({ force: true, behavior: "auto" });
+                isChatInitialRenderSettling = false;
+            });
+        });
+    } else {
+        isChatInitialRenderSettling = false;
+    }
+}
+
+function shouldLoadOlderChatMessages(force = false) {
+    if (force) return true;
+    const firstNode = getFirstRenderedChatMessageNode();
+    if (!firstNode || !chat) return chat?.scrollTop <= CHAT_HISTORY_PRELOAD_SCROLL_PX;
+    const chatRect = chat.getBoundingClientRect();
+    const firstRect = firstNode.getBoundingClientRect();
+    const boundaryOffset = firstRect.top - chatRect.top;
+    return (
+        boundaryOffset >= -CHAT_HISTORY_PRELOAD_SCROLL_PX
+        && boundaryOffset <= chat.clientHeight + CHAT_HISTORY_PRELOAD_SCROLL_PX
+    );
 }
 
 function loadOlderChatMessagesIfNeeded({ force = false } = {}) {
-    if (!chat || isChatHistoryPrepending) return;
+    if (!chat || isChatInitialRenderSettling || isChatHistoryPrepending || isChatHistoryAppending || isChatHistoryPruning) return;
     if (activeWorkspaceView !== WORKSPACE_VIEW_PLAYGROUND) return;
+    if (!force && !hasChatUserScrolledSinceRender) return;
     if (!Array.isArray(conversationHistory) || conversationHistory.length === 0) return;
     if (chatRenderWindowSessionId !== activeSessionId || chatRenderWindowStart <= 0) return;
-    if (!force && chat.scrollTop > CHAT_HISTORY_PRELOAD_SCROLL_PX) return;
+    if (!shouldLoadOlderChatMessages(force)) return;
 
     isChatHistoryPrepending = true;
     const previousScrollHeight = chat.scrollHeight;
     const previousScrollTop = chat.scrollTop;
-    const beforeNode = chat.firstChild;
+    const beforeNode = getFirstRenderedChatMessageNode() || getBottomChatWindowSpacer();
     const nextStart = Math.max(0, chatRenderWindowStart - CHAT_HISTORY_RENDER_BATCH_SIZE);
     const currentEnd = chatRenderWindowEnd;
 
@@ -5320,14 +5617,155 @@ function loadOlderChatMessagesIfNeeded({ force = false } = {}) {
         beforeNode,
         sessionId: activeSessionId
     });
-    updateChatRenderWindowState(nextStart, currentEnd, activeSessionId);
+    updateChatRenderWindowState(nextStart, currentEnd, activeSessionId, conversationHistory);
 
     window.requestAnimationFrame(() => {
+        updateChatWindowSpacers(conversationHistory, activeSessionId);
         const heightDelta = chat.scrollHeight - previousScrollHeight;
         chat.scrollTop = Math.max(0, previousScrollTop + heightDelta);
         isChatPinnedToBottom = false;
         isChatHistoryPrepending = false;
         scheduleChatHistoryBackfillIfNeeded();
+        pruneRenderedChatWindow({ prefer: "bottom" });
+    });
+}
+
+function shouldLoadNewerChatMessages(force = false) {
+    if (force) return true;
+    const lastNode = getLastRenderedChatMessageNode();
+    if (!lastNode || !chat) return false;
+    const chatRect = chat.getBoundingClientRect();
+    const lastRect = lastNode.getBoundingClientRect();
+    return lastRect.bottom - chatRect.bottom <= CHAT_HISTORY_PRELOAD_SCROLL_PX;
+}
+
+function loadNewerChatMessagesIfNeeded({ force = false } = {}) {
+    if (!chat || isChatInitialRenderSettling || isChatHistoryAppending || isChatHistoryPrepending || isChatHistoryPruning) return;
+    if (activeWorkspaceView !== WORKSPACE_VIEW_PLAYGROUND) return;
+    if (!force && !hasChatUserScrolledSinceRender) return;
+    if (!Array.isArray(conversationHistory) || conversationHistory.length === 0) return;
+    if (chatRenderWindowSessionId !== activeSessionId || chatRenderWindowEnd <= 0) return;
+    if (chatRenderWindowEnd >= conversationHistory.length) return;
+    if (!shouldLoadNewerChatMessages(force)) return;
+
+    isChatHistoryAppending = true;
+    const wasPinnedToBottom = isChatNearBottom();
+    const nextEnd = Math.min(conversationHistory.length, chatRenderWindowEnd + CHAT_HISTORY_RENDER_BATCH_SIZE);
+    const currentStart = chatRenderWindowStart;
+    const beforeNode = getBottomChatWindowSpacer();
+
+    renderChatHistoryWindow(conversationHistory, {
+        start: chatRenderWindowEnd,
+        end: nextEnd,
+        replace: false,
+        beforeNode,
+        sessionId: activeSessionId
+    });
+    updateChatRenderWindowState(currentStart, nextEnd, activeSessionId, conversationHistory);
+
+    window.requestAnimationFrame(() => {
+        updateChatWindowSpacers(conversationHistory, activeSessionId);
+        if (wasPinnedToBottom) {
+            scrollChatToBottom({ force: true, behavior: "auto" });
+        }
+        isChatHistoryAppending = false;
+        pruneRenderedChatWindow({ prefer: "top" });
+    });
+}
+
+function getAutoChatPrunePreference() {
+    const total = Array.isArray(conversationHistory) ? conversationHistory.length : 0;
+    if (chatRenderWindowStart <= 0 && chatRenderWindowEnd < total) return "bottom";
+    if (chatRenderWindowStart > 0 && chatRenderWindowEnd >= total) return "top";
+    if (!chat) return "top";
+    return chat.scrollTop + (chat.clientHeight / 2) > chat.scrollHeight / 2 ? "top" : "bottom";
+}
+
+function canPruneTopChatRange(nextStart, force = false) {
+    if (force || !chat) return true;
+    const keepNode = chat.querySelector(`.message-node[data-history-index="${nextStart}"]`);
+    if (!keepNode) return true;
+    const chatRect = chat.getBoundingClientRect();
+    const keepRect = keepNode.getBoundingClientRect();
+    return keepRect.top - chatRect.top < -CHAT_RENDER_WINDOW_VISIBLE_BUFFER_PX;
+}
+
+function canPruneBottomChatRange(nextEnd, force = false) {
+    if (force || !chat) return true;
+    const firstRemovedNode = chat.querySelector(`.message-node[data-history-index="${nextEnd}"]`);
+    if (!firstRemovedNode) return true;
+    const chatRect = chat.getBoundingClientRect();
+    const removedRect = firstRemovedNode.getBoundingClientRect();
+    return removedRect.top - chatRect.bottom > CHAT_RENDER_WINDOW_VISIBLE_BUFFER_PX;
+}
+
+function removeRenderedChatRange(start, end) {
+    if (!chat) return;
+    const safeEnd = Math.max(start, end);
+    for (let index = start; index < safeEnd; index += 1) {
+        const node = chat.querySelector(`.message-node[data-history-index="${index}"]`);
+        if (node) {
+            cacheRenderedChatNodeHeight(node, activeSessionId);
+            node.remove();
+        }
+    }
+}
+
+function pruneRenderedChatWindow({ prefer = "auto", force = false } = {}) {
+    if (!chat || isChatInitialRenderSettling || isChatHistoryPrepending || isChatHistoryAppending || isChatHistoryPruning) return;
+    if (activeWorkspaceView !== WORKSPACE_VIEW_PLAYGROUND) return;
+    if (!Array.isArray(conversationHistory) || conversationHistory.length === 0) return;
+    if (chatRenderWindowSessionId !== activeSessionId || chatRenderWindowEnd <= 0) return;
+
+    const renderedCount = chatRenderWindowEnd - chatRenderWindowStart;
+    if (renderedCount <= CHAT_RENDER_WINDOW_MAX_COUNT) return;
+
+    const direction = prefer === "top" || prefer === "bottom" ? prefer : getAutoChatPrunePreference();
+    const trimCount = Math.max(0, renderedCount - CHAT_RENDER_WINDOW_TARGET_COUNT);
+    if (trimCount <= 0) return;
+
+    isChatHistoryPruning = true;
+    measureRenderedChatMessageHeights(activeSessionId);
+    const previousScrollHeight = chat.scrollHeight;
+    const previousScrollTop = chat.scrollTop;
+
+    if (direction === "bottom") {
+        const nextEnd = Math.max(chatRenderWindowStart + CHAT_RENDER_WINDOW_TARGET_COUNT, chatRenderWindowEnd - trimCount);
+        if (nextEnd >= chatRenderWindowEnd || !canPruneBottomChatRange(nextEnd, force)) {
+            isChatHistoryPruning = false;
+            return;
+        }
+        removeRenderedChatRange(nextEnd, chatRenderWindowEnd);
+        updateChatRenderWindowState(chatRenderWindowStart, nextEnd, activeSessionId, conversationHistory);
+        window.requestAnimationFrame(() => {
+            updateChatWindowSpacers(conversationHistory, activeSessionId);
+            chat.scrollTop = previousScrollTop;
+            isChatHistoryPruning = false;
+        });
+        return;
+    }
+
+    const nextStart = Math.min(chatRenderWindowEnd - CHAT_RENDER_WINDOW_TARGET_COUNT, chatRenderWindowStart + trimCount);
+    if (nextStart <= chatRenderWindowStart || !canPruneTopChatRange(nextStart, force)) {
+        isChatHistoryPruning = false;
+        return;
+    }
+    removeRenderedChatRange(chatRenderWindowStart, nextStart);
+    updateChatRenderWindowState(nextStart, chatRenderWindowEnd, activeSessionId, conversationHistory);
+    window.requestAnimationFrame(() => {
+        updateChatWindowSpacers(conversationHistory, activeSessionId);
+        const heightDelta = chat.scrollHeight - previousScrollHeight;
+        chat.scrollTop = Math.max(0, previousScrollTop + heightDelta);
+        isChatPinnedToBottom = isChatNearBottom();
+        isChatHistoryPruning = false;
+    });
+}
+
+function scheduleChatRenderWindowPrune() {
+    if (chatRenderWindowPruneFrame || !chat) return;
+    chatRenderWindowPruneFrame = window.requestAnimationFrame(() => {
+        chatRenderWindowPruneFrame = 0;
+        pruneRenderedChatWindow();
     });
 }
 
@@ -5498,7 +5936,11 @@ function updateStoredSessionFromGeneration(sessionId, {
     if (isChatSessionVisible(sessionId)) {
         conversationHistory = cloneConversationHistory(history);
         sessionTotalTokens = tokenTotal;
-        extendChatRenderWindowToHistory(history);
+        if (shouldRenderVisibleGenerationHistory(conversationHistory, sessionId)) {
+            renderInitialChatHistoryWindow(conversationHistory, sessionId);
+        } else {
+            extendChatRenderWindowToHistory(conversationHistory);
+        }
         snapshotVisibleChatIntoSession(session, { history, tokenTotal });
         updateTokenDisplay();
         updateActiveChatTitle();
@@ -5646,7 +6088,8 @@ function serializeChatSession(session, options = {}) {
 }
 
 function trimChatSessions() {
-    if (chatSessions.length <= MAX_CHAT_SESSIONS) return;
+    const maxStoredSessions = getMaxStoredChatSessions();
+    if (chatSessions.length <= maxStoredSessions) return;
     const removedSessions = [];
     const removable = [...chatSessions]
         .filter(session => session.id !== activeSessionId)
@@ -5656,7 +6099,7 @@ function trimChatSessions() {
             return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
         });
 
-    while (chatSessions.length > MAX_CHAT_SESSIONS && removable.length > 0) {
+    while (chatSessions.length > maxStoredSessions && removable.length > 0) {
         const sessionToRemove = removable.shift();
         removedSessions.push(sessionToRemove);
         chatSessions = chatSessions.filter(session => session.id !== sessionToRemove.id);
@@ -5696,7 +6139,7 @@ function getChatStorageProfilesToTry() {
         CHAT_STORAGE_PROFILE_HISTORY_ONLY,
         CHAT_STORAGE_PROFILE_MINIMAL
     ];
-    const startIndex = Math.max(0, profiles.indexOf(chatStorageProfile));
+    const startIndex = Math.max(0, profiles.indexOf(getPreferredChatStorageProfile()));
     return profiles.slice(startIndex);
 }
 

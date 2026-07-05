@@ -492,6 +492,7 @@ function applyWorkspaceUrlFragment({ normalize = false } = {}) {
 
 function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, updateUrl = true, urlMode = "push" } = {}) {
     const nextView = view === WORKSPACE_VIEW_LIBRARY ? WORKSPACE_VIEW_LIBRARY : WORKSPACE_VIEW_PLAYGROUND;
+    const previousView = activeWorkspaceView;
     if (nextView === WORKSPACE_VIEW_LIBRARY && activeChatHasContent()) {
         saveCurrentSession({ render: false, updateUrl });
     }
@@ -515,11 +516,20 @@ function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, up
         updateActiveChatTitle();
         renderLibraryView();
     } else {
+        let restoredActiveSessionFromViewSwitch = false;
         if (libraryView) {
             libraryView.hidden = true;
             libraryView.setAttribute("aria-hidden", "true");
         }
         if (inputWrapper) inputWrapper.hidden = false;
+        if (previousView !== WORKSPACE_VIEW_PLAYGROUND && activeSessionId) {
+            const activeSession = getChatSessionById(activeSessionId);
+            if (activeSession) {
+                clearUnreadGenerationCompletion?.(activeSessionId, { renderHistory: false });
+                restoreChatSessionToView(activeSession, { closeWorkbench: false });
+                restoredActiveSessionFromViewSwitch = true;
+            }
+        }
         if (chat) chat.style.display = activeChatHasContent() ? "block" : "none";
         if (welcome) welcome.style.display = activeChatHasContent() ? "none" : "flex";
         if (chatTitleEditBtn) chatTitleEditBtn.hidden = false;
@@ -527,6 +537,7 @@ function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, up
         updateTokenDisplay();
         renderPromptTimeline();
         if (focusComposer) focusComposerInput({ force: true });
+        if (restoredActiveSessionFromViewSwitch) renderChatHistory();
     }
 
     if (closeSidebar) sidebarController.close();
@@ -1752,12 +1763,14 @@ function shouldSearchWeb(text) {
     if (!canUseComposerTools()) return false;
     if (!isWebSearchEnabled || !text) return false;
     if (/^\/(?:search|web)\b/i.test(text)) return true;
+    if (!isPotatoAutoWebContextEnabled) return false;
     if (/\bhttps?:\/\//i.test(text)) return true;
     return /\b(link|links|url|website|site|source|sources|search|inspect|browse|look up|lookup|online|internet|web|latest|current|today|news|recent|price|where can i|find me|provide me information|useful links|usefull links|skakel|soek|nuutste|vandag)\b/i.test(text);
 }
 
 function shouldUseApproxWeatherContext(text) {
     if (!canUseComposerTools() || !text) return false;
+    if (!isApproxLocationEnabled) return false;
     if (/^\/(?:weather|wetter|temp|temperature|location|ip-location)\b/i.test(text)) return true;
     const asksWeather = /\b(weather|wetter|temperature|temperatur|degrees?|outside|warm|cold|hot|kalt|draußen|draussen)\b/i.test(text)
         || /\b(?:wie\s+)?viel\s+grad\b/i.test(text)

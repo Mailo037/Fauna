@@ -371,7 +371,11 @@ async function submitClarifyingAnswers() {
         scrollChatToBottom();
     } catch (err) {
         if (!aiBubble) aiBubble = addRenderNode("__thinking__", "output");
-        renderErrorCard(aiBubble, err);
+        renderErrorCard(aiBubble, err, {
+            sessionId: generationSessionId,
+            history: runHistory,
+            getTokenTotal: () => runTokenTotal
+        });
     } finally {
         finishChatGeneration(generationSessionId, generationController);
         updateTokenDisplay();
@@ -393,6 +397,12 @@ function attachToolActivityToAssistantMessage(message, data = {}) {
     const items = getAssistantToolActivityForConversationData(data);
     if (message && items.length > 0) {
         message.faunaToolActivity = items;
+    }
+    const generatedMedia = typeof normalizeGeneratedMediaItems === "function"
+        ? normalizeGeneratedMediaItems(data?.__faunaGeneratedMedia || data?.message?.faunaGeneratedMedia || data?.message?.generatedMedia || [])
+        : [];
+    if (message && generatedMedia.length > 0) {
+        message.faunaGeneratedMedia = generatedMedia;
     }
     return message;
 }
@@ -424,7 +434,7 @@ function getAssistantMessageForConversation(data, fallbackModel = getCurrentMode
 async function renderAssistantResponse(data, aiBubble, webSources = [], signal = null, speakThisReply = false, options = {}) {
     const rawContent = data?.message?.content || "";
     const responseSessionId = options.sessionId || activeSessionId || "";
-    const responseIsVisible = !responseSessionId || responseSessionId === activeSessionId;
+    const responseIsVisible = !responseSessionId || isChatSessionVisible(responseSessionId);
     applyAssistantChatTitle(rawContent, responseSessionId);
     const questionRequest = parseClarifyingQuestionRequest(rawContent);
     const assistantMessage = getAssistantMessageForConversation(data);
@@ -433,33 +443,38 @@ async function renderAssistantResponse(data, aiBubble, webSources = [], signal =
     const messageIndex = Number.isInteger(options.messageIndex) ? options.messageIndex : null;
     const alreadyRendered = options.alreadyRendered === true;
     const preserveRenderedContent = options.preserveRenderedContent === true;
-    const shouldPlayVoiceReply = responseIsVisible
+    const canRenderLiveResponse = responseIsVisible
+        && aiBubble instanceof HTMLElement
+        && aiBubble.isConnected;
+    const shouldPlayVoiceReply = canRenderLiveResponse
         && speakThisReply
         && isVoiceReplyEnabled
         && (!isOpenAiProvider() || isOpenAiVoiceSessionActive);
     const realtimeSpeechReply = shouldPlayVoiceReply && !alreadyRendered ? createRealtimeSpeechReply(signal) : null;
 
-    if (alreadyRendered) {
-        if (!preserveRenderedContent) {
-            renderAssistantContentHtml(aiBubble, renderMarkdown(displayContent), { final: true, busy: false });
+    if (canRenderLiveResponse) {
+        if (alreadyRendered) {
+            if (!preserveRenderedContent) {
+                renderAssistantContentHtml(aiBubble, renderMarkdown(displayContent), { final: true, busy: false });
+            }
+            if (shouldPlayVoiceReply) {
+                speakReply(displayContent);
+            }
+        } else {
+            await renderTypewriterMarkdown(aiBubble, displayContent, signal, {
+                onReveal: realtimeSpeechReply ? text => realtimeSpeechReply.appendRevealedText(text) : null
+            });
         }
-        if (shouldPlayVoiceReply) {
-            speakReply(displayContent);
-        }
-    } else {
-        await renderTypewriterMarkdown(aiBubble, displayContent, signal, {
-            onReveal: realtimeSpeechReply ? text => realtimeSpeechReply.appendRevealedText(text) : null
+        setupCodeSandbox(aiBubble);
+        setupAssistantActions(aiBubble.parentElement, options.copyText || data.__faunaCopyText || assistantMessage.content, {
+            messageIndex,
+            canRegenerate: messageIndex !== null,
+            canFork: messageIndex !== null,
+            canSpeak: true,
+            speakText: displayContent
         });
+        renderWebSources(aiBubble.parentElement, responseWebSources);
     }
-    setupCodeSandbox(aiBubble);
-    setupAssistantActions(aiBubble.parentElement, options.copyText || data.__faunaCopyText || assistantMessage.content, {
-        messageIndex,
-        canRegenerate: messageIndex !== null,
-        canFork: messageIndex !== null,
-        canSpeak: true,
-        speakText: displayContent
-    });
-    renderWebSources(aiBubble.parentElement, responseWebSources);
     applyAssistantMemoryRequests(rawContent);
     if (shouldPlayVoiceReply) {
         realtimeSpeechReply?.finish();
@@ -470,6 +485,23 @@ async function renderAssistantResponse(data, aiBubble, webSources = [], signal =
         showClarifyingQuestionComposer(questionRequest);
     }
     return assistantMessage;
+}
+
+function buildFaunaBurstToolStepLimitMessage(burstToolSteps, maxStepsAtATime) {
+    return `I paused after ${burstToolSteps} tool steps. The active max steps at a time is ${maxStepsAtATime}; the model must use thinking to reset that counter before more tool calls.`;
+}
+
+function buildFaunaBurstToolStepLimitFeedback(burstToolSteps, maxStepsAtATime, toolCall) {
+    const attemptedTool = toolCall?.tool ? `\nAttempted next tool: ${toolCall.tool}` : "";
+    return [
+        "[Fauna tool-step pause]",
+        buildFaunaBurstToolStepLimitMessage(burstToolSteps, maxStepsAtATime),
+        attemptedTool.trim(),
+        "",
+        "This message is internal and has not been shown to the user yet.",
+        "If more tool work is needed, respond with exactly one thinking tool call to reset the consecutive step counter before any other tool call.",
+        "If you already have enough information, answer the user's original request now without calling more tools."
+    ].filter(Boolean).join("\n");
 }
 
 async function sendOllamaChatWithLocalTools(messages, options = {}, preferredModel = OLLAMA_MODEL, signal = null, progressTarget = null, streamOptions = {}) {
@@ -497,6 +529,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
     const duplicateToolReminders = new Set();
     let totalToolSteps = 0;
     let burstToolSteps = 0;
+    let burstLimitReminderSent = false;
     const attachToolActivityToData = (data, status = "done") => {
         if (!data || toolActivityItems.length === 0) return data;
         const items = normalizeToolActivityItems(toolActivityItems).map(item => ({
@@ -538,6 +571,9 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
             return attachToolActivityToData(data);
         }
         if (toolCalls.length === 0) {
+            if (burstLimitReminderSent && data.message && !stripAssistantControlBlocks(data.message.content || "").trim()) {
+                data.message.content = buildFaunaBurstToolStepLimitMessage(burstToolSteps, maxStepsAtATime);
+            }
             if (streamRenderer) {
                 streamRenderer.finish(data.message?.content || "");
                 data.__faunaAlreadyRendered = streamRenderer.hasRendered;
@@ -559,9 +595,22 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
         for (const toolCall of toolCalls) {
             const isThinkingTool = isThinkingToolName(toolCall.tool);
             if (!isThinkingTool && burstToolSteps >= maxStepsAtATime) {
+                if (!burstLimitReminderSent) {
+                    if (!assistantContextPushed) {
+                        workingMessages.push({ role: "assistant", content: assistantToolContextContent });
+                        assistantContextPushed = true;
+                    }
+                    workingMessages.push({
+                        role: "user",
+                        content: buildFaunaBurstToolStepLimitFeedback(burstToolSteps, maxStepsAtATime, toolCall)
+                    });
+                    burstLimitReminderSent = true;
+                    continueLoop = true;
+                    break;
+                }
+
                 if (data.message) {
-                    data.message.content = visibleText
-                        || `I paused after ${burstToolSteps} tool steps. The active max steps at a time is ${maxStepsAtATime}; the model must use thinking to reset that counter before more tool calls.`;
+                    data.message.content = visibleText || buildFaunaBurstToolStepLimitMessage(burstToolSteps, maxStepsAtATime);
                 }
                 if (toolWebSources.length > 0) {
                     data.__faunaWebSources = mergeWebSources(toolWebSources);
@@ -582,6 +631,7 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
             totalToolSteps += 1;
             if (isThinkingTool) {
                 burstToolSteps = 0;
+                burstLimitReminderSent = false;
             } else {
                 burstToolSteps += 1;
             }
@@ -593,8 +643,14 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 });
                 if (data.message) {
                     data.message.content = imageResult.content || visibleText || imageResult.historyContent || "";
+                    if (Array.isArray(imageResult.generatedMedia) && imageResult.generatedMedia.length > 0) {
+                        data.message.faunaGeneratedMedia = imageResult.generatedMedia;
+                    }
                 }
                 data.__faunaDisplayContent = visibleText || "Generated image";
+                if (Array.isArray(imageResult.generatedMedia) && imageResult.generatedMedia.length > 0) {
+                    data.__faunaGeneratedMedia = imageResult.generatedMedia;
+                }
                 if (imageResult.imageUrl) {
                     data.__faunaCopyText = getGeneratedMediaCopyText(imageResult.imageUrl, data.message?.content || imageResult.historyContent || "");
                 }
@@ -1949,7 +2005,7 @@ function clearUnreadGenerationCompletion(sessionId, { renderHistory = true } = {
 }
 
 function markUnreadGenerationCompletion(sessionId, { notify = true } = {}) {
-    if (!sessionId || sessionId === activeSessionId) return;
+    if (!sessionId || isChatSessionVisible(sessionId)) return;
     completedGenerationSessionIds.add(sessionId);
     if (notify && typeof notifyChatGenerationCompleted === "function") {
         notifyChatGenerationCompleted(sessionId);
@@ -2009,12 +2065,12 @@ function finishChatGeneration(sessionId, controller = null) {
     const record = getGenerationRecordForSession(sessionId);
     const wasRunning = Boolean(record && (!controller || record.controller === controller));
     const wasAborted = Boolean(record?.controller?.signal?.aborted || controller?.signal?.aborted);
-    const wasActiveSession = sessionId === activeSessionId;
+    const wasVisibleSession = isChatSessionVisible(sessionId);
     if (record && (!controller || record.controller === controller)) {
         activeGenerationRecords.delete(sessionId);
     }
     if (wasRunning && !wasAborted) {
-        if (!wasActiveSession) {
+        if (!wasVisibleSession) {
             markUnreadGenerationCompletion(sessionId, { notify: false });
         } else {
             clearUnreadGenerationCompletion(sessionId, { renderHistory: false });
@@ -2022,7 +2078,7 @@ function finishChatGeneration(sessionId, controller = null) {
         if (typeof notifyChatGenerationCompleted === "function") {
             notifyChatGenerationCompleted(sessionId);
         }
-    } else if (wasActiveSession) {
+    } else if (wasVisibleSession) {
         clearUnreadGenerationCompletion(sessionId, { renderHistory: false });
     }
     updateGenerationUi();

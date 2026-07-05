@@ -1237,6 +1237,7 @@ function setVoiceReplyEnabled(enabled, { persist = true, cue = false } = {}) {
     if (persist) safeLocalStorageSet(VOICE_REPLY_ENABLED_STORAGE_KEY, isVoiceReplyEnabled ? "true" : "false");
     applyVoiceReplyOutputState();
     updateVoiceQuickUi();
+    if (typeof updatePotatoSettingsUi === "function") updatePotatoSettingsUi();
     if (cue) void playVoiceSessionCue(isVoiceReplyEnabled ? "unmute" : "mute");
 }
 
@@ -1476,6 +1477,71 @@ function getGeneratedMediaCopyText(url, fallbackText) {
     return MEDIA_DATA_URL_PREFIX_RE.test(String(url || "")) ? fallbackText : (url || fallbackText);
 }
 
+function normalizeGeneratedMediaType(value = "") {
+    const type = String(value || "").trim().toLowerCase();
+    return ["image", "video"].includes(type) ? type : "";
+}
+
+function normalizeGeneratedMediaItem(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const type = normalizeGeneratedMediaType(raw.type);
+    const src = String(raw.src || raw.url || raw.imageUrl || raw.videoUrl || "").trim();
+    if (!type || !src) return null;
+    return {
+        type,
+        src,
+        prompt: String(raw.prompt || raw.alt || raw.detail || "").trim(),
+        label: String(raw.label || (type === "video" ? "Generated video" : "Generated image")).trim(),
+        extension: String(raw.extension || (type === "video" ? "mp4" : "png")).trim(),
+        sensitive: Boolean(raw.sensitive)
+    };
+}
+
+function normalizeGeneratedMediaItems(items) {
+    if (!Array.isArray(items)) return [];
+    const seen = new Set();
+    return items
+        .map(normalizeGeneratedMediaItem)
+        .filter(item => {
+            if (!item) return false;
+            const key = `${item.type}:${item.src}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+}
+
+function createGeneratedImageMediaItem({
+    src = "",
+    prompt = "",
+    label = "Generated image",
+    sensitive = false
+} = {}) {
+    return normalizeGeneratedMediaItem({
+        type: "image",
+        src,
+        prompt,
+        label,
+        extension: "png",
+        sensitive
+    });
+}
+
+function createGeneratedVideoMediaItem({
+    src = "",
+    prompt = "",
+    label = "Generated video",
+    extension = "mp4"
+} = {}) {
+    return normalizeGeneratedMediaItem({
+        type: "video",
+        src,
+        prompt,
+        label,
+        extension
+    });
+}
+
 function isContextCompactionMessage(message) {
     return Boolean(
         message
@@ -1548,11 +1614,21 @@ function cloneConversationHistory(history, { includeImages = true, sanitizeConte
             if (contextCompaction) {
                 cloned.contextCompaction = contextCompaction;
             }
+            const errorInfo = typeof normalizeErrorHistoryMetadata === "function"
+                ? normalizeErrorHistoryMetadata(message.faunaError || message.errorInfo || null)
+                : null;
+            if (errorInfo) {
+                cloned.faunaError = errorInfo;
+            }
             const toolActivity = typeof normalizeToolActivityItems === "function"
                 ? normalizeToolActivityItems(message.faunaToolActivity || [])
                 : [];
             if (toolActivity.length > 0) {
                 cloned.faunaToolActivity = toolActivity;
+            }
+            const generatedMedia = normalizeGeneratedMediaItems(message.faunaGeneratedMedia || message.generatedMedia || []);
+            if (generatedMedia.length > 0) {
+                cloned.faunaGeneratedMedia = generatedMedia;
             }
             return cloned;
         });
