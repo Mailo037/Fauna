@@ -1044,13 +1044,15 @@ async function regenerateAssistantFromAction(control) {
         });
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: runHistory
         });
         showToast("Response regenerated.", "success");
     } catch (err) {
         renderErrorCard(context.bubble, err, {
             sessionId: generationSessionId,
             history: runHistory,
+            modelContextHistory: runHistory,
             getTokenTotal: () => runTokenTotal
         });
     } finally {
@@ -1058,7 +1060,8 @@ async function regenerateAssistantFromAction(control) {
         updateTokenDisplay();
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: runHistory
         });
     }
 }

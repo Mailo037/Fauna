@@ -88,7 +88,9 @@ const DEFAULT_LOCAL_CHAT_MODEL = "qwen3:8b";
 const DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4-mini";
 const DEFAULT_REMOTE_ACCESS_PORT = 8899;
 const MAX_REMOTE_ACCESS_PORT = 8919;
-const REMOTE_REQUEST_BODY_LIMIT_BYTES = 65536;
+const REMOTE_REQUEST_BODY_LIMIT_BYTES = 24 * 1024 * 1024;
+const REMOTE_ATTACHMENT_MAX_BYTES = 12 * 1024 * 1024;
+const REMOTE_ATTACHMENT_MAX_COUNT = 8;
 const APP_CACHE_STORAGE_KEYS = [
   "faunaOpenAiSpeechCache",
   "faunaVoicePreviewCache",
@@ -1524,6 +1526,27 @@ function getRemoteSettingDefinition(key = "") {
   return REMOTE_EDITABLE_SETTINGS.find(setting => setting.key === cleanKey) || null;
 }
 
+function getRemoteSettingPane(definition = {}) {
+  if (definition.pane) return String(definition.pane);
+  if (definition.key === AUTO_INSTALL_UPDATES_STORAGE_KEY) return "info";
+  const section = String(definition.section || "").trim().toLowerCase();
+  const paneBySection = {
+    appearance: "general",
+    provider: "provider",
+    media: "services",
+    voice: "voice",
+    response: "provider",
+    agent: "task-models",
+    "local workspace": "services",
+    "local services": "services",
+    notifications: "notifications",
+    performance: "potato",
+    personalization: "personalization",
+    updates: "info"
+  };
+  return paneBySection[section] || "general";
+}
+
 function serializeRemoteSetting(definition = {}) {
   const stored = storageGetSync(definition.key);
   const storageValue = normalizeRemoteSettingStorageValue(
@@ -1532,6 +1555,7 @@ function serializeRemoteSetting(definition = {}) {
   );
   return {
     key: definition.key,
+    pane: getRemoteSettingPane(definition),
     section: definition.section || "Settings",
     label: definition.label || definition.key,
     description: definition.description || "",
@@ -2329,6 +2353,99 @@ function readRemoteJsonBody(req) {
   });
 }
 
+function getRemoteUploadsRoot() {
+  return path.join(getUserDataRoot(), "mobile-uploads");
+}
+
+function sanitizeRemoteUploadName(value = "") {
+  const base = path.basename(String(value || "attachment").trim()) || "attachment";
+  const safe = base.replace(/[<>:"/\\|?*\x00-\x1F]+/g, "_").replace(/\s+/g, " ").trim();
+  return (safe || "attachment").slice(0, 160);
+}
+
+function getRemoteAttachmentBuffer(raw = {}) {
+  const dataUrl = String(raw.dataUrl || "").trim();
+  const base64 = dataUrl.includes(",")
+    ? dataUrl.slice(dataUrl.indexOf(",") + 1)
+    : String(raw.base64 || "").trim();
+  if (!base64) throw new Error("Attachment data is missing.");
+  const buffer = Buffer.from(base64, "base64");
+  if (!buffer.length) throw new Error("Attachment data is empty.");
+  if (buffer.length > REMOTE_ATTACHMENT_MAX_BYTES) {
+    throw new Error(`${sanitizeRemoteUploadName(raw.name)} is larger than ${Math.round(REMOTE_ATTACHMENT_MAX_BYTES / 1024 / 1024)} MB.`);
+  }
+  return buffer;
+}
+
+function saveRemoteAttachments(attachments = []) {
+  const items = Array.isArray(attachments) ? attachments.slice(0, REMOTE_ATTACHMENT_MAX_COUNT) : [];
+  if (items.length === 0) return [];
+  const root = getRemoteUploadsRoot();
+  ensureDirSync(root);
+  return items.map(raw => {
+    const name = sanitizeRemoteUploadName(raw?.name);
+    const type = String(raw?.type || "").trim();
+    const buffer = getRemoteAttachmentBuffer(raw);
+    const fileName = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${name}`;
+    const filePath = path.resolve(root, fileName);
+    if (!isPathInside(filePath, root)) throw new Error("Invalid attachment path.");
+    fs.writeFileSync(filePath, buffer);
+    return {
+      path: filePath,
+      name,
+      type
+    };
+  });
+}
+
+async function getRemoteLibraryItemsFromRenderer(limit = 160) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    throw new Error("Desktop UI is still loading. Try Library again in a moment.");
+  }
+  if (mainWindow.webContents.isLoading() || !mainRendererReady) {
+    throw new Error("Desktop UI is still loading. Try Library again in a moment.");
+  }
+  const safeLimit = Math.max(1, Math.min(300, Number(limit) || 160));
+  const script = `
+    (() => {
+      const safeText = (value, max = 240) => String(value || "").replace(/\\s+/g, " ").trim().slice(0, max);
+      const items = typeof collectLibraryItems === "function" ? collectLibraryItems() : [];
+      const getKey = typeof getLibraryItemPersistentKey === "function"
+        ? getLibraryItemPersistentKey
+        : item => item?.id || item?.src || item?.title || "";
+      const getKind = typeof getLibraryItemKindLabel === "function"
+        ? getLibraryItemKindLabel
+        : item => item?.type || "Library item";
+      const getDate = typeof formatLibraryItemDate === "function"
+        ? formatLibraryItemDate
+        : () => "";
+      return items.map(item => {
+        const key = safeText(getKey(item), 512);
+        if (!key) return null;
+        const type = safeText(item?.type || "file", 32);
+        const src = safeText(item?.src || "", 4096);
+        return {
+          key,
+          id: safeText(item?.id || key, 512),
+          type,
+          title: safeText(item?.title || item?.fileName || getKind(item) || "Library item", 180),
+          detail: safeText(item?.detail || item?.sessionTitle || item?.prompt || "", 260),
+          meta: safeText([getKind(item), getDate(item)].filter(Boolean).join(" / "), 160),
+          sessionTitle: safeText(item?.sessionTitle || "", 160),
+          createdAt: safeText(item?.createdAt || item?.timestamp || "", 80),
+          fileName: safeText(item?.fileName || "", 180),
+          lang: safeText(item?.lang || "", 32),
+          kind: safeText(item?.kind || "", 32),
+          thumbnail: /^(?:data:image\\/|https?:)/i.test(src) ? src : ""
+        };
+      }).filter(Boolean).slice(0, ${safeLimit});
+    })()
+  `;
+  const result = await mainWindow.webContents.executeJavaScript(script, true);
+  return Array.isArray(result) ? result : [];
+}
+
 function getRemoteStaticMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".html") return "text/html; charset=utf-8";
@@ -2409,12 +2526,189 @@ function cleanRemoteMessageText(value = "") {
     .trim();
 }
 
+function cleanRemoteToolText(value = "", limit = 1000) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, limit);
+}
+
+function getRemoteToolKind(tool = "", item = {}) {
+  const explicit = cleanRemoteToolText(item.kind, 40).toLowerCase();
+  if (explicit && /^[a-z0-9_-]+$/.test(explicit)) return explicit;
+  const name = cleanRemoteToolText(tool || item.toolName || item.label, 80).toLowerCase();
+  if (["run_terminal_command", "terminal", "exec", "shell", "wait_for", "stopwatch"].includes(name)) return "terminal";
+  if (["read_file", "read_files", "write_file", "append_file", "edit_file", "search_text"].includes(name)) return "file";
+  if (["read_directory", "list_directory", "search_files", "make_directory", "workspace_tree"].includes(name)) return "workspace";
+  if (["web_search", "inspect_url", "fetch_url", "api_call", "mcp_call"].includes(name)) return "web";
+  if (["generate_image", "edit_image", "upload_image", "vision_analysis"].includes(name)) return "image";
+  if (["get_ip_location", "current_weather"].includes(name)) return "location";
+  if (["wait", "timer"].includes(name)) return "timer";
+  if (["read_memories", "save_memory", "delete_memory"].includes(name)) return "memory";
+  if (name === "thinking") return "thinking";
+  return "tool";
+}
+
+function formatRemoteToolName(value = "", fallback = "Tool") {
+  const text = cleanRemoteToolText(value || fallback, 120)
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return fallback;
+  return text.replace(/\b[a-z]/g, match => match.toUpperCase());
+}
+
+function getRemoteToolInputFromPayload(payload = {}) {
+  const candidates = [
+    payload.input,
+    payload.prompt,
+    payload.query,
+    payload.path,
+    payload.url,
+    payload.command,
+    payload.reason,
+    payload.duration,
+    payload.cwd
+  ];
+  return cleanRemoteToolText(candidates.find(value => value !== undefined && value !== null) || "", 1200);
+}
+
+function getRemoteToolSettingsFromPayload(payload = {}) {
+  const settings = [];
+  ["style", "quality", "aspectRatio", "format", "width", "height", "timeout", "depth"].forEach(key => {
+    if (payload[key] !== undefined && payload[key] !== null && payload[key] !== "") {
+      settings.push(`${key}: ${payload[key]}`);
+    }
+  });
+  return cleanRemoteToolText(settings.join(", "), 500);
+}
+
+function normalizeRemoteToolActivityItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => {
+      const tool = cleanRemoteToolText(item?.tool || item?.toolName || item?.name || "", 120);
+      const kind = getRemoteToolKind(tool, item);
+      const sources = Array.isArray(item?.sources)
+        ? item.sources.slice(0, 8).map(source => ({
+          title: cleanRemoteToolText(source?.title || source?.url || "Result", 180),
+          url: cleanRemoteToolText(source?.url || "", 500),
+          snippet: cleanRemoteToolText(source?.snippet || "", 500)
+        })).filter(source => source.title || source.url || source.snippet)
+        : [];
+      return {
+        id: cleanRemoteToolText(item?.id || `${kind}-${index}`, 120),
+        kind,
+        label: cleanRemoteToolText(item?.label || item?.name || formatRemoteToolName(tool, "Tool"), 180),
+        tool,
+        detail: cleanRemoteToolText(item?.detail || item?.path || item?.url || item?.command || "", 1200),
+        meta: cleanRemoteToolText(item?.meta || item?.status || "", 240),
+        input: cleanRemoteToolText(item?.input || item?.prompt || "", 1200),
+        settings: cleanRemoteToolText(item?.settings || "", 700),
+        query: cleanRemoteToolText(item?.query || "", 700),
+        resultCount: Number.isFinite(Number(item?.resultCount)) ? Number(item.resultCount) : null,
+        error: cleanRemoteToolText(item?.error || "", 700),
+        sources
+      };
+    })
+    .filter(item => item.label || item.tool || item.detail || item.meta || item.input || item.settings || item.query || item.error || item.sources.length);
+}
+
+function parseRemoteToolArguments(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  const text = String(value || "").trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : { input: text };
+  } catch {
+    return { input: text };
+  }
+}
+
+function normalizeRemoteProviderToolCalls(calls = []) {
+  return (Array.isArray(calls) ? calls : [])
+    .map((call, index) => {
+      const fn = call?.function && typeof call.function === "object" ? call.function : {};
+      const payload = parseRemoteToolArguments(fn.arguments || call?.arguments || call?.args || call?.input);
+      const tool = cleanRemoteToolText(fn.name || call?.name || call?.tool || call?.toolName || call?.type || "Tool call", 120);
+      const merged = { ...payload, ...call, tool, toolName: tool };
+      const kind = getRemoteToolKind(tool, merged);
+      return {
+        id: cleanRemoteToolText(call?.id || call?.call_id || `${kind}-${index}`, 120),
+        kind,
+        label: formatRemoteToolName(tool, "Tool call"),
+        tool,
+        detail: cleanRemoteToolText(payload.path || payload.url || payload.command || payload.reason || call?.detail || "", 1200),
+        meta: cleanRemoteToolText(call?.status || call?.state || "Requested", 240),
+        input: getRemoteToolInputFromPayload(merged),
+        settings: getRemoteToolSettingsFromPayload(merged),
+        query: cleanRemoteToolText(payload.query || call?.query || "", 700),
+        resultCount: null,
+        error: cleanRemoteToolText(call?.error || "", 700),
+        sources: []
+      };
+    });
+}
+
+function extractRemoteToolCallsFromText(value = "") {
+  const text = String(value || "");
+  const items = [];
+  const tagPattern = /<fauna_tool_call>([\s\S]*?)<\/fauna_tool_call>/gi;
+  let match;
+  while ((match = tagPattern.exec(text))) {
+    try {
+      const payload = JSON.parse(match[1]);
+      if (!payload || typeof payload !== "object") continue;
+      const tool = cleanRemoteToolText(payload.tool || payload.toolName || "", 120);
+      const kind = getRemoteToolKind(tool, payload);
+      items.push({
+        id: `${kind}-${items.length}`,
+        kind,
+        label: formatRemoteToolName(tool, "Tool call"),
+        tool,
+        detail: cleanRemoteToolText(payload.path || payload.url || payload.command || payload.reason || "", 1200),
+        meta: "Requested",
+        input: getRemoteToolInputFromPayload(payload),
+        settings: getRemoteToolSettingsFromPayload(payload),
+        query: cleanRemoteToolText(payload.query || "", 700),
+        resultCount: null,
+        error: "",
+        sources: []
+      });
+    } catch {
+      // Ignore malformed historical tool blocks instead of breaking remote chat sync.
+    }
+  }
+  return items;
+}
+
 function normalizeRemoteMessage(message = {}, index = 0) {
   const role = ["user", "assistant", "system", "tool"].includes(message.role) ? message.role : "assistant";
+  const rawText = getRemoteMessageText(message.content);
+  const directToolActivity = normalizeRemoteToolActivityItems(
+    message.faunaToolActivity || message.toolActivity || message.__faunaToolActivity || []
+  );
+  const providerToolActivity = directToolActivity.length > 0
+    ? []
+    : normalizeRemoteProviderToolCalls(
+      message.tool_calls
+      || message.toolCalls
+      || message.__faunaToolCalls
+      || message.message?.tool_calls
+      || message.message?.toolCalls
+      || []
+    );
+  const fallbackActivity = directToolActivity.length > 0 || providerToolActivity.length > 0 ? [] : extractRemoteToolCallsFromText(rawText);
+  const toolActivity = directToolActivity.length > 0
+    ? directToolActivity
+    : (providerToolActivity.length > 0 ? providerToolActivity : fallbackActivity);
   return {
     id: String(message.id || `${role}-${index}`),
+    historyIndex: index,
     role,
-    content: cleanRemoteMessageText(getRemoteMessageText(message.content)),
+    content: cleanRemoteMessageText(rawText),
+    toolActivity,
     createdAt: String(message.createdAt || message.completedAt || ""),
     error: message.faunaError || null
   };
@@ -2459,7 +2753,7 @@ function serializeRemoteChatSession(session) {
     updatedAt: session?.updatedAt || session?.createdAt || "",
     pinned: Boolean(session?.pinned),
     archived: Boolean(session?.archived),
-    messages: history.map(normalizeRemoteMessage).filter(message => message.content || message.error)
+    messages: history.map(normalizeRemoteMessage).filter(message => message.content || message.error || message.toolActivity?.length)
   };
 }
 
@@ -2467,13 +2761,12 @@ function normalizeRemotePrompt(value = "") {
   return String(value || "").replace(/\r\n/g, "\n").trim().slice(0, 12000);
 }
 
-function dispatchRemotePrompt({ chatId = "", prompt = "", newChat = false } = {}) {
+function dispatchRemotePrompt({ chatId = "", prompt = "", attachments = [], libraryItems = [], newChat = false } = {}) {
   const cleanPrompt = normalizeRemotePrompt(prompt);
-  if (!cleanPrompt) throw new Error("Message is empty.");
+  const quickPayload = normalizeQuickPromptPayload({ prompt: cleanPrompt, attachments, libraryItems });
+  if (!quickPromptPayloadHasContent(quickPayload)) throw new Error("Message is empty.");
 
   const safeChatId = sanitizeId(chatId, "");
-  const quickPayload = normalizeQuickPromptPayload({ prompt: cleanPrompt });
-  if (!quickPromptPayloadHasContent(quickPayload)) throw new Error("Message is empty.");
 
   if (!mainWindow || mainWindow.isDestroyed()) {
     pendingOpenChatId = safeChatId || pendingOpenChatId;
@@ -2514,6 +2807,162 @@ function setRemoteChatPinned(chatId = "", pinned = false) {
     updatedAt: session.updatedAt
   });
   return serializeRemoteChatSession(session);
+}
+
+function normalizeRemoteChatTitle(value = "") {
+  return truncateLabel(String(value || "").replace(/\s+/g, " ").trim(), 80);
+}
+
+function updateRemoteChatTitle(chatId = "", title = "") {
+  const safeId = sanitizeId(chatId, "");
+  const session = readChatSessionByIdSync(safeId);
+  if (!session) throw new Error("Chat was not found.");
+  const cleanTitle = normalizeRemoteChatTitle(title);
+  if (!cleanTitle) throw new Error("Chat name is empty.");
+  session.title = cleanTitle;
+  session.manualTitle = true;
+  session.assistantTitle = "";
+  session.updatedAt = new Date().toISOString();
+  writeJsonFileSync(getChatFilePath(safeId), { ...session, id: safeId });
+  refreshDesktopRecents();
+  sendToRenderer("fauna:remote-chat-updated", {
+    chatId: safeId,
+    title: cleanTitle,
+    updatedAt: session.updatedAt
+  });
+  return serializeRemoteChatSession(session);
+}
+
+function setRemoteChatArchived(chatId = "", archived = false) {
+  const safeId = sanitizeId(chatId, "");
+  const sessions = readChatSessionsSync();
+  const session = sessions.find(item => sanitizeId(item?.id, "") === safeId);
+  if (!session) throw new Error("Chat was not found.");
+  session.archived = Boolean(archived);
+  if (session.archived) session.pinned = false;
+  session.updatedAt = new Date().toISOString();
+  writeJsonFileSync(getChatFilePath(safeId), { ...session, id: safeId });
+  if (session.archived && getActiveChatIdSync() === safeId) {
+    const nextActive = sessions
+      .filter(item => sanitizeId(item?.id, "") !== safeId && !item?.archived && sessionHasContent(item))
+      .sort(compareRemoteChatSessions)[0]?.id || "";
+    storageSetSync(ACTIVE_CHAT_SESSION_STORAGE_KEY, nextActive);
+  }
+  refreshDesktopRecents();
+  sendToRenderer("fauna:remote-chat-updated", {
+    chatId: safeId,
+    archived: session.archived,
+    updatedAt: session.updatedAt
+  });
+  return serializeRemoteChatSession(session);
+}
+
+function deleteRemoteChat(chatId = "") {
+  const safeId = sanitizeId(chatId, "");
+  const sessions = readChatSessionsSync();
+  const existing = sessions.find(item => sanitizeId(item?.id, "") === safeId);
+  if (!existing) throw new Error("Chat was not found.");
+  const remaining = sessions.filter(item => sanitizeId(item?.id, "") !== safeId);
+  writeChatSessionsSync(remaining);
+  if (getActiveChatIdSync() === safeId) {
+    const nextActive = remaining
+      .filter(item => !item?.archived && sessionHasContent(item))
+      .sort(compareRemoteChatSessions)[0]?.id || "";
+    storageSetSync(ACTIVE_CHAT_SESSION_STORAGE_KEY, nextActive);
+  }
+  sendToRenderer("fauna:remote-chat-deleted", { chatId: safeId });
+  return {
+    deleted: safeId,
+    activeChatId: getActiveChatIdSync(),
+    chats: getRemoteChatSummaries(80)
+  };
+}
+
+function normalizeRemoteMessageIndex(value, history = []) {
+  const index = Number(value);
+  return Number.isInteger(index) && index >= 0 && index < history.length ? index : -1;
+}
+
+function cloneRemoteJson(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function getRemoteForkTitle(history = []) {
+  const firstUser = history.find(message => message?.role === "user" && message?.content);
+  const title = truncateLabel(firstUser?.content, 54);
+  return title ? `Fork: ${title}` : "Forked chat";
+}
+
+function forkRemoteChat(chatId = "", messageIndex = -1) {
+  const safeId = sanitizeId(chatId, "");
+  const sessions = readChatSessionsSync();
+  const source = sessions.find(item => sanitizeId(item?.id, "") === safeId);
+  if (!source) throw new Error("Chat was not found.");
+  const history = Array.isArray(source.conversationHistory) ? source.conversationHistory : [];
+  const index = normalizeRemoteMessageIndex(messageIndex, history);
+  if (index < 0) throw new Error("Message was not found.");
+
+  const forkHistory = cloneRemoteJson(history.slice(0, index + 1)) || [];
+  if (forkHistory.length === 0) throw new Error("There is nothing to fork yet.");
+  const now = new Date().toISOString();
+  const forkId = sanitizeId(`chat-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`, "chat");
+  const forkSession = {
+    id: forkId,
+    title: getRemoteForkTitle(forkHistory),
+    manualTitle: true,
+    assistantTitle: "",
+    createdAt: now,
+    updatedAt: now,
+    pinned: false,
+    archived: false,
+    chatHtml: "",
+    domNodes: [],
+    conversationHistory: forkHistory,
+    sessionTotalTokens: sumRemoteHistoryTokens(forkHistory)
+  };
+
+  writeChatSessionsSync([forkSession, ...sessions]);
+  storageSetSync(ACTIVE_CHAT_SESSION_STORAGE_KEY, forkId);
+  sendToRenderer("fauna:open-chat", { chatId: forkId });
+  return serializeRemoteChatSession(forkSession);
+}
+
+function sumRemoteHistoryTokens(history = []) {
+  return history.reduce((total, message) => {
+    const usage = message?.usage || message?.tokenUsage || {};
+    const values = [
+      usage.inputTokens,
+      usage.outputTokens,
+      usage.totalTokens,
+      message?.tokens
+    ].map(Number).filter(Number.isFinite);
+    return total + (values[2] || values[0] + values[1] || values[0] || 0);
+  }, 0);
+}
+
+function regenerateRemoteChatFromMessage(chatId = "", messageIndex = -1) {
+  const safeId = sanitizeId(chatId, "");
+  const session = readChatSessionByIdSync(safeId);
+  if (!session) throw new Error("Chat was not found.");
+  if (session.archived) throw new Error("Archived chats are read-only.");
+  const history = Array.isArray(session.conversationHistory) ? session.conversationHistory : [];
+  const index = normalizeRemoteMessageIndex(messageIndex, history);
+  if (index < 0 || history[index]?.role !== "assistant") throw new Error("Choose an assistant response to regenerate.");
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const message = history[cursor];
+    if (message?.role === "user" && normalizeRemotePrompt(message.content)) {
+      return dispatchRemotePrompt({
+        chatId: safeId,
+        prompt: message.content,
+        newChat: false
+      });
+    }
+  }
+  throw new Error("There is no prompt to regenerate from.");
 }
 
 function getRemoteSettingsPayload() {
@@ -2603,6 +3052,12 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
     return;
   }
 
+  if (method === "GET" && requestUrl.pathname === "/api/library") {
+    const items = await getRemoteLibraryItemsFromRenderer(requestUrl.searchParams.get("limit"));
+    sendRemoteJson(res, 200, { ok: true, items });
+    return;
+  }
+
   if (method === "POST" && requestUrl.pathname === "/api/settings") {
     const body = await readRemoteJsonBody(req);
     const changed = await applyRemoteSettingsPayload(body);
@@ -2638,9 +3093,12 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
 
   if (method === "POST" && requestUrl.pathname === "/api/messages") {
     const body = await readRemoteJsonBody(req);
+    const attachments = saveRemoteAttachments(body.attachments);
     const result = dispatchRemotePrompt({
       chatId: body.chatId,
       prompt: body.message || body.prompt,
+      attachments,
+      libraryItems: body.libraryItems,
       newChat: Boolean(body.newChat)
     });
     sendRemoteJson(res, 202, { ok: true, accepted: true, ...result });
@@ -2660,15 +3118,31 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
       return;
     }
 
+    if ((method === "PATCH" || method === "POST") && parts.length === 3) {
+      const body = await readRemoteJsonBody(req);
+      const chat = updateRemoteChatTitle(chatId, body.title || body.name);
+      sendRemoteJson(res, 200, { ok: true, chat });
+      return;
+    }
+
+    if (method === "DELETE" && parts.length === 3) {
+      const result = deleteRemoteChat(chatId);
+      sendRemoteJson(res, 200, { ok: true, ...result });
+      return;
+    }
+
     if (method === "POST" && parts[3] === "send") {
       if (session.archived) {
         sendRemoteJson(res, 409, { ok: false, error: "Archived chats are read-only." });
         return;
       }
       const body = await readRemoteJsonBody(req);
+      const attachments = saveRemoteAttachments(body.attachments);
       const result = dispatchRemotePrompt({
         chatId,
         prompt: body.message || body.prompt,
+        attachments,
+        libraryItems: body.libraryItems,
         newChat: false
       });
       sendRemoteJson(res, 202, { ok: true, accepted: true, chatId, ...result });
@@ -2679,6 +3153,27 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
       const body = await readRemoteJsonBody(req);
       const chat = setRemoteChatPinned(chatId, body.pinned);
       sendRemoteJson(res, 200, { ok: true, chat });
+      return;
+    }
+
+    if (method === "POST" && parts[3] === "archive") {
+      const body = await readRemoteJsonBody(req);
+      const chat = setRemoteChatArchived(chatId, body.archived !== false);
+      sendRemoteJson(res, 200, { ok: true, chat, activeChatId: getActiveChatIdSync() });
+      return;
+    }
+
+    if (method === "POST" && parts[3] === "fork") {
+      const body = await readRemoteJsonBody(req);
+      const chat = forkRemoteChat(chatId, body.messageIndex);
+      sendRemoteJson(res, 200, { ok: true, chat });
+      return;
+    }
+
+    if (method === "POST" && parts[3] === "regenerate") {
+      const body = await readRemoteJsonBody(req);
+      const result = regenerateRemoteChatFromMessage(chatId, body.messageIndex);
+      sendRemoteJson(res, 202, { ok: true, accepted: true, chatId, ...result });
       return;
     }
   }
@@ -3566,16 +4061,20 @@ function normalizeQuickPromptPayload(payload) {
       type: String(attachment?.type || "").trim()
     })).filter(attachment => attachment.path)
     : [];
+  const libraryItems = Array.isArray(raw.libraryItems)
+    ? raw.libraryItems.map(item => String(item?.key || item?.id || item || "").trim()).filter(Boolean).slice(0, REMOTE_ATTACHMENT_MAX_COUNT)
+    : [];
   return {
     prompt: String(raw.prompt || "").trim(),
     provider: normalizeAiProvider(raw.provider),
     modelId: String(raw.modelId || "").trim(),
-    attachments
+    attachments,
+    libraryItems
   };
 }
 
 function quickPromptPayloadHasContent(payload) {
-  return Boolean(payload?.prompt || payload?.attachments?.length);
+  return Boolean(payload?.prompt || payload?.attachments?.length || payload?.libraryItems?.length);
 }
 
 function openMainWindow({ chatId = "", prompt = "", quickPayload = null, newChat = false } = {}) {

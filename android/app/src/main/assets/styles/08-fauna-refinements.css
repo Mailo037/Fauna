@@ -1,0 +1,579 @@
+/* Original styles.css lines 8970-9547. */
+/* ═══════════════════════════════════════════════════════════════
+   Fauna refinements: animations, welcome, composer, menus, a11y
+   ═══════════════════════════════════════════════════════════════ */
+
+/* --- Geometry token --- */
+:root {
+    --radius-composer: 22px;
+}
+
+/* --- Welcome screen: less clutter --- */
+.welcome-logo-glow {
+    display: none;
+}
+
+.welcome-container {
+    padding-top: clamp(32px, 8vh, 84px);
+}
+
+.welcome-hero {
+    text-align: center;
+}
+
+.welcome-hero h1 {
+    font-size: clamp(22px, 3.8vw, 30px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.18;
+}
+
+.welcome-hero p {
+    margin-top: 6px;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* --- Welcome entrance animations --- */
+@keyframes welcomeHeroIn {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+}
+
+@keyframes suggestionCardIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+}
+
+body.app-ready .welcome-hero h1 {
+    animation: welcomeHeroIn 0.52s var(--ease) both;
+    animation-delay: 0.08s;
+}
+
+body.app-ready .welcome-hero p {
+    animation: welcomeHeroIn 0.52s var(--ease) both;
+    animation-delay: 0.15s;
+}
+
+body.app-ready .suggestion-card {
+    animation: suggestionCardIn 0.48s var(--ease) both;
+}
+
+body.app-ready .suggestion-card:nth-child(1) { animation-delay: 0.20s; }
+body.app-ready .suggestion-card:nth-child(2) { animation-delay: 0.26s; }
+body.app-ready .suggestion-card:nth-child(3) { animation-delay: 0.32s; }
+body.app-ready .suggestion-card:nth-child(4) { animation-delay: 0.38s; }
+
+/* --- Suggestion cards: hover lift + glow --- */
+.suggestion-card {
+    transition: background-color 0.2s var(--ease), border-color 0.2s var(--ease),
+                transform 0.22s var(--ease), box-shadow 0.22s var(--ease);
+}
+
+.suggestion-card:hover,
+.suggestion-card:focus-visible {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.suggestion-card:active {
+    transform: translateY(0) scale(0.98);
+}
+
+/* --- Composer: rounder, polished --- */
+.input-container-floating {
+    border-radius: var(--radius-composer);
+    transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.input-container-floating:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* --- Clarifying question: match composer radius --- */
+.clarifying-question-card {
+    border-radius: var(--radius-composer);
+}
+
+/* --- Dropdowns: rounder + entrance animation --- */
+.model-dropdown,
+.tools-dropdown {
+    border-radius: var(--radius-composer);
+    overflow: hidden;
+}
+
+.model-dropdown.open,
+.tools-dropdown.open {
+    animation: dropdownIn 0.16s var(--ease) both;
+}
+
+@keyframes dropdownIn {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* --- Voice quick panel: composer radius --- */
+.voice-quick-panel {
+    border-radius: var(--radius-composer);
+}
+
+/* --- Status pill & settings button: micro-lift on hover --- */
+.status-pill,
+.theme-toggle {
+    transition: background-color 0.18s var(--ease), color 0.18s var(--ease),
+                border-color 0.18s var(--ease), transform 0.18s var(--ease);
+}
+
+.status-pill:hover,
+.theme-toggle:hover {
+    transform: translateY(-1px);
+}
+
+/* --- Action circle buttons: scale on hover --- */
+.action-circle-btn,
+.voice-btn {
+    transition: background-color 0.18s var(--ease), color 0.18s var(--ease),
+                transform 0.18s var(--ease);
+}
+
+.action-circle-btn:hover,
+.voice-btn:hover:not(:disabled) {
+    transform: scale(1.06);
+}
+
+/* --- Run button: spring press --- */
+.run-btn {
+    transition: background-color 0.18s var(--ease), border-color 0.18s var(--ease),
+                transform 0.15s var(--ease);
+}
+
+.run-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+.run-btn:active:not(:disabled) {
+    transform: translateY(0) scale(0.97);
+}
+
+/* --- Chat message entrance: refined --- */
+@keyframes messageInRefined {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+}
+
+.message-node {
+    animation: messageInRefined 0.3s var(--ease) both;
+}
+
+body.voice-chat-active .chat-stream {
+    padding-top: 0;
+    padding-bottom: max(232px, var(--voice-chat-turn-padding, 0px), var(--composer-safe-area));
+}
+
+body.voice-chat-active .message-node.voice-user-prompt {
+    animation: none;
+}
+
+body.voice-chat-active .message-node.voice-assistant-reply {
+    animation: none;
+}
+
+body.voice-chat-active .message-node.voice-current-assistant-reply {
+    width: min(1040px, calc(100% - 16px));
+    margin-top: 0;
+    margin-bottom: 42px;
+}
+
+body.voice-chat-active .message-node.voice-current-assistant-reply .bubble-block {
+    max-width: 100%;
+}
+
+body.voice-chat-active .message-node.voice-current-assistant-reply .bubble {
+    font-size: 22px;
+    line-height: 1.5;
+    letter-spacing: 0;
+}
+
+body.voice-chat-active .message-node.voice-current-assistant-reply .markdown p {
+    margin: 0.78em 0;
+}
+
+/* --- Nav items: smoother sidebar animations --- */
+.nav-item,
+.history-item,
+.chat-session-row {
+    transition: background-color 0.18s var(--ease), border-color 0.18s var(--ease),
+                color 0.18s var(--ease), box-shadow 0.18s var(--ease),
+                transform 0.18s var(--ease);
+}
+
+/* --- Toast: composer radius for consistency --- */
+.toast {
+    border-radius: var(--radius-xl);
+}
+
+/* --- Personalization pane: extra spacing --- */
+.settings-pane[data-settings-pane-panel="personalization"] .settings-row {
+    padding: 14px 0;
+}
+
+/* --- Settings modal: fixed height to prevent resize --- */
+/* (already set via direct rule edit in .settings-dialog) */
+
+/* --- Reduced motion: skip all new animations --- */
+@media (prefers-reduced-motion: reduce) {
+    body.app-ready .welcome-hero h1,
+    body.app-ready .welcome-hero p,
+    body.app-ready .suggestion-card {
+        animation: none;
+        opacity: 1;
+        transform: none;
+    }
+
+    .model-dropdown.open,
+    .tools-dropdown.open {
+        animation: none;
+    }
+
+    body.voice-chat-active .message-node.voice-user-prompt {
+        transform: none;
+    }
+
+    .suggestion-card:hover,
+    .suggestion-card:focus-visible,
+    .status-pill:hover,
+    .theme-toggle:hover,
+    .action-circle-btn:hover,
+    .voice-btn:hover:not(:disabled),
+    .run-btn:hover:not(:disabled) {
+        transform: none;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Minimalist sidebar redesign
+   ═══════════════════════════════════════════════════════════ */
+
+.sidebar {
+    --sidebar-row-radius: 6px;
+    gap: 8px;
+    padding: 14px 8px;
+    background: var(--bg);
+    border-right: 1px solid var(--border-soft);
+    box-shadow: none;
+    transition: width 0.22s var(--ease), min-width 0.22s var(--ease);
+}
+
+:root[data-theme="light"] .sidebar {
+    background: var(--bg);
+    box-shadow: none;
+}
+
+/* Logo: flat, no decorative icon box */
+.logo {
+    gap: 9px;
+    min-height: 38px;
+    padding: 0 6px 10px;
+    border-bottom: 0;
+}
+
+.logo-icon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--accent);
+}
+
+.logo-icon .fauna-mark {
+    width: 18px;
+    height: 18px;
+    filter: none;
+}
+
+.logo-text {
+    font-size: 14px;
+    font-weight: 750;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    color: var(--text);
+}
+
+.logo-kicker {
+    display: none;
+}
+
+/* Collapse toggle: borderless, minimal */
+.sidebar-collapse-toggle,
+.sidebar-collapse-toggle:hover,
+.sidebar-collapse-toggle:focus-visible {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border-radius: 6px;
+}
+
+.sidebar-collapse-toggle {
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.sidebar-collapse-toggle:hover,
+.sidebar-collapse-toggle:focus-visible {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+    color: var(--text);
+    border: 0;
+}
+
+/* Section labels */
+.sidebar-section-label,
+.history-label {
+    padding: 0 8px 3px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-dim);
+    opacity: 0.65;
+    line-height: 1;
+}
+
+/* Nav + history rows: completely flat */
+.nav-item,
+.history-item {
+    min-height: 34px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--sidebar-row-radius);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    font-weight: 520;
+    will-change: auto;
+    box-shadow: none;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.nav-item:hover,
+.history-item:hover:not(:disabled),
+.nav-item:focus-visible,
+.history-item:focus-visible {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text);
+    transform: none;
+    border: 0;
+    box-shadow: none;
+}
+
+/* Active: accent color text + subtle tint, no left bar, no gradient */
+.nav-item.active,
+.history-item.active {
+    border: 0;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    color: var(--accent);
+    font-weight: 650;
+    box-shadow: none;
+    transform: none;
+}
+
+.nav-item.active:hover,
+.history-item.active:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Icons */
+.nav-icon,
+.history-icon {
+    width: 15px;
+    height: 15px;
+    opacity: 0.65;
+}
+
+.nav-item.active .nav-icon {
+    color: var(--accent);
+    opacity: 1;
+}
+
+/* Hide chevron */
+.chevron-right {
+    display: none;
+}
+
+/* New chat: flat, no box */
+.new-chat-item {
+    margin-bottom: 3px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.new-chat-item:hover,
+.new-chat-item:focus-visible {
+    border: 0;
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text);
+}
+
+.new-chat-item .history-icon {
+    color: inherit;
+    opacity: 0.6;
+    transition: transform 0.2s var(--ease), opacity 0.15s var(--ease);
+}
+
+.new-chat-item:hover .history-icon,
+.new-chat-item:focus-visible .history-icon {
+    transform: rotate(-10deg);
+    opacity: 0.9;
+}
+
+/* Chat session rows */
+.chat-session-row {
+    border: 0;
+    border-radius: var(--sidebar-row-radius);
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.chat-session-row:hover,
+.chat-session-row:focus-within {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    color: var(--text);
+    transform: none;
+}
+
+.chat-session-row.active {
+    border: 0;
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    box-shadow: none;
+}
+
+.chat-session-main {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    min-height: 34px;
+    gap: 7px;
+    padding: 0 8px;
+}
+
+.chat-session-row.active .chat-session-main {
+    color: var(--accent);
+}
+
+/* Hide the animated dot bar in session rows */
+.chat-session-main .dot {
+    display: none;
+}
+
+/* Chat history list: tight gaps */
+.chat-history-list {
+    gap: 1px;
+    padding: 1px 0 8px;
+}
+
+/* History subsection labels */
+.history-subsection-label {
+    margin: 8px 2px 2px;
+    padding: 0 7px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-dim);
+    opacity: 0.55;
+}
+
+/* Collapsed state adjustments */
+.sidebar.collapsed {
+    padding: 14px 8px;
+}
+
+.sidebar.collapsed .logo {
+    flex-direction: column;
+    gap: 4px;
+    padding: 0 0 4px;
+    border-bottom: 0;
+}
+
+.sidebar.collapsed .sidebar-collapse-toggle {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    border-radius: 6px;
+}
+
+.sidebar.collapsed .nav-item,
+.sidebar.collapsed .history-item,
+.sidebar.collapsed .chat-session-main {
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
+    flex: 0 0 34px;
+    border-radius: 6px;
+    padding: 0;
+    justify-content: center;
+}
+
+.sidebar.collapsed .nav-item.active,
+.sidebar.collapsed .history-item.active {
+    box-shadow: none;
+}
+
+/* Suggestion grid: removed from HTML, hide any lingering instance */
+.suggestion-grid {
+    display: none !important;
+}
+
+/* Welcome: center vertically with just the hero */
+.welcome-container {
+    justify-content: center;
+    padding-top: 0;
+    padding-bottom: 96px;
+}
+
+.welcome-hero {
+    width: min(680px, 100%);
+    max-width: 100%;
+    padding: 0 16px;
+}
+
+.welcome-hero h1 {
+    max-width: 100%;
+    font-size: 30px;
+    font-weight: 680;
+    letter-spacing: 0;
+    overflow-wrap: normal;
+    text-wrap: balance;
+}
+
+@media (max-width: 768px) {
+    .welcome-hero {
+        padding: 0 12px;
+    }
+
+    .welcome-hero h1 {
+        font-size: 26px;
+    }
+}
+
+@media (max-width: 420px) {
+    .welcome-hero h1 {
+        font-size: 24px;
+    }
+}
+
+/* Mobile sidebar: keep styling clean */
+@media (max-width: 768px) {
+    .sidebar {
+        background: var(--bg);
+        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
+    }
+}
+

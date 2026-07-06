@@ -2,11 +2,13 @@ package ai.fauna.phone;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.net.http.SslError;
@@ -14,11 +16,18 @@ import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.webkit.SslErrorHandler;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
+import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
@@ -27,6 +36,11 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 
 import java.io.InputStream;
 import java.net.HttpURLConnection;
@@ -41,16 +55,28 @@ public class MainActivity extends Activity {
     private static final String SERVER_URL_KEY = "server_url";
     private static final String TOKEN_KEY = "token";
     private static final String DEVICE_ID_KEY = "device_id";
+    private static final int FILE_CHOOSER_REQUEST_CODE = 42;
+    private static final int COLOR_BG = 0xFF111214;
+    private static final int COLOR_PANEL = 0xFF202020;
+    private static final int COLOR_PANEL_SOFT = 0xFF242424;
+    private static final int COLOR_INPUT = 0xFF151515;
+    private static final int COLOR_BORDER = 0x1FFFFFFF;
+    private static final int COLOR_TEXT = 0xFFF5F5F5;
+    private static final int COLOR_MUTED = 0x8AFFFFFF;
+    private static final int COLOR_DIM = 0x66FFFFFF;
+    private static final int COLOR_ACCENT = 0xFF5B7CFA;
 
     private SharedPreferences prefs;
     private WebView webView;
     private EditText serverInput;
     private EditText tokenInput;
     private TextView statusText;
+    private ValueCallback<Uri[]> filePathCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        applySystemBarsWindow();
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         if (handlePairingIntent(getIntent())) return;
 
@@ -70,6 +96,21 @@ public class MainActivity extends Activity {
         handlePairingIntent(intent);
     }
 
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) applySystemBarsWindow();
+    }
+
+    private void applySystemBarsWindow() {
+        Window window = getWindow();
+        if (window == null) return;
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        window.setStatusBarColor(COLOR_BG);
+        window.setNavigationBarColor(COLOR_BG);
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+    }
+
     private int dp(float value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
@@ -84,12 +125,18 @@ public class MainActivity extends Activity {
         return drawable;
     }
 
-    private TextView label(String text) {
+    private TextView text(String value, float sizeSp, int color, int style) {
         TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextColor(Color.argb(168, 255, 255, 255));
-        view.setTextSize(11);
-        view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        view.setText(value);
+        view.setTextColor(color);
+        view.setTextSize(sizeSp);
+        view.setIncludeFontPadding(true);
+        if (style != 0) view.setTypeface(Typeface.DEFAULT, style);
+        return view;
+    }
+
+    private TextView label(String text) {
+        TextView view = text(text, 11, COLOR_MUTED, Typeface.BOLD);
         return view;
     }
 
@@ -98,13 +145,34 @@ public class MainActivity extends Activity {
         view.setSingleLine(true);
         view.setHint(hint);
         view.setText(value);
-        view.setTextColor(Color.rgb(239, 242, 251));
-        view.setHintTextColor(Color.argb(112, 255, 255, 255));
+        view.setTextColor(COLOR_TEXT);
+        view.setHintTextColor(COLOR_DIM);
         view.setTextSize(15);
         view.setPadding(dp(12), 0, dp(12), 0);
         view.setMinHeight(dp(46));
-        view.setBackground(rounded(Color.rgb(43, 44, 50), 8, Color.argb(26, 255, 255, 255)));
+        view.setBackground(rounded(COLOR_INPUT, 8, COLOR_BORDER));
         return view;
+    }
+
+    private Button actionButton(String text, boolean primary) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextColor(COLOR_TEXT);
+        button.setTextSize(15);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setMinHeight(dp(46));
+        button.setBackground(rounded(primary ? COLOR_ACCENT : COLOR_PANEL_SOFT, 9, primary ? 0 : COLOR_BORDER));
+        return button;
+    }
+
+    private TextView iconButton(String text) {
+        TextView button = text(text, 16, COLOR_TEXT, Typeface.BOLD);
+        button.setGravity(Gravity.CENTER);
+        button.setMinWidth(dp(44));
+        button.setMinHeight(dp(44));
+        button.setBackground(rounded(COLOR_PANEL_SOFT, 999, COLOR_BORDER));
+        return button;
     }
 
     private void addWithTopMargin(LinearLayout parent, android.view.View child, int topDp) {
@@ -124,11 +192,11 @@ public class MainActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(Color.rgb(17, 18, 20));
+        scroll.setBackgroundColor(COLOR_BG);
 
         LinearLayout outer = new LinearLayout(this);
         outer.setGravity(Gravity.CENTER);
-        outer.setPadding(dp(22), dp(22), dp(22), dp(22));
+        outer.setPadding(dp(24), dp(24), dp(24), dp(24));
         scroll.addView(outer, new ScrollView.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
@@ -136,9 +204,16 @@ public class MainActivity extends Activity {
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(20), dp(20), dp(20), dp(20));
-        panel.setBackground(rounded(Color.argb(10, 255, 255, 255), 10, Color.argb(18, 255, 255, 255)));
+        panel.setPadding(dp(0), dp(0), dp(0), dp(0));
         outer.addView(panel, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        panel.addView(header, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ));
@@ -147,31 +222,27 @@ public class MainActivity extends Activity {
         icon.setImageResource(R.mipmap.ic_launcher);
         icon.setAdjustViewBounds(true);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(46), dp(46));
-        panel.addView(icon, iconParams);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        header.addView(icon, iconParams);
 
-        TextView title = new TextView(this);
-        title.setText("Fauna Phone");
-        title.setTextColor(Color.rgb(239, 242, 251));
-        title.setTextSize(28);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        addWithTopMargin(panel, title, 14);
+        TextView spacer = new TextView(this);
+        header.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
 
-        TextView subtitle = new TextView(this);
-        subtitle.setText("Connect to your PC");
-        subtitle.setTextColor(Color.argb(112, 255, 255, 255));
-        subtitle.setTextSize(14);
-        addWithTopMargin(panel, subtitle, 4);
+        TextView infoButton = iconButton("i");
+        infoButton.setContentDescription("Pairing instructions");
+        header.addView(infoButton, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
-        TextView qrHint = new TextView(this);
-        qrHint.setText("Scan the QR code in Fauna Desktop with your phone camera, or paste the details below.");
-        qrHint.setTextColor(Color.argb(174, 255, 255, 255));
-        qrHint.setTextSize(13);
-        qrHint.setPadding(dp(11), dp(10), dp(11), dp(10));
-        qrHint.setBackground(rounded(Color.argb(7, 255, 255, 255), 10, Color.argb(18, 255, 255, 255)));
-        addWithTopMargin(panel, qrHint, 16);
+        TextView title = text("Phone Sync", 28, COLOR_TEXT, Typeface.BOLD);
+        addWithTopMargin(panel, title, 22);
 
-        addWithTopMargin(panel, label("Phone URL"), 18);
+        TextView subtitle = text("Connect to the Phone URL from Fauna Desktop.", 14, COLOR_MUTED, 0);
+        subtitle.setLineSpacing(dp(2), 1.0f);
+        addWithTopMargin(panel, subtitle, 5);
+
+        Button scanButton = actionButton("Scan QR with camera", false);
+        addWithTopMargin(panel, scanButton, 22);
+
+        addWithTopMargin(panel, label("Phone URL"), 28);
         serverInput = input("http://192.168.1.20:8899", prefs.getString(SERVER_URL_KEY, ""));
         serverInput.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         addWithTopMargin(panel, serverInput, 7);
@@ -181,21 +252,21 @@ public class MainActivity extends Activity {
         tokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         addWithTopMargin(panel, tokenInput, 7);
 
-        Button connectButton = new Button(this);
-        connectButton.setText("Connect");
-        connectButton.setAllCaps(false);
-        connectButton.setTextColor(Color.WHITE);
-        connectButton.setTextSize(15);
-        connectButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        connectButton.setMinHeight(dp(46));
-        connectButton.setBackground(rounded(Color.rgb(91, 124, 250), 9, 0));
+        Button connectButton = actionButton("Connect to PC", true);
         addWithTopMargin(panel, connectButton, 18);
 
-        statusText = new TextView(this);
-        statusText.setText(message);
-        statusText.setTextColor(Color.argb(112, 255, 255, 255));
-        statusText.setTextSize(13);
+        TextView clearButton = text("Clear saved pairing", 13, COLOR_DIM, Typeface.BOLD);
+        clearButton.setGravity(Gravity.CENTER);
+        clearButton.setMinHeight(dp(42));
+        clearButton.setVisibility((prefs.getString(SERVER_URL_KEY, "").isEmpty() && prefs.getString(TOKEN_KEY, "").isEmpty()) ? View.GONE : View.VISIBLE);
+        addWithTopMargin(panel, clearButton, 8);
+
+        statusText = text(message, 13, COLOR_MUTED, 0);
+        statusText.setLineSpacing(dp(2), 1.0f);
         addWithTopMargin(panel, statusText, 12);
+
+        infoButton.setOnClickListener(view -> showInstructionsDialog());
+        scanButton.setOnClickListener(view -> startQrScanner());
 
         connectButton.setOnClickListener(view -> {
             PairingDetails pairing = extractPairingDetails(
@@ -211,7 +282,77 @@ public class MainActivity extends Activity {
             checkAndConnect(pairing.serverUrl, pairing.token, connectButton);
         });
 
+        clearButton.setOnClickListener(view -> {
+            prefs.edit().remove(SERVER_URL_KEY).remove(TOKEN_KEY).apply();
+            WebStorage.getInstance().deleteAllData();
+            serverInput.setText("");
+            tokenInput.setText("");
+            clearButton.setVisibility(View.GONE);
+            statusText.setText("Saved pairing cleared.");
+        });
+
         setContentView(scroll);
+    }
+
+    private void startQrScanner() {
+        GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .build();
+        GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(this, options);
+        if (statusText != null) statusText.setText("Opening camera...");
+        scanner.startScan()
+            .addOnSuccessListener(barcode -> {
+                String rawValue = barcode.getRawValue();
+                PairingDetails pairing = extractPairingDetails(rawValue, "");
+                if (pairing.serverUrl.isEmpty() || pairing.token.isEmpty()) {
+                    if (statusText != null) statusText.setText("QR code did not include a complete Fauna pairing.");
+                    return;
+                }
+                if (serverInput != null) serverInput.setText(pairing.serverUrl);
+                if (tokenInput != null) tokenInput.setText(pairing.token);
+                checkAndConnect(pairing.serverUrl, pairing.token, null);
+            })
+            .addOnCanceledListener(() -> {
+                if (statusText != null) statusText.setText("QR scan cancelled.");
+            })
+            .addOnFailureListener(error -> {
+                if (statusText != null) statusText.setText("Could not open the camera scanner. Paste the pairing details instead.");
+            });
+    }
+
+    private void showInstructionsDialog() {
+        Dialog dialog = new Dialog(this);
+        LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(20), dp(18), dp(20), dp(18));
+        sheet.setBackground(rounded(COLOR_PANEL, 18, COLOR_BORDER));
+
+        TextView title = text("Pairing", 18, COLOR_TEXT, Typeface.BOLD);
+        sheet.addView(title, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        TextView copy = text("Open Fauna Desktop settings, go to Phone Sync, then scan the QR code or copy the Phone URL and token here. The app loads a fresh mobile page from your PC every time.", 13, COLOR_MUTED, 0);
+        copy.setLineSpacing(dp(3), 1.0f);
+        addWithTopMargin(sheet, copy, 8);
+
+        Button closeButton = actionButton("Done", false);
+        addWithTopMargin(sheet, closeButton, 16);
+
+        dialog.setContentView(sheet);
+        closeButton.setOnClickListener(view -> dialog.dismiss());
+        Window window = dialog.getWindow();
+        dialog.setOnShowListener(item -> {
+            Window shownWindow = dialog.getWindow();
+            if (shownWindow == null) return;
+            shownWindow.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            shownWindow.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        });
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+        dialog.show();
     }
 
     private String firstNonEmpty(String first, String second) {
@@ -436,11 +577,41 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        webView.clearCache(true);
+        webView.clearFormData();
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (filePathCallback != null) {
+                    filePathCallback.onReceiveValue(null);
+                }
+                filePathCallback = callback;
+                try {
+                    Intent intent = params != null ? params.createIntent() : new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    startActivityForResult(Intent.createChooser(intent, "Choose files"), FILE_CHOOSER_REQUEST_CODE);
+                    return true;
+                } catch (Exception error) {
+                    filePathCallback = null;
+                    callback.onReceiveValue(null);
+                    return false;
+                }
+            }
+        });
 
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                WebResourceResponse response = serveBundledMobileAsset(request);
+                return response != null ? response : super.shouldInterceptRequest(view, request);
+            }
+
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request != null && request.isForMainFrame()) {
@@ -459,7 +630,66 @@ public class MainActivity extends Activity {
         String encodedToken = encodeUrlPart(token);
         String encodedDeviceId = encodeUrlPart(getFaunaDeviceId());
         String encodedDeviceName = encodeUrlPart(getDeviceName());
-        webView.loadUrl(normalizeServerUrl(serverUrl) + "/mobile/#token=" + encodedToken + "&deviceId=" + encodedDeviceId + "&deviceName=" + encodedDeviceName + "&platform=android");
+        String cacheBust = String.valueOf(System.currentTimeMillis());
+        webView.loadUrl(normalizeServerUrl(serverUrl) + "/mobile/?native=android&shell=0.3.2&ts=" + cacheBust + "#token=" + encodedToken + "&deviceId=" + encodedDeviceId + "&deviceName=" + encodedDeviceName + "&platform=android");
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != FILE_CHOOSER_REQUEST_CODE || filePathCallback == null) return;
+        Uri[] results = null;
+        if (resultCode == RESULT_OK && data != null) {
+            if (data.getClipData() != null) {
+                int count = data.getClipData().getItemCount();
+                results = new Uri[count];
+                for (int index = 0; index < count; index += 1) {
+                    results[index] = data.getClipData().getItemAt(index).getUri();
+                }
+            } else if (data.getData() != null) {
+                results = new Uri[] { data.getData() };
+            }
+        }
+        filePathCallback.onReceiveValue(results);
+        filePathCallback = null;
+    }
+
+    private WebResourceResponse serveBundledMobileAsset(WebResourceRequest request) {
+        Uri uri = request == null ? null : request.getUrl();
+        String path = uri == null ? "" : uri.getPath();
+        String assetPath = getBundledMobileAssetPath(path);
+        if (assetPath.isEmpty()) return null;
+        try {
+            InputStream stream = getAssets().open(assetPath);
+            WebResourceResponse response = new WebResourceResponse(getBundledMimeType(assetPath), "UTF-8", stream);
+            response.setResponseHeaders(java.util.Collections.singletonMap("Cache-Control", "no-store"));
+            return response;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String getBundledMobileAssetPath(String path) {
+        String clean = path == null ? "" : path;
+        if (clean.equals("/mobile") || clean.equals("/mobile/") || clean.equals("/mobile/index.html")) return "mobile/index.html";
+        if (clean.equals("/mobile/app.js")) return "mobile/app.js";
+        if (clean.equals("/mobile/styles.css")) return "mobile/styles.css";
+        if (clean.equals("/styles.css")) return "styles.css";
+        if (clean.startsWith("/styles/")) return clean.substring(1);
+        if (clean.equals("/components/composer.html")) return "components/composer.html";
+        if (clean.equals("/components/templates.html")) return "components/templates.html";
+        if (clean.equals("/modules/model-switcher.js")) return "modules/model-switcher.js";
+        if (clean.equals("/favicon.png")) return "favicon.png";
+        return "";
+    }
+
+    private String getBundledMimeType(String path) {
+        if (path.endsWith(".html")) return "text/html";
+        if (path.endsWith(".css")) return "text/css";
+        if (path.endsWith(".js")) return "text/javascript";
+        if (path.endsWith(".png")) return "image/png";
+        if (path.endsWith(".svg")) return "image/svg+xml";
+        return "application/octet-stream";
     }
 
     @Override

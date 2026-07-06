@@ -5067,6 +5067,7 @@ function createChatSession(overrides = {}) {
         assistantTitle: false,
         chatHtml: "",
         conversationHistory: [],
+        modelContextHistory: [],
         composerDraft: createEmptyComposerDraft(),
         projectContext: createEmptyProjectContext(),
         workspacePanelState: createEmptyWorkspacePanelState(),
@@ -5142,10 +5143,39 @@ function composerDraftHasContent(draft) {
     );
 }
 
+function hasSeparateModelContextHistory(modelContextHistory = [], visibleHistory = []) {
+    const modelHistory = Array.isArray(modelContextHistory) ? modelContextHistory : [];
+    if (modelHistory.length === 0) return false;
+    if (modelHistory.some(message => isContextCompactionMessage(message))) return true;
+    const visibleCount = Array.isArray(visibleHistory) ? visibleHistory.length : 0;
+    return visibleCount > 0 && modelHistory.length < visibleCount;
+}
+
+function normalizeSessionModelContextHistory(modelContextHistory = [], visibleHistory = []) {
+    const context = cloneConversationHistory(modelContextHistory);
+    return hasSeparateModelContextHistory(context, visibleHistory) ? context : [];
+}
+
+function getSessionModelContextHistory(session, fallbackHistory = []) {
+    const context = cloneConversationHistory(session?.modelContextHistory || []);
+    return context.length > 0 ? context : cloneConversationHistory(fallbackHistory);
+}
+
+function resolveSessionModelContextHistory(session, visibleHistory = [], modelContextHistory) {
+    if (Array.isArray(modelContextHistory)) {
+        return normalizeSessionModelContextHistory(modelContextHistory, visibleHistory);
+    }
+    return normalizeSessionModelContextHistory(session?.modelContextHistory || [], visibleHistory);
+}
+
 function normalizeStoredChatSession(raw) {
     if (!raw || typeof raw !== "object") return null;
     const now = new Date().toISOString();
     const conversationHistory = cloneConversationHistory(raw.conversationHistory, { includeImages: false });
+    const modelContextHistory = normalizeSessionModelContextHistory(
+        cloneConversationHistory(raw.modelContextHistory, { includeImages: false }),
+        conversationHistory
+    );
     const historyTokenTotal = sumHistoryTokenUsage(conversationHistory);
     const trustedStoredTotal = raw.sessionTokenSource === TOKEN_USAGE_SOURCE_PROVIDER
         ? normalizeTokenCount(raw.sessionTotalTokens)
@@ -5161,6 +5191,7 @@ function normalizeStoredChatSession(raw) {
         assistantTitle: Boolean(raw.assistantTitle),
         chatHtml: sanitizeChatHtmlMediaSources(typeof raw.chatHtml === "string" ? raw.chatHtml : ""),
         conversationHistory,
+        modelContextHistory,
         composerDraft: normalizeStoredComposerDraft(raw.composerDraft),
         projectContext: normalizeStoredSessionProjectContext(raw.projectContext),
         workspacePanelState: normalizeStoredWorkspacePanelState(raw.workspacePanelState),
@@ -6268,7 +6299,8 @@ function getHtmlForSessionNodes(nodes = []) {
 
 function snapshotVisibleChatIntoSession(session, {
     history = conversationHistory,
-    tokenTotal = sessionTotalTokens
+    tokenTotal = sessionTotalTokens,
+    modelContextHistory
 } = {}) {
     if (!session) return null;
     const hasFullRenderedDom = isChatDomFullyRendered(history);
@@ -6280,6 +6312,7 @@ function snapshotVisibleChatIntoSession(session, {
         session.domNodes = [];
     }
     session.conversationHistory = cloneConversationHistory(history);
+    session.modelContextHistory = resolveSessionModelContextHistory(session, session.conversationHistory, modelContextHistory);
     session.composerDraft = captureComposerDraft();
     session.workspacePanelState = captureWorkspacePanelState();
     session.sessionTotalTokens = tokenTotal;
@@ -6295,13 +6328,16 @@ function snapshotVisibleChatIntoSession(session, {
 function updateStoredSessionFromGeneration(sessionId, {
     history = [],
     tokenTotal = 0,
+    modelContextHistory,
     render = true
 } = {}) {
     const session = getChatSessionById(sessionId);
     if (!session) return null;
+    const visibleHistory = cloneConversationHistory(history);
+    const nextModelContextHistory = resolveSessionModelContextHistory(session, visibleHistory, modelContextHistory);
 
     if (isChatSessionVisible(sessionId)) {
-        conversationHistory = cloneConversationHistory(history);
+        conversationHistory = visibleHistory;
         sessionTotalTokens = tokenTotal;
         const keepLiveGenerationDom = typeof isSessionGenerating === "function"
             && isSessionGenerating(sessionId)
@@ -6315,11 +6351,16 @@ function updateStoredSessionFromGeneration(sessionId, {
             extendChatRenderWindowToHistory(conversationHistory);
         }
         ensureVisibleGenerationProgress?.(sessionId);
-        snapshotVisibleChatIntoSession(session, { history, tokenTotal });
+        snapshotVisibleChatIntoSession(session, {
+            history: visibleHistory,
+            tokenTotal,
+            modelContextHistory: nextModelContextHistory
+        });
         updateTokenDisplay();
         updateActiveChatTitle();
     } else {
-        session.conversationHistory = cloneConversationHistory(history);
+        session.conversationHistory = visibleHistory;
+        session.modelContextHistory = nextModelContextHistory;
         session.sessionTotalTokens = tokenTotal;
         session.sessionTokenSource = TOKEN_USAGE_SOURCE_PROVIDER;
         if (Array.isArray(session.domNodes) && session.domNodes.length > 0) {
@@ -6336,7 +6377,7 @@ function updateStoredSessionFromGeneration(sessionId, {
     if (render) renderChatHistory();
     refreshUsageSettingsPaneIfVisible();
     refreshLibraryViewIfActive();
-    renderPromptTimeline(history);
+    renderPromptTimeline(visibleHistory);
     return session;
 }
 
@@ -6445,11 +6486,30 @@ function limitSerializedHistory(history, limit = 0) {
     return history.slice(-limit);
 }
 
+function limitSerializedModelContextHistory(history, limit = 0) {
+    if (!Number.isFinite(limit) || limit <= 0 || history.length <= limit) return history;
+    const compactionIndex = history.findIndex(message => isContextCompactionMessage(message));
+    if (compactionIndex < 0) return history.slice(-limit);
+    const summaryMessage = history[compactionIndex];
+    const tailLimit = Math.max(0, limit - 1);
+    const tail = history
+        .filter((_, index) => index !== compactionIndex)
+        .slice(-tailLimit);
+    return [summaryMessage, ...tail];
+}
+
 function serializeChatSession(session, options = {}) {
     const includeHtml = options.includeHtml !== false;
     const historyLimit = Number(options.historyLimit) || 0;
     const conversation = limitSerializedHistory(
         cloneConversationHistory(session.conversationHistory, { includeImages: false }),
+        historyLimit
+    );
+    const modelContext = limitSerializedModelContextHistory(
+        normalizeSessionModelContextHistory(
+            cloneConversationHistory(session.modelContextHistory, { includeImages: false }),
+            conversation
+        ),
         historyLimit
     );
 
@@ -6464,6 +6524,7 @@ function serializeChatSession(session, options = {}) {
         assistantTitle: Boolean(session.assistantTitle),
         chatHtml: includeHtml ? sanitizeChatHtmlMediaSources(session.chatHtml || "") : "",
         conversationHistory: conversation,
+        modelContextHistory: modelContext,
         composerDraft: serializeComposerDraftForStorage(session.composerDraft),
         projectContext: normalizeStoredSessionProjectContext(session.projectContext),
         workspacePanelState: normalizeStoredWorkspacePanelState(session.workspacePanelState),

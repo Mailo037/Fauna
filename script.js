@@ -16,7 +16,7 @@ import {
     safeLocalStorageRemove
 } from "./modules/storage.js";
 
-const FAUNA_SCRIPT_CHUNK_VERSION = "20260706-phone-qr";
+const FAUNA_SCRIPT_CHUNK_VERSION = "20260706-hidden-model-context";
 const FAUNA_SCRIPT_DEPENDENCIES_KEY = "__faunaScriptDependencies";
 const FAUNA_SCRIPT_CHUNKS = [
     "./scripts/01-dom-state-feedback.js",

@@ -310,6 +310,7 @@ async function submitClarifyingAnswers() {
     const payload = buildClarifyingAnswerPayload(state);
     const displayText = buildClarifyingAnswerDisplay(state);
     const runHistory = cloneConversationHistory(conversationHistory);
+    const modelRunHistory = getSessionModelContextHistory(generationSession, runHistory);
     let runTokenTotal = sessionTotalTokens;
 
     clearClarifyingQuestionComposer();
@@ -331,18 +332,20 @@ async function submitClarifyingAnswers() {
             content: payload,
             createdAt: userMessageCreatedAt
         });
+        modelRunHistory.push(cloneConversationHistory([runHistory[runHistory.length - 1]])[0]);
         const userMessageNode = userBubble?.closest?.(".message-node.user-node");
         if (userMessageNode) {
             userMessageNode.dataset.historyIndex = String(runHistory.length - 1);
         }
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: modelRunHistory
         });
 
         aiBubble = addRenderNode("__thinking__", "output");
         const data = await sendOllamaChatWithLocalTools(
-            runHistory,
+            modelRunHistory,
             {
                 ...getActiveChatRequestOptions(),
                 sessionId: generationSessionId
@@ -356,6 +359,7 @@ async function submitClarifyingAnswers() {
         const assistantMessage = getAssistantMessageForConversation(data, OLLAMA_MODEL);
         attachTokenUsage(assistantMessage, tokenUsage);
         runHistory.push(assistantMessage);
+        modelRunHistory.push(cloneConversationHistory([assistantMessage])[0]);
         const assistantIndex = runHistory.length - 1;
         runTokenTotal += recordSessionTokenUsage(generationSessionId, tokenUsage, { message: assistantMessage });
         await renderAssistantResponse(data, aiBubble, [], generationSignal, false, {
@@ -366,7 +370,8 @@ async function submitClarifyingAnswers() {
         });
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: modelRunHistory
         });
         scrollChatToBottom();
     } catch (err) {
@@ -374,6 +379,7 @@ async function submitClarifyingAnswers() {
         renderErrorCard(aiBubble, err, {
             sessionId: generationSessionId,
             history: runHistory,
+            modelContextHistory: modelRunHistory,
             getTokenTotal: () => runTokenTotal
         });
     } finally {
@@ -381,7 +387,8 @@ async function submitClarifyingAnswers() {
         updateTokenDisplay();
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: modelRunHistory
         });
     }
 }
@@ -491,6 +498,20 @@ function buildFaunaBurstToolStepLimitMessage(burstToolSteps, maxStepsAtATime) {
     return `I paused after ${burstToolSteps} tool steps. The active max steps at a time is ${maxStepsAtATime}; the model must use thinking to reset that counter before more tool calls.`;
 }
 
+function isFaunaBurstToolStepLimitContent(content) {
+    const text = stripAssistantControlBlocks(content || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    return /^I paused after \d+ tool steps\. The active max steps at a time is \d+; the model must use thinking to reset that counter before more tool calls\.?$/i.test(text);
+}
+
+function getFaunaVisibleContentOrToolLimitFallback(content, toolResultsBySignature) {
+    const visibleText = stripAssistantControlBlocks(content || "").trim();
+    return visibleText && !isFaunaBurstToolStepLimitContent(visibleText)
+        ? visibleText
+        : buildFaunaToolLimitMessage(toolResultsBySignature);
+}
+
 function buildFaunaBurstToolStepLimitFeedback(burstToolSteps, maxStepsAtATime, toolCall) {
     const attemptedTool = toolCall?.tool ? `\nAttempted next tool: ${toolCall.tool}` : "";
     return [
@@ -499,8 +520,9 @@ function buildFaunaBurstToolStepLimitFeedback(burstToolSteps, maxStepsAtATime, t
         attemptedTool.trim(),
         "",
         "This message is internal and has not been shown to the user yet.",
-        "If more tool work is needed, respond with exactly one thinking tool call to reset the consecutive step counter before any other tool call.",
-        "If you already have enough information, answer the user's original request now without calling more tools."
+        "Your next response must be exactly one thinking tool call, or a normal final answer with no tool calls.",
+        "If you call any other tool now, Fauna will stop this generation and answer from the latest available tool result.",
+        "Do not repeat the pause text to the user."
     ].filter(Boolean).join("\n");
 }
 
@@ -571,8 +593,12 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
             return attachToolActivityToData(data);
         }
         if (toolCalls.length === 0) {
-            if (burstLimitReminderSent && data.message && !stripAssistantControlBlocks(data.message.content || "").trim()) {
-                data.message.content = buildFaunaBurstToolStepLimitMessage(burstToolSteps, maxStepsAtATime);
+            if (burstLimitReminderSent && data.message) {
+                const visibleContent = stripAssistantControlBlocks(data.message.content || "").trim();
+                if (!visibleContent || isFaunaBurstToolStepLimitContent(visibleContent)) {
+                    data.message.content = buildFaunaToolLimitMessage(toolResultsBySignature);
+                    data.__faunaForcedToolStepStop = true;
+                }
             }
             if (streamRenderer) {
                 streamRenderer.finish(data.message?.content || "");
@@ -610,7 +636,8 @@ async function sendOllamaChatWithLocalTools(messages, options = {}, preferredMod
                 }
 
                 if (data.message) {
-                    data.message.content = visibleText || buildFaunaBurstToolStepLimitMessage(burstToolSteps, maxStepsAtATime);
+                    data.message.content = getFaunaVisibleContentOrToolLimitFallback(visibleText, toolResultsBySignature);
+                    data.__faunaForcedToolStepStop = true;
                 }
                 if (toolWebSources.length > 0) {
                     data.__faunaWebSources = mergeWebSources(toolWebSources);
@@ -1190,31 +1217,6 @@ function isLikelyContextWindowError(error) {
     return /context(?: length| window)?|maximum context|too many tokens|token limit|tokens? exceed|prompt is too long|context_length_exceeded|num_ctx/i.test(message);
 }
 
-function applyCompactedHistoryToGenerationView(history, sessionId, tokenTotal, progressTarget = null) {
-    if (!isChatSessionVisible(sessionId)) {
-        updateStoredSessionFromGeneration(sessionId, {
-            history,
-            tokenTotal,
-            render: false
-        });
-        return progressTarget;
-    }
-
-    conversationHistory = cloneConversationHistory(history);
-    sessionTotalTokens = tokenTotal;
-    renderInitialChatHistoryWindow(conversationHistory, sessionId);
-    updateStoredSessionFromGeneration(sessionId, {
-        history: conversationHistory,
-        tokenTotal,
-        render: false
-    });
-    const nextBubble = addRenderNode("__thinking__", "output");
-    if (document.body?.classList.contains("voice-chat-active")) {
-        setCurrentVoiceAssistantNode(nextBubble?.closest(".message-node"));
-    }
-    return nextBubble || progressTarget;
-}
-
 async function maybeCompactHistoryForContext({
     history,
     sessionId,
@@ -1268,11 +1270,10 @@ async function maybeCompactHistoryForContext({
         ...keptMessages
     ];
     renderContextCompactionProgress(progressTarget, "Context summary ready", "Done");
-    const nextProgressTarget = applyCompactedHistoryToGenerationView(nextHistory, sessionId, tokenTotal, progressTarget);
     return {
         compacted: true,
         history: nextHistory,
-        progressTarget: nextProgressTarget,
+        progressTarget,
         usage,
         compactionMessage
     };

@@ -2805,6 +2805,7 @@ function createErrorHistoryMessage(error, info = {}) {
 function persistErrorCardToHistory(target, errorMessage, options = {}) {
     if (options.persist === false || options.persistError === false) return null;
     const history = Array.isArray(options.history) ? options.history : null;
+    const modelContextHistory = Array.isArray(options.modelContextHistory) ? options.modelContextHistory : null;
     const sessionId = options.sessionId || activeSessionId || "";
     if (!history) return null;
 
@@ -2825,9 +2826,14 @@ function persistErrorCardToHistory(target, errorMessage, options = {}) {
         messageNode.dataset.createdAt = errorMessage.createdAt;
     }
 
+    if (modelContextHistory && modelContextHistory !== history) {
+        modelContextHistory.push(cloneConversationHistory([errorMessage])[0]);
+    }
+
     if (sessionId) {
         updateStoredSessionFromGeneration?.(sessionId, {
             history,
+            modelContextHistory: modelContextHistory || undefined,
             tokenTotal: typeof options.getTokenTotal === "function"
                 ? options.getTokenTotal()
                 : Number(options.tokenTotal ?? sessionTotalTokens) || 0
@@ -3061,13 +3067,15 @@ async function retryAssistantGenerationFromBubble(target, {
         });
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: runHistory
         });
         showToast("Generation retried.", "success");
     } catch (err) {
         renderErrorCard(target, err, {
             sessionId: generationSessionId,
             history: runHistory,
+            modelContextHistory: runHistory,
             getTokenTotal: () => runTokenTotal,
             retryLabel: "Retry generation",
             onRetry: () => retryAssistantGenerationFromBubble(target, { model, webSources, speakThisReply })
@@ -3077,7 +3085,8 @@ async function retryAssistantGenerationFromBubble(target, {
         updateTokenDisplay();
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: runHistory
         });
     }
 }

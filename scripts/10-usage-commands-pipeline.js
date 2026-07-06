@@ -1054,6 +1054,15 @@ async function processWorkspaceEntry(options = {}) {
     }
 
     let runHistory = cloneConversationHistory(conversationHistory);
+    let modelRunHistory = getSessionModelContextHistory(generationSession, runHistory);
+    let modelVisibleSyncIndex = runHistory.length;
+    const syncNewVisibleMessagesIntoModelContext = () => {
+        const additions = runHistory.slice(modelVisibleSyncIndex);
+        if (additions.length > 0) {
+            modelRunHistory.push(...cloneConversationHistory(additions));
+            modelVisibleSyncIndex = runHistory.length;
+        }
+    };
     let runTokenTotal = sessionTotalTokens;
     const speakThisReply = shouldSpeakNextReply && textValue.length > 0;
     const videoPrompt = getVideoCommandPrompt(textValue);
@@ -1124,6 +1133,7 @@ async function processWorkspaceEntry(options = {}) {
                 getTokenTotal: () => runTokenTotal,
                 setTokenTotal: value => { runTokenTotal = value; }
             });
+            syncNewVisibleMessagesIntoModelContext();
             scrollChatToBottom();
             return;
         }
@@ -1136,6 +1146,7 @@ async function processWorkspaceEntry(options = {}) {
                 getTokenTotal: () => runTokenTotal,
                 setTokenTotal: value => { runTokenTotal = value; }
             });
+            syncNewVisibleMessagesIntoModelContext();
             scrollChatToBottom();
             return;
         }
@@ -1148,6 +1159,7 @@ async function processWorkspaceEntry(options = {}) {
                 getTokenTotal: () => runTokenTotal,
                 setTokenTotal: value => { runTokenTotal = value; }
             });
+            syncNewVisibleMessagesIntoModelContext();
             scrollChatToBottom();
             return;
         }
@@ -1182,6 +1194,7 @@ async function processWorkspaceEntry(options = {}) {
                         : `Fauna could not analyze the image with ${getLocalTaskModel("vision")}. Make sure that model is installed or choose another Vision task model in Settings.`,
                     sessionId: generationSessionId,
                     history: runHistory,
+                    modelContextHistory: modelRunHistory,
                     getTokenTotal: () => runTokenTotal,
                     retryLabel: "Retry generation",
                     onRetry: () => processWorkspaceEntry({
@@ -1235,6 +1248,7 @@ async function processWorkspaceEntry(options = {}) {
                                 : "Fauna could not upload the image to OpenAI. Check the API key, file type, and file size.",
                             sessionId: generationSessionId,
                             history: runHistory,
+                            modelContextHistory: modelRunHistory,
                             getTokenTotal: () => runTokenTotal,
                             retryLabel: "Retry generation",
                             onRetry: () => processWorkspaceEntry({
@@ -1384,10 +1398,11 @@ async function processWorkspaceEntry(options = {}) {
             userMessageObject.openAiImageFileIds = openAiImageFileIds;
         }
         runHistory.push(userMessageObject);
-        let preflightCompaction = { compacted: false, history: runHistory, progressTarget: aiBubble };
+        syncNewVisibleMessagesIntoModelContext();
+        let preflightCompaction = { compacted: false, history: modelRunHistory, progressTarget: aiBubble };
         try {
             preflightCompaction = await maybeCompactHistoryForContext({
-                history: runHistory,
+                history: modelRunHistory,
                 sessionId: generationSessionId,
                 tokenTotal: runTokenTotal,
                 preferredModel: routedModel,
@@ -1403,6 +1418,7 @@ async function processWorkspaceEntry(options = {}) {
                     : "Fauna could not compact this chat before sending it to the model.",
                 sessionId: generationSessionId,
                 history: runHistory,
+                modelContextHistory: modelRunHistory,
                 getTokenTotal: () => runTokenTotal,
                 retryLabel: "Retry generation",
                 onRetry: () => processWorkspaceEntry({
@@ -1416,7 +1432,7 @@ async function processWorkspaceEntry(options = {}) {
             return;
         }
         if (preflightCompaction.compacted) {
-            runHistory = cloneConversationHistory(preflightCompaction.history);
+            modelRunHistory = cloneConversationHistory(preflightCompaction.history);
             aiBubble = preflightCompaction.progressTarget || aiBubble;
         }
         if (isChatSessionVisible(generationSessionId)) {
@@ -1432,7 +1448,8 @@ async function processWorkspaceEntry(options = {}) {
         }
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: modelRunHistory
         });
 
         try {
@@ -1445,7 +1462,7 @@ async function processWorkspaceEntry(options = {}) {
             while (true) {
                 try {
                     data = await sendOllamaChatWithLocalTools(
-                        runHistory,
+                        modelRunHistory,
                         requestOptions,
                         routedModel,
                         generationSignal,
@@ -1460,7 +1477,7 @@ async function processWorkspaceEntry(options = {}) {
                     if (!recoveredFromContextError && isLikelyContextWindowError(err)) {
                         recoveredFromContextError = true;
                         const recoveryCompaction = await maybeCompactHistoryForContext({
-                            history: runHistory,
+                            history: modelRunHistory,
                             sessionId: generationSessionId,
                             tokenTotal: runTokenTotal,
                             preferredModel: routedModel,
@@ -1471,7 +1488,7 @@ async function processWorkspaceEntry(options = {}) {
                             aggressive: true
                         });
                         if (recoveryCompaction.compacted) {
-                            runHistory = cloneConversationHistory(recoveryCompaction.history);
+                            modelRunHistory = cloneConversationHistory(recoveryCompaction.history);
                             aiBubble = recoveryCompaction.progressTarget || aiBubble;
                             continue;
                         }
@@ -1483,6 +1500,7 @@ async function processWorkspaceEntry(options = {}) {
             const assistantMessage = getAssistantMessageForConversation(data, routedModel);
             attachTokenUsage(assistantMessage, tokenUsage);
             runHistory.push(assistantMessage);
+            syncNewVisibleMessagesIntoModelContext();
             if (isChatSessionVisible(generationSessionId)) {
                 conversationHistory = cloneConversationHistory(runHistory);
             }
@@ -1497,13 +1515,15 @@ async function processWorkspaceEntry(options = {}) {
             });
             updateStoredSessionFromGeneration(generationSessionId, {
                 history: runHistory,
-                tokenTotal: runTokenTotal
+                tokenTotal: runTokenTotal,
+                modelContextHistory: modelRunHistory
             });
 
         } catch (e) {
             renderErrorCard(aiBubble, e, {
                 sessionId: generationSessionId,
                 history: runHistory,
+                modelContextHistory: modelRunHistory,
                 getTokenTotal: () => runTokenTotal,
                 retryLabel: "Retry generation",
                 onRetry: () => retryAssistantGenerationFromBubble(aiBubble, {
@@ -1520,7 +1540,8 @@ async function processWorkspaceEntry(options = {}) {
         updateTokenDisplay();
         updateStoredSessionFromGeneration(generationSessionId, {
             history: runHistory,
-            tokenTotal: runTokenTotal
+            tokenTotal: runTokenTotal,
+            modelContextHistory: modelRunHistory
         });
         if (isChatSessionVisible(generationSessionId) && isOpenAiProvider() && isOpenAiVoiceSessionActive) {
             scheduleOpenAiVoiceRearm();
@@ -1591,6 +1612,29 @@ async function createDesktopAttachmentFiles(attachments = []) {
     return files;
 }
 
+async function createDesktopLibraryAttachmentFiles(libraryItems = []) {
+    const keys = Array.from(new Set((Array.isArray(libraryItems) ? libraryItems : [])
+        .map(item => String(item?.key || item?.id || item || "").trim())
+        .filter(Boolean)));
+    if (keys.length === 0) return [];
+    if (typeof collectLibraryItems !== "function" || typeof createAttachmentFileFromLibraryItem !== "function") return [];
+
+    const keySet = new Set(keys);
+    const items = collectLibraryItems().filter(item => {
+        const itemKey = typeof getLibraryItemPersistentKey === "function"
+            ? getLibraryItemPersistentKey(item)
+            : item?.id || item?.src || item?.title || "";
+        return keySet.has(String(itemKey || "").trim()) || keySet.has(String(item?.id || "").trim());
+    });
+
+    const files = [];
+    for (const item of items) {
+        const result = await createAttachmentFileFromLibraryItem(item);
+        if (result?.file) files.push(result.file);
+    }
+    return files;
+}
+
 function applyDesktopQuickModelSelection(payload = {}) {
     const provider = payload.provider === AI_PROVIDER_OPENAI ? AI_PROVIDER_OPENAI : AI_PROVIDER_LOCAL;
     const modelId = normalizeModelId(payload.modelId);
@@ -1640,7 +1684,9 @@ async function handleDesktopQuickPromptRequest(payload = {}) {
 
     let files = [];
     try {
-        files = await createDesktopAttachmentFiles(payload.attachments);
+        const attachmentFiles = await createDesktopAttachmentFiles(payload.attachments);
+        const libraryFiles = await createDesktopLibraryAttachmentFiles(payload.libraryItems);
+        files = [...attachmentFiles, ...libraryFiles];
     } catch (err) {
         showToast(`Quick attachment failed: ${err.message}`, "error");
     }

@@ -1649,7 +1649,7 @@ function updateAiCallSettingsUi() {
     }
     setSettingStatus(
         contextCompactionStatus,
-        `Compacts automatically above ${activeContextCompactionThresholdPercent}% of the active model context.`
+        `Compacts the AI's internal context above ${activeContextCompactionThresholdPercent}% of the active model context.`
     );
     if (contextCompactionReviewToggle) {
         contextCompactionReviewToggle.checked = isContextCompactionReviewEnabled;

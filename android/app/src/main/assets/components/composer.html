@@ -1,0 +1,203 @@
+<footer class="input-wrapper">
+    <div id="voiceAgentStage" class="voice-agent-stage" hidden aria-live="polite">
+        <div id="voiceAgentOrb" class="voice-agent-orb" aria-hidden="true"></div>
+        <span id="voiceAgentStatus" class="voice-agent-status">Listening</span>
+    </div>
+    <div class="input-container-floating">
+        <div id="previewContainer" class="preview-container"></div>
+        <input type="file" id="fileInput" multiple style="display: none;" />
+
+        <div id="slashCommandPalette" class="slash-command-palette" role="listbox" aria-label="Composer actions" hidden></div>
+
+        <textarea id="prompt" rows="1" placeholder="Message Fauna" aria-controls="slashCommandPalette" aria-autocomplete="list"></textarea>
+
+        <div class="input-action-bar">
+            <div class="action-bar-left">
+                <div class="attachment-menu-wrap">
+                    <button id="uploadButton" class="action-circle-btn" type="button" aria-label="Attach" aria-haspopup="menu" aria-expanded="false" aria-controls="attachmentMenu">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                    <div id="attachmentMenu" class="attachment-menu" role="menu" aria-label="Attach options" hidden>
+                        <button id="attachmentUploadFile" class="attachment-menu-item" type="button" role="menuitem">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
+                            <span>Upload file</span>
+                        </button>
+                        <button id="attachmentChooseLibrary" class="attachment-menu-item" type="button" role="menuitem">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V5a2 2 0 0 1 2-2h4v18H6a2 2 0 0 1-2-1.5Z"></path><path d="M10 3h8a2 2 0 0 1 2 2v14.5A2 2 0 0 1 18 21h-8"></path><path d="M14 8h3"></path><path d="M14 12h3"></path></svg>
+                            <span>Choose from Library</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="voiceChatControls" class="voice-chat-controls" hidden>
+                    <button id="voiceListeningPill" class="voice-listening-pill" type="button" aria-pressed="false" aria-label="Mute microphone" data-tooltip="Mute microphone">
+                        <span class="voice-listening-dots" aria-hidden="true">
+                            <span></span><span></span><span></span><span></span>
+                        </span>
+                        <svg class="voice-listening-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path>
+                            <path d="M19 11v1a7 7 0 0 1-14 0v-1"></path>
+                            <path d="M12 19v3"></path>
+                        </svg>
+                        <span id="voiceListeningLabel" class="visually-hidden">Listening</span>
+                    </button>
+                    <button id="voiceReplyToggleBtn" class="voice-mode-icon-btn active" type="button" aria-pressed="true" aria-label="Turn voice replies off" data-tooltip="Turn voice replies off">
+                        <svg class="voice-reply-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M11 5 6 9H3v6h3l5 4V5Z"></path>
+                            <path d="M16 9.5a4 4 0 0 1 0 5"></path>
+                            <path d="M19 7a8 8 0 0 1 0 10"></path>
+                        </svg>
+                    </button>
+                    <button id="voiceQuickSettingsBtn" class="voice-quick-settings-btn" type="button" aria-expanded="false" aria-controls="voiceQuickPanel" aria-label="Audio settings" data-tooltip="Audio settings">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M4 7h10"></path><path d="M18 7h2"></path><path d="M16 5v4"></path>
+                            <path d="M4 17h2"></path><path d="M10 17h10"></path><path d="M8 15v4"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="tools-container">
+                    <button id="toolsBtn" class="action-pill-btn" type="button">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                        </svg>
+                        <span>Tools</span>
+                    </button>
+                    <div id="toolsDropdown" class="tools-dropdown">
+                        <div class="tools-header">
+                            <span>Tools</span>
+                            <small>Agent behavior for this chat</small>
+                        </div>
+                        <div class="tools-section">
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Code Sandbox</span>
+                                    <span class="setting-desc">Preview HTML, CSS & JS in interactive sandbox</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleSandbox" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Google Grounding</span>
+                                    <span class="setting-desc">Search Google and inspect site content when available</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleGoogleGrounding" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Approx Location</span>
+                                    <span class="setting-desc">Allow IP-based weather and rough location tools when asked</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleApproxLocation" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-info">
+                                    <span class="setting-title">Local Workspace</span>
+                                    <span class="setting-desc">Tell the AI it can read this PC's workspace and run terminal commands through the local bridge</span>
+                                </div>
+                                <label class="switch">
+                                    <input type="checkbox" id="toggleWorkspaceBridge">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="action-bar-right">
+                <div id="modelSwitcherHost" class="model-switcher"></div>
+                <button id="voiceButton" class="voice-btn" type="button" aria-label="Voice Input">
+                    <svg id="voiceBtnIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                </button>
+                <button id="sendButton" class="run-btn" type="button" aria-label="Send message" data-tooltip="Send message">
+                    <span class="send-btn-idle-state" data-send-state="idle">
+                        <span class="send-btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 19V5"></path>
+                                <path d="m6 11 6-6 6 6"></path>
+                            </svg>
+                        </span>
+                        <span class="send-btn-label">Send</span>
+                        <span class="shortcut-badge">Ctrl Enter</span>
+                    </span>
+                    <span class="send-btn-loading-state" data-send-state="loading" hidden>
+                        <span class="send-btn-loader" aria-hidden="true"></span>
+                        <span class="send-btn-label">Working...</span>
+                    </span>
+                </button>
+                <button id="stopButton" class="stop-btn" type="button" hidden aria-label="Stop generation" data-tooltip="Stop generation">
+                    <span class="stop-btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false">
+                            <rect x="5" y="5" width="14" height="14" rx="2.5"></rect>
+                        </svg>
+                    </span>
+                </button>
+                <button id="voiceStopButton" class="voice-stop-btn" type="button" hidden aria-label="Stop voice chat">Stop</button>
+            </div>
+        </div>
+        <section id="voiceQuickPanel" class="voice-quick-panel" hidden aria-label="Audio settings">
+            <div class="voice-quick-section">
+                <div class="voice-quick-row">
+                    <div class="voice-quick-heading">Voice</div>
+                    <div id="voiceQuickVoiceLabel" class="voice-quick-current">Alloy</div>
+                </div>
+                <div id="voiceQuickVoiceChoices" class="voice-quick-voice-list" role="radiogroup" aria-label="AI voice"></div>
+            </div>
+            <div class="voice-quick-section">
+                <div class="voice-quick-heading">Microphone</div>
+                <div id="voiceMicChoices" class="voice-device-list" role="radiogroup" aria-label="Microphone"></div>
+            </div>
+            <div class="voice-quick-section">
+                <div class="voice-quick-heading">Output</div>
+                <div id="voiceOutputChoices" class="voice-device-list" role="radiogroup" aria-label="Output device"></div>
+            </div>
+        </section>
+    </div>
+    <div class="composer-context-bar" aria-label="Chat workspace">
+        <div class="composer-project-wrap">
+            <button id="composerProjectBtn" class="composer-project-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="composerProjectMenu" data-tooltip="Change project">
+                <svg class="composer-project-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 19V6.5A2.5 2.5 0 0 1 6.5 4H10l2 2h5.5A2.5 2.5 0 0 1 20 8.5V19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"></path>
+                </svg>
+                <span id="composerProjectLabel" class="composer-project-label">No project</span>
+            </button>
+            <div id="composerProjectMenu" class="composer-project-menu" role="dialog" aria-label="Choose project" hidden></div>
+        </div>
+        <button id="composerBranchBtn" class="composer-context-btn composer-branch-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="composerBranchMenu" data-tooltip="Search Git branches">
+            <svg class="composer-context-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M6 3v6a6 6 0 0 0 6 6h2"></path>
+                <path d="M18 21v-6a6 6 0 0 0-6-6h-2"></path>
+                <circle cx="6" cy="3" r="2"></circle>
+                <circle cx="18" cy="21" r="2"></circle>
+            </svg>
+            <span id="composerBranchLabel">No branch</span>
+            <svg class="composer-context-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        <div class="agent-task-mode-wrap">
+            <button id="agentTaskModeBtn" class="agent-task-mode-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="agentTaskModeMenu" data-tooltip="Task mode">
+                <svg class="agent-task-mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M9 11 12 14 22 4"></path>
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                </svg>
+                <span id="agentTaskModeLabel" class="agent-task-mode-label">Build</span>
+            </button>
+            <div id="agentTaskModeMenu" class="agent-task-mode-menu" role="menu" aria-label="Task mode" hidden></div>
+        </div>
+    </div>
+    <section id="clarifyingQuestionComposer" class="clarifying-question-composer" hidden aria-live="polite"></section>
+</footer>

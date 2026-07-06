@@ -1,0 +1,25 @@
+<header class="main-header">
+    <div class="header-left">
+        <button class="icon-btn sidebar-toggle-btn header-toggle-btn" type="button" aria-label="Toggle Sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+        <div class="breadcrumb">
+            <div class="breadcrumb-icon-wrapper">
+                <svg class="breadcrumb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+            </div>
+            <div class="breadcrumb-stack">
+                <div class="breadcrumb-title-row">
+                    <span id="chatTitle" class="breadcrumb-text">Current Session</span>
+                    <input id="chatTitleInput" class="chat-title-input" type="text" maxlength="80" aria-label="Chat name" hidden>
+                    <button id="chatTitleEditBtn" class="chat-title-edit-btn" type="button" aria-label="Rename chat">
+                        <svg class="chat-title-edit-icon-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="m16.5 3.5 4 4L7 21l-4 1 1-4 12.5-14.5Z"></path></svg>
+                        <svg class="chat-title-edit-icon-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>
+                    </button>
+                </div>
+                <span id="tokenCounter" class="breadcrumb-subtext">0 Session Tokens</span>
+            </div>
+        </div>
+    </div>
+</header>
