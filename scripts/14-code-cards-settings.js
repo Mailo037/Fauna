@@ -1709,6 +1709,37 @@ function renderAppInfoStoredKeys(keys = []) {
     }));
 }
 
+function getRemoteAccessPrimaryUrl(remote = {}) {
+    if (remote?.primaryUrl) return String(remote.primaryUrl);
+    if (Array.isArray(remote?.lanUrls) && remote.lanUrls.length > 0) return String(remote.lanUrls[0]);
+    return String(remote?.endpoint || "");
+}
+
+function renderAppInfoRemoteAccess(remote = {}, isDesktop = false) {
+    const enabled = Boolean(remote?.enabled);
+    const running = Boolean(remote?.running);
+    const url = getRemoteAccessPrimaryUrl(remote);
+    const token = String(remote?.token || "");
+
+    if (appInfoRemoteToggle) {
+        appInfoRemoteToggle.checked = enabled;
+        appInfoRemoteToggle.disabled = !isDesktop;
+    }
+    if (appInfoRemoteStatus) {
+        appInfoRemoteStatus.textContent = !isDesktop
+            ? "Use the desktop app to pair an Android phone."
+            : enabled && running
+                ? "Ready for the Android app on this Wi-Fi network."
+                : enabled
+                    ? "Starting remote access."
+                    : "Off until you enable it on this PC.";
+    }
+    setAppInfoText(appInfoRemoteUrl, enabled ? url : "", enabled ? "No LAN URL found" : "Enable remote access");
+    setAppInfoText(appInfoRemoteToken, isDesktop ? token : "", isDesktop ? "Token unavailable" : "Desktop only");
+    if (appInfoRemoteCopyBtn) appInfoRemoteCopyBtn.disabled = !isDesktop || !enabled || !url || !token;
+    if (appInfoRemoteRotateBtn) appInfoRemoteRotateBtn.disabled = !isDesktop;
+}
+
 function getUpdateBadgeState(status = "") {
     return ["current", "idle", "downloaded"].includes(status) ? "configured" : "missing";
 }
@@ -1752,6 +1783,7 @@ async function updateAppInfoPane() {
     setAppInfoText(appInfoMediaPath, info?.mediaPath, isDesktop ? "chats/<chatId>/media" : "Browser blob/data URLs");
     setAppInfoText(appInfoOutputPath, info?.outputPath, isDesktop ? "chats/<chatId>/output" : "Browser localStorage");
     setAppInfoText(appInfoSkillsPath, info?.skillsPath, isDesktop ? "skills" : "Browser localStorage");
+    renderAppInfoRemoteAccess(info?.remoteAccess || {}, isDesktop);
 
     if (appInfoUpdateStatus) {
         const status = String(updateStateInfo?.status || "").trim();
@@ -1764,6 +1796,69 @@ async function updateAppInfoPane() {
         ? [...desktopKeys, "faunaChatSessions -> chats/<chatId>/chat.json", "faunaSkills -> skills/<name>/SKILL.md"]
         : getWebStoredFaunaKeys();
     renderAppInfoStoredKeys(keys);
+}
+
+async function getDesktopRemoteAccessInfo() {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.getInfo) return null;
+    const info = await desktopApi.getInfo();
+    return info?.remoteAccess || null;
+}
+
+async function setRemoteAccessFromSettings(enabled) {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.remote?.setEnabled) {
+        showToast("Remote access is available in the desktop app.", "warning");
+        renderAppInfoRemoteAccess({}, false);
+        return;
+    }
+
+    if (appInfoRemoteToggle) appInfoRemoteToggle.disabled = true;
+    if (appInfoRemoteStatus) appInfoRemoteStatus.textContent = enabled ? "Starting remote access..." : "Stopping remote access...";
+    try {
+        const info = await desktopApi.remote.setEnabled(Boolean(enabled));
+        renderAppInfoRemoteAccess(info?.remoteAccess || {}, true);
+        showToast(enabled ? "Android remote access enabled." : "Android remote access disabled.", enabled ? "success" : "info");
+        await updateAppInfoPane();
+    } catch (err) {
+        showToast(`Remote access failed: ${err.message}`, "error");
+        await updateAppInfoPane();
+    }
+}
+
+async function rotateRemoteAccessTokenFromSettings() {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.remote?.rotateToken) {
+        showToast("Remote tokens are available in the desktop app.", "warning");
+        return;
+    }
+    if (appInfoRemoteRotateBtn) appInfoRemoteRotateBtn.disabled = true;
+    try {
+        const info = await desktopApi.remote.rotateToken();
+        renderAppInfoRemoteAccess(info?.remoteAccess || {}, true);
+        showToast("Android remote token changed.", "success");
+        await updateAppInfoPane();
+    } catch (err) {
+        showToast(`Token change failed: ${err.message}`, "error");
+    } finally {
+        if (appInfoRemoteRotateBtn) appInfoRemoteRotateBtn.disabled = false;
+    }
+}
+
+async function copyRemoteAccessPairingFromSettings() {
+    try {
+        const remote = await getDesktopRemoteAccessInfo();
+        const url = getRemoteAccessPrimaryUrl(remote || {});
+        const token = String(remote?.token || "");
+        if (!remote?.enabled || !url || !token) {
+            showToast("Enable Android remote access before copying pairing details.", "warning");
+            return;
+        }
+        await writeTextToClipboard(`Fauna phone sync\nURL: ${url}\nToken: ${token}`);
+        showToast("Phone pairing copied.", "success");
+    } catch (err) {
+        showToast(`Copy failed: ${err.message}`, "error");
+    }
 }
 
 function toggleAppInfoSection(toggle) {
@@ -2607,6 +2702,18 @@ appResetBtn?.addEventListener("click", () => {
 
 appInfoOnboardingBtn?.addEventListener("click", () => {
     openOnboardingModal({ force: true });
+});
+
+appInfoRemoteToggle?.addEventListener("change", event => {
+    void setRemoteAccessFromSettings(Boolean(event.target.checked));
+});
+
+appInfoRemoteCopyBtn?.addEventListener("click", () => {
+    void copyRemoteAccessPairingFromSettings();
+});
+
+appInfoRemoteRotateBtn?.addEventListener("click", () => {
+    void rotateRemoteAccessTokenFromSettings();
 });
 
 localModelsAutoStartToggle?.addEventListener("change", event => {

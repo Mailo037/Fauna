@@ -3,7 +3,9 @@ const { autoUpdater } = require("electron-updater");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
+const http = require("node:http");
 const net = require("node:net");
+const os = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { TextDecoder } = require("node:util");
@@ -20,6 +22,9 @@ const WORKSPACE_PROJECTS_STORAGE_KEY = "faunaWorkspaceProjects";
 const WORKSPACE_ACCESS_POLICY_STORAGE_KEY = "faunaWorkspaceAccessPolicy";
 const WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT = "chat-output";
 const WORKSPACE_ACCESS_POLICY_FULL_MACHINE = "full-machine";
+const REMOTE_ACCESS_ENABLED_STORAGE_KEY = "faunaRemoteAccessEnabled";
+const REMOTE_ACCESS_TOKEN_STORAGE_KEY = "faunaRemoteAccessToken";
+const REMOTE_ACCESS_PORT_STORAGE_KEY = "faunaRemoteAccessPort";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
 const SKILL_LIBRARY_STORAGE_KEY = "faunaSkills";
@@ -36,6 +41,9 @@ const OLLAMA_TAGS_PATH = "/api/tags";
 const OLLAMA_TAGS_URL = `${OLLAMA_BASE_URL}${OLLAMA_TAGS_PATH}`;
 const DEFAULT_LOCAL_CHAT_MODEL = "qwen3:8b";
 const DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4-mini";
+const DEFAULT_REMOTE_ACCESS_PORT = 8899;
+const MAX_REMOTE_ACCESS_PORT = 8919;
+const REMOTE_REQUEST_BODY_LIMIT_BYTES = 65536;
 const APP_CACHE_STORAGE_KEYS = [
   "faunaOpenAiSpeechCache",
   "faunaVoicePreviewCache",
@@ -86,6 +94,8 @@ let mainWindow = null;
 let quickWindow = null;
 let tray = null;
 let bridgeProcess = null;
+let remoteAccessServer = null;
+let remoteAccessPort = 0;
 let mainRendererReady = false;
 let pendingOpenChatId = "";
 let pendingQuickPrompt = "";
@@ -1364,8 +1374,488 @@ function getDesktopInfo() {
     chatCount: sessions.length,
     projects: readWorkspaceProjectsSync(),
     activeChatId: getActiveChatIdSync(),
+    remoteAccess: getRemoteAccessInfoSync(),
     updateState
   };
+}
+
+function getRemoteAccessEnabledSync() {
+  return storageGetSync(REMOTE_ACCESS_ENABLED_STORAGE_KEY) === "true";
+}
+
+function getRemoteAccessTokenSync() {
+  const existing = String(storageGetSync(REMOTE_ACCESS_TOKEN_STORAGE_KEY) || "").trim();
+  if (existing) return existing;
+  const token = crypto.randomBytes(24).toString("base64url");
+  storageSetSync(REMOTE_ACCESS_TOKEN_STORAGE_KEY, token);
+  return token;
+}
+
+function getRemoteAccessPreferredPortSync() {
+  const stored = Number(storageGetSync(REMOTE_ACCESS_PORT_STORAGE_KEY));
+  if (Number.isInteger(stored) && stored >= 1024 && stored <= 65535) return stored;
+  return DEFAULT_REMOTE_ACCESS_PORT;
+}
+
+function getLanIpv4Addresses() {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      if (entry?.family !== "IPv4" || entry.internal || !entry.address) continue;
+      addresses.push(entry.address);
+    }
+  }
+  return Array.from(new Set(addresses)).sort();
+}
+
+function getRemoteAccessUrls(port = remoteAccessPort || getRemoteAccessPreferredPortSync()) {
+  const cleanPort = Number(port) || DEFAULT_REMOTE_ACCESS_PORT;
+  return getLanIpv4Addresses().map(address => `http://${address}:${cleanPort}`);
+}
+
+function getRemoteAccessInfoSync() {
+  const enabled = getRemoteAccessEnabledSync();
+  const running = Boolean(remoteAccessServer);
+  const port = remoteAccessPort || getRemoteAccessPreferredPortSync();
+  const lanUrls = running ? getRemoteAccessUrls(port) : [];
+  return {
+    enabled,
+    running,
+    port,
+    endpoint: running ? `http://127.0.0.1:${port}` : "",
+    lanUrls,
+    primaryUrl: lanUrls[0] || (running ? `http://127.0.0.1:${port}` : ""),
+    token: getRemoteAccessTokenSync()
+  };
+}
+
+function canUseRemotePort(port) {
+  return new Promise(resolve => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "0.0.0.0");
+  });
+}
+
+async function findAvailableRemoteAccessPort(preferredPort = DEFAULT_REMOTE_ACCESS_PORT) {
+  const preferred = Math.max(1024, Math.min(65535, Number(preferredPort) || DEFAULT_REMOTE_ACCESS_PORT));
+  const candidates = [];
+  for (let port = preferred; port <= MAX_REMOTE_ACCESS_PORT; port += 1) candidates.push(port);
+  for (let port = DEFAULT_REMOTE_ACCESS_PORT; port < preferred; port += 1) candidates.push(port);
+  for (const port of candidates) {
+    if (await canUseRemotePort(port)) return port;
+  }
+  throw new Error("No remote access port is available.");
+}
+
+function timingSafeStringEquals(left = "", right = "") {
+  const leftBuffer = Buffer.from(String(left || ""));
+  const rightBuffer = Buffer.from(String(right || ""));
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function getRemoteRequestToken(req) {
+  const auth = String(req.headers.authorization || "");
+  const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  const header = String(req.headers["x-fauna-remote-token"] || "").trim();
+  return header || bearer;
+}
+
+function isRemoteRequestAuthorized(req) {
+  const expected = getRemoteAccessTokenSync();
+  const supplied = getRemoteRequestToken(req);
+  return Boolean(expected && supplied && timingSafeStringEquals(supplied, expected));
+}
+
+function setRemoteCorsHeaders(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "authorization, content-type, x-fauna-remote-token");
+}
+
+function sendRemoteJson(res, statusCode, payload = {}) {
+  setRemoteCorsHeaders(res);
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(JSON.stringify(payload));
+}
+
+function sendRemoteText(res, statusCode, text, contentType = "text/plain; charset=utf-8") {
+  res.writeHead(statusCode, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-cache"
+  });
+  res.end(text);
+}
+
+function readRemoteJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", chunk => {
+      size += chunk.length;
+      if (size > REMOTE_REQUEST_BODY_LIMIT_BYTES) {
+        reject(new Error("Remote request body is too large."));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("error", reject);
+    req.on("end", () => {
+      if (chunks.length === 0) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch {
+        reject(new Error("Remote request body must be JSON."));
+      }
+    });
+  });
+}
+
+function getRemoteStaticMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === ".html") return "text/html; charset=utf-8";
+  if (ext === ".css") return "text/css; charset=utf-8";
+  if (ext === ".js") return "text/javascript; charset=utf-8";
+  if (ext === ".png") return "image/png";
+  if (ext === ".svg") return "image/svg+xml";
+  return "application/octet-stream";
+}
+
+async function serveRemoteStaticFile(reqPath, res) {
+  const pathname = reqPath === "/" || reqPath === "/mobile" ? "/mobile/" : reqPath;
+  if (pathname === "/favicon.png") {
+    const favicon = path.join(getAppRoot(), "favicon.png");
+    if (fs.existsSync(favicon)) {
+      res.writeHead(200, {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=3600"
+      });
+      fs.createReadStream(favicon).pipe(res);
+      return true;
+    }
+  }
+
+  const appRoot = getAppRoot();
+  let staticRoot = "";
+  let relative = "";
+
+  if (pathname.startsWith("/mobile/")) {
+    staticRoot = path.join(appRoot, "mobile");
+    relative = decodeURIComponent(pathname.slice("/mobile/".length)) || "index.html";
+  } else if (pathname === "/styles.css") {
+    staticRoot = appRoot;
+    relative = "styles.css";
+  } else if (pathname.startsWith("/styles/")) {
+    staticRoot = path.join(appRoot, "styles");
+    relative = decodeURIComponent(pathname.slice("/styles/".length));
+  } else if (pathname === "/components/composer.html" || pathname === "/components/templates.html") {
+    staticRoot = path.join(appRoot, "components");
+    relative = path.basename(pathname);
+  } else if (pathname === "/modules/model-switcher.js") {
+    staticRoot = path.join(appRoot, "modules");
+    relative = "model-switcher.js";
+  } else {
+    return false;
+  }
+
+  const target = path.resolve(staticRoot, relative);
+  if (!isPathInside(target, staticRoot) || !fs.existsSync(target) || !fs.statSync(target).isFile()) return false;
+
+  res.writeHead(200, {
+    "Content-Type": getRemoteStaticMimeType(target),
+    "Cache-Control": target.endsWith(".html") ? "no-cache" : "public, max-age=600"
+  });
+  fs.createReadStream(target).pipe(res);
+  return true;
+}
+
+function getRemoteMessageText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map(part => {
+      if (typeof part === "string") return part;
+      if (typeof part?.text === "string") return part.text;
+      if (typeof part?.content === "string") return part.content;
+      return "";
+    }).filter(Boolean).join("\n");
+  }
+  if (content && typeof content === "object" && typeof content.text === "string") return content.text;
+  return String(content || "");
+}
+
+function cleanRemoteMessageText(value = "") {
+  return String(value || "")
+    .replace(/<fauna_(?:tool_call|question|chat_title|memory)>[\s\S]*?<\/fauna_(?:tool_call|question|chat_title|memory)>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeRemoteMessage(message = {}, index = 0) {
+  const role = ["user", "assistant", "system", "tool"].includes(message.role) ? message.role : "assistant";
+  return {
+    id: String(message.id || `${role}-${index}`),
+    role,
+    content: cleanRemoteMessageText(getRemoteMessageText(message.content)),
+    createdAt: String(message.createdAt || message.completedAt || ""),
+    error: message.faunaError || null
+  };
+}
+
+function compareRemoteChatSessions(a, b) {
+  if (Boolean(a?.pinned) !== Boolean(b?.pinned)) return a?.pinned ? -1 : 1;
+  return getSessionTime(b) - getSessionTime(a);
+}
+
+function getRemoteChatSummaries(limit = 40) {
+  const max = Math.max(1, Math.min(120, Number(limit) || 40));
+  const activeChatId = getActiveChatIdSync();
+  return readChatSessionsSync()
+    .filter(session => session?.id && !session.archived && sessionHasContent(session))
+    .sort(compareRemoteChatSessions)
+    .slice(0, max)
+    .map(session => ({
+      id: sanitizeId(session.id, "chat"),
+      title: getSessionTitle(session),
+      preview: getSessionPreview(session),
+      updatedAt: session.updatedAt || session.createdAt || "",
+      pinned: Boolean(session.pinned),
+      archived: Boolean(session.archived),
+      active: session.id === activeChatId
+    }));
+}
+
+function readChatSessionByIdSync(chatId = "") {
+  const safeId = sanitizeId(chatId, "");
+  if (!safeId) return null;
+  return readChatSessionsSync().find(session => sanitizeId(session?.id, "") === safeId) || null;
+}
+
+function serializeRemoteChatSession(session) {
+  const history = Array.isArray(session?.conversationHistory) ? session.conversationHistory : [];
+  return {
+    id: sanitizeId(session?.id, "chat"),
+    title: getSessionTitle(session),
+    preview: getSessionPreview(session),
+    createdAt: session?.createdAt || "",
+    updatedAt: session?.updatedAt || session?.createdAt || "",
+    pinned: Boolean(session?.pinned),
+    archived: Boolean(session?.archived),
+    messages: history.map(normalizeRemoteMessage).filter(message => message.content || message.error)
+  };
+}
+
+function normalizeRemotePrompt(value = "") {
+  return String(value || "").replace(/\r\n/g, "\n").trim().slice(0, 12000);
+}
+
+function dispatchRemotePrompt({ chatId = "", prompt = "", newChat = false } = {}) {
+  const cleanPrompt = normalizeRemotePrompt(prompt);
+  if (!cleanPrompt) throw new Error("Message is empty.");
+
+  const safeChatId = sanitizeId(chatId, "");
+  const quickPayload = normalizeQuickPromptPayload({ prompt: cleanPrompt });
+  if (!quickPromptPayloadHasContent(quickPayload)) throw new Error("Message is empty.");
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingOpenChatId = safeChatId || pendingOpenChatId;
+    pendingQuickPayload = quickPayload;
+    pendingQuickPrompt = "";
+    pendingNewChat = Boolean(newChat || pendingNewChat);
+    createWindow({ chatId: safeChatId });
+    return { delivered: false };
+  }
+
+  if (mainWindow.webContents.isLoading() || !mainRendererReady) {
+    pendingOpenChatId = safeChatId || pendingOpenChatId;
+    pendingQuickPayload = quickPayload;
+    pendingQuickPrompt = "";
+    pendingNewChat = Boolean(newChat || pendingNewChat);
+    return { delivered: false };
+  }
+
+  if (newChat) sendToRenderer("fauna:new-chat", {});
+  if (safeChatId) sendToRenderer("fauna:open-chat", { chatId: safeChatId });
+  sendToRenderer("fauna:quick-prompt", quickPayload);
+  return { delivered: true };
+}
+
+function setRemoteChatPinned(chatId = "", pinned = false) {
+  const safeId = sanitizeId(chatId, "");
+  const sessions = readChatSessionsSync();
+  const session = sessions.find(item => sanitizeId(item?.id, "") === safeId);
+  if (!session) throw new Error("Chat was not found.");
+  if (session.archived) throw new Error("Archived chats cannot be pinned from mobile.");
+  session.pinned = Boolean(pinned);
+  session.updatedAt = new Date().toISOString();
+  writeJsonFileSync(getChatFilePath(safeId), { ...session, id: safeId });
+  refreshDesktopRecents();
+  sendToRenderer("fauna:remote-chat-pinned", {
+    chatId: safeId,
+    pinned: session.pinned,
+    updatedAt: session.updatedAt
+  });
+  return serializeRemoteChatSession(session);
+}
+
+async function handleRemoteApiRequest(req, res, requestUrl) {
+  if (!isRemoteRequestAuthorized(req)) {
+    sendRemoteJson(res, 401, { ok: false, error: "Unauthorized remote token" });
+    return;
+  }
+
+  const parts = requestUrl.pathname.split("/").filter(Boolean);
+  const method = String(req.method || "GET").toUpperCase();
+
+  if (method === "GET" && requestUrl.pathname === "/api/health") {
+    sendRemoteJson(res, 200, { ok: true, info: getRemoteAccessInfoSync(), app: "Fauna" });
+    return;
+  }
+
+  if (method === "GET" && requestUrl.pathname === "/api/info") {
+    sendRemoteJson(res, 200, { ok: true, info: getDesktopInfo() });
+    return;
+  }
+
+  if (method === "GET" && requestUrl.pathname === "/api/chats") {
+    sendRemoteJson(res, 200, {
+      ok: true,
+      chats: getRemoteChatSummaries(requestUrl.searchParams.get("limit")),
+      activeChatId: getActiveChatIdSync()
+    });
+    return;
+  }
+
+  if (method === "POST" && requestUrl.pathname === "/api/messages") {
+    const body = await readRemoteJsonBody(req);
+    const result = dispatchRemotePrompt({
+      chatId: body.chatId,
+      prompt: body.message || body.prompt,
+      newChat: Boolean(body.newChat)
+    });
+    sendRemoteJson(res, 202, { ok: true, accepted: true, ...result });
+    return;
+  }
+
+  if (parts[0] === "api" && parts[1] === "chats" && parts[2]) {
+    const chatId = sanitizeId(parts[2], "");
+    const session = readChatSessionByIdSync(chatId);
+    if (!session) {
+      sendRemoteJson(res, 404, { ok: false, error: "Chat was not found." });
+      return;
+    }
+
+    if (method === "GET" && parts.length === 3) {
+      sendRemoteJson(res, 200, { ok: true, chat: serializeRemoteChatSession(session) });
+      return;
+    }
+
+    if (method === "POST" && parts[3] === "send") {
+      if (session.archived) {
+        sendRemoteJson(res, 409, { ok: false, error: "Archived chats are read-only." });
+        return;
+      }
+      const body = await readRemoteJsonBody(req);
+      const result = dispatchRemotePrompt({
+        chatId,
+        prompt: body.message || body.prompt,
+        newChat: false
+      });
+      sendRemoteJson(res, 202, { ok: true, accepted: true, chatId, ...result });
+      return;
+    }
+
+    if (method === "POST" && parts[3] === "pin") {
+      const body = await readRemoteJsonBody(req);
+      const chat = setRemoteChatPinned(chatId, body.pinned);
+      sendRemoteJson(res, 200, { ok: true, chat });
+      return;
+    }
+  }
+
+  sendRemoteJson(res, 404, { ok: false, error: "Unknown remote endpoint." });
+}
+
+async function handleRemoteAccessRequest(req, res) {
+  setRemoteCorsHeaders(res);
+  if (String(req.method || "").toUpperCase() === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+  try {
+    if (requestUrl.pathname.startsWith("/api/")) {
+      await handleRemoteApiRequest(req, res, requestUrl);
+      return;
+    }
+    if (await serveRemoteStaticFile(requestUrl.pathname, res)) return;
+    sendRemoteText(res, 404, "Not found");
+  } catch (error) {
+    if (!res.headersSent) {
+      sendRemoteJson(res, 500, { ok: false, error: error?.message || "Remote access failed." });
+    } else {
+      res.end();
+    }
+  }
+}
+
+async function startRemoteAccessServer() {
+  if (remoteAccessServer) return getRemoteAccessInfoSync();
+  const port = await findAvailableRemoteAccessPort(getRemoteAccessPreferredPortSync());
+  getRemoteAccessTokenSync();
+
+  const server = http.createServer((req, res) => {
+    void handleRemoteAccessRequest(req, res);
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "0.0.0.0", resolve);
+  });
+
+  remoteAccessServer = server;
+  remoteAccessPort = port;
+  storageSetSync(REMOTE_ACCESS_PORT_STORAGE_KEY, String(port));
+  console.log(`Fauna remote access listening on 0.0.0.0:${port}`);
+  return getRemoteAccessInfoSync();
+}
+
+function stopRemoteAccessServer() {
+  const server = remoteAccessServer;
+  remoteAccessServer = null;
+  remoteAccessPort = 0;
+  if (!server) return Promise.resolve(getRemoteAccessInfoSync());
+  return new Promise(resolve => {
+    server.close(() => resolve(getRemoteAccessInfoSync()));
+  });
+}
+
+async function startRemoteAccessServerIfEnabled() {
+  if (!getRemoteAccessEnabledSync()) return getRemoteAccessInfoSync();
+  return startRemoteAccessServer();
+}
+
+async function setRemoteAccessEnabled(enabled) {
+  storageSetSync(REMOTE_ACCESS_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
+  if (enabled) return startRemoteAccessServer();
+  return stopRemoteAccessServer();
+}
+
+function rotateRemoteAccessToken() {
+  storageSetSync(REMOTE_ACCESS_TOKEN_STORAGE_KEY, crypto.randomBytes(24).toString("base64url"));
+  return getRemoteAccessInfoSync();
 }
 
 async function removePathInsideUserData(targetPath) {
@@ -2500,6 +2990,14 @@ function registerIpc() {
     await startWorkspaceBridge();
     return getDesktopInfo();
   });
+  ipcMain.handle("fauna:remote-access-set-enabled", async (_event, enabled) => {
+    await setRemoteAccessEnabled(Boolean(enabled));
+    return getDesktopInfo();
+  });
+  ipcMain.handle("fauna:remote-access-rotate-token", () => {
+    rotateRemoteAccessToken();
+    return getDesktopInfo();
+  });
   ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
   ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));
   ipcMain.handle("fauna:window-minimize", () => {
@@ -2595,6 +3093,11 @@ if (!gotSingleInstanceLock) {
     } catch (error) {
       console.warn("Fauna desktop could not start the workspace bridge:", error);
     }
+    try {
+      await startRemoteAccessServerIfEnabled();
+    } catch (error) {
+      console.warn("Fauna desktop could not start remote access:", error);
+    }
     createTray();
     updateJumpList();
     createWindow({ chatId: pendingOpenChatId });
@@ -2613,6 +3116,9 @@ app.on("before-quit", () => {
   stopAllTerminalSessions();
   if (bridgeProcess && !bridgeProcess.killed) {
     bridgeProcess.kill();
+  }
+  if (remoteAccessServer) {
+    remoteAccessServer.close();
   }
 });
 

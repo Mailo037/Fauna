@@ -1619,6 +1619,18 @@ function handleDesktopNewChatRequest() {
     startNewChatSession({ notify: true, urlMode: "replace" });
 }
 
+function handleDesktopRemoteChatPinnedRequest(payload = {}) {
+    const chatId = String(payload.chatId || "").trim();
+    if (!chatId) return;
+    const session = getChatSessionById(chatId);
+    if (!session || session.archived) return;
+    if (session.id === activeSessionId) saveCurrentSession({ render: false, updateUrl: false });
+    session.pinned = Boolean(payload.pinned);
+    session.updatedAt = String(payload.updatedAt || new Date().toISOString());
+    persistChatSessions();
+    renderChatHistory();
+}
+
 async function handleDesktopQuickPromptRequest(payload = {}) {
     const prompt = String(payload.prompt || "").trim();
     focusMainWindowComposer();
@@ -1652,4 +1664,5 @@ const desktopQuickApi = getFaunaDesktopApi()?.quick;
 desktopQuickApi?.onOpenChat?.(handleDesktopOpenChatRequest);
 desktopQuickApi?.onNewChat?.(handleDesktopNewChatRequest);
 desktopQuickApi?.onPrompt?.(handleDesktopQuickPromptRequest);
+desktopQuickApi?.onRemoteChatPinned?.(handleDesktopRemoteChatPinnedRequest);
 void desktopQuickApi?.rendererReady?.();

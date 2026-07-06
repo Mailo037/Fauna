@@ -3,3 +3,6 @@ attached_assets/*
 node_modules/
 dist/
 *.log
+android/.gradle/
+android/build/
+android/app/build/

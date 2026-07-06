@@ -373,8 +373,15 @@ const appInfoSettingsPath = document.getElementById("appInfoSettingsPath");
 const appInfoChatsPath = document.getElementById("appInfoChatsPath");
 const appInfoMediaPath = document.getElementById("appInfoMediaPath");
 const appInfoOutputPath = document.getElementById("appInfoOutputPath");
+const appInfoSkillsPath = document.getElementById("appInfoSkillsPath");
 const appInfoBridgeEndpoint = document.getElementById("appInfoBridgeEndpoint");
 const appInfoWorkspaceAccessPolicy = document.getElementById("appInfoWorkspaceAccessPolicy");
+const appInfoRemoteStatus = document.getElementById("appInfoRemoteStatus");
+const appInfoRemoteToggle = document.getElementById("appInfoRemoteToggle");
+const appInfoRemoteUrl = document.getElementById("appInfoRemoteUrl");
+const appInfoRemoteToken = document.getElementById("appInfoRemoteToken");
+const appInfoRemoteCopyBtn = document.getElementById("appInfoRemoteCopyBtn");
+const appInfoRemoteRotateBtn = document.getElementById("appInfoRemoteRotateBtn");
 const appInfoChatCount = document.getElementById("appInfoChatCount");
 const appInfoStoredKeys = document.getElementById("appInfoStoredKeys");
 const appInfoOnboardingBtn = document.getElementById("appInfoOnboardingBtn");
@@ -535,12 +542,24 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.2.0";
-const FAUNA_APP_BUILD_ID = "20260706-capabilities-skills";
+const FAUNA_APP_VERSION = "0.3.0";
+const FAUNA_APP_BUILD_ID = "20260706-phone-sync";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.3.0",
+        date: "2026-07-06",
+        commit: "v0.3.0",
+        title: "Phone sync and Android companion",
+        changes: [
+            "Added token-protected phone sync so the Android companion can view chats from the PC over the local network.",
+            "Added remote chat sending, new-chat handoff, and pinned-chat updates that route through the running desktop app.",
+            "Added Settings > Info controls for enabling phone sync, copying the phone URL, and rotating the access token.",
+            "Matched the Android companion composer to the desktop composer by loading the same component, templates, styles, and model switcher."
+        ]
+    },
     {
         version: "0.2.0",
         date: "2026-07-06",

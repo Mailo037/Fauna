@@ -89,6 +89,14 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   getInfo() {
     return ipcRenderer.invoke("fauna:desktop-info");
   },
+  remote: {
+    setEnabled(enabled) {
+      return ipcRenderer.invoke("fauna:remote-access-set-enabled", Boolean(enabled));
+    },
+    rotateToken() {
+      return ipcRenderer.invoke("fauna:remote-access-rotate-token");
+    }
+  },
   skills: {
     list() {
       return ipcRenderer.invoke("fauna:skills-list");
@@ -243,6 +251,9 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
     },
     onRecentChatsChanged(handler) {
       return onRendererEvent("fauna:recent-chats-changed", handler);
+    },
+    onRemoteChatPinned(handler) {
+      return onRendererEvent("fauna:remote-chat-pinned", handler);
     }
   }
 });

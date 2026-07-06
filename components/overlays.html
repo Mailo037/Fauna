@@ -1012,6 +1012,39 @@
                 </div>
 
                 <div class="provider-model-section settings-panel-section app-info-collapsible" data-app-info-section>
+                    <button class="app-info-section-toggle" type="button" data-app-info-toggle aria-expanded="true" aria-controls="appInfoRemoteSection">
+                        <span class="provider-section-label">Phone sync</span>
+                        <svg class="app-info-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                    </button>
+                    <div id="appInfoRemoteSection" class="app-info-section-body settings-control-stack">
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Android remote access</span>
+                                <span id="appInfoRemoteStatus" class="setting-desc">Desktop only</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="appInfoRemoteToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="app-info-path-list">
+                            <div class="app-info-path-row">
+                                <span>Phone URL</span>
+                                <code id="appInfoRemoteUrl">Enable remote access</code>
+                            </div>
+                            <div class="app-info-path-row">
+                                <span>Token</span>
+                                <code id="appInfoRemoteToken">Enable remote access</code>
+                            </div>
+                        </div>
+                        <div class="provider-actions app-info-actions">
+                            <button id="appInfoRemoteCopyBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Copy pairing</button>
+                            <button id="appInfoRemoteRotateBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">New token</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="provider-model-section settings-panel-section app-info-collapsible" data-app-info-section>
                     <button class="app-info-section-toggle" type="button" data-app-info-toggle aria-expanded="true" aria-controls="appInfoStorageSection">
                         <span class="provider-section-label">Storage locations</span>
                         <svg class="app-info-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
