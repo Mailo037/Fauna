@@ -25,12 +25,56 @@ const WORKSPACE_ACCESS_POLICY_FULL_MACHINE = "full-machine";
 const REMOTE_ACCESS_ENABLED_STORAGE_KEY = "faunaRemoteAccessEnabled";
 const REMOTE_ACCESS_TOKEN_STORAGE_KEY = "faunaRemoteAccessToken";
 const REMOTE_ACCESS_PORT_STORAGE_KEY = "faunaRemoteAccessPort";
+const AUTO_INSTALL_UPDATES_STORAGE_KEY = "faunaAutoInstallUpdates";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
 const SKILL_LIBRARY_STORAGE_KEY = "faunaSkills";
 const AI_PROVIDER_STORAGE_KEY = "faunaAiProvider";
 const LOCAL_CHAT_MODEL_STORAGE_KEY = "faunaLocalChatModel";
 const OPENAI_CHAT_MODEL_STORAGE_KEY = "faunaOpenAiChatModel";
+const OPENAI_REASONING_MODE_STORAGE_KEY = "faunaOpenAiReasoningMode";
+const OPENAI_IMAGE_MODEL_STORAGE_KEY = "faunaOpenAiImageModel";
+const OPENAI_TRANSCRIPTION_MODEL_STORAGE_KEY = "faunaOpenAiTranscriptionModel";
+const OPENAI_SPEECH_MODEL_STORAGE_KEY = "faunaOpenAiSpeechModel";
+const OPENAI_REALTIME_MODEL_STORAGE_KEY = "faunaOpenAiRealtimeModel";
+const OPENAI_VOICE_STORAGE_KEY = "faunaOpenAiVoice";
+const LOCAL_VOICE_TRANSCRIPTION_STORAGE_KEY = "faunaLocalVoiceTranscription";
+const LOCAL_VOICE_TRANSCRIPTION_ENDPOINT_STORAGE_KEY = "faunaLocalVoiceTranscriptionEndpoint";
+const LOCAL_VOICE_TRANSCRIPTION_MODEL_STORAGE_KEY = "faunaLocalVoiceTranscriptionModel";
+const LOCAL_VOICE_REPLY_MODEL_STORAGE_KEY = "faunaLocalVoiceReplyModel";
+const LOCAL_VOICE_REPLY_ENDPOINT_STORAGE_KEY = "faunaLocalVoiceReplyEndpoint";
+const AI_CACHING_STORAGE_KEY = "faunaAiCachingEnabled";
+const WAN_VIDEO_ENDPOINT_STORAGE_KEY = "faunaWanEndpoint";
+const THEME_STORAGE_KEY = "faunaTheme";
+const ACCENT_STORAGE_KEY = "faunaAccent";
+const AI_STREAMING_ENABLED_STORAGE_KEY = "faunaAiStreamingEnabled";
+const UI_COMPACT_MODE_STORAGE_KEY = "faunaUiCompactMode";
+const AI_TEMPERATURE_STORAGE_KEY = "faunaAiTemperature";
+const AI_MAX_OUTPUT_TOKENS_STORAGE_KEY = "faunaAiMaxOutputTokens";
+const AI_TOP_P_STORAGE_KEY = "faunaAiTopP";
+const OLLAMA_TOP_K_STORAGE_KEY = "faunaOllamaTopK";
+const OPENAI_VERBOSITY_STORAGE_KEY = "faunaOpenAiVerbosity";
+const AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY = "faunaAgentMaxStepsAtATime";
+const AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY = "faunaAgentMaxStepsPerRun";
+const CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY = "faunaContextCompactionThresholdPercent";
+const CONTEXT_COMPACTION_REVIEW_STORAGE_KEY = "faunaContextCompactionReviewEnabled";
+const CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY = "faunaContextCompactionRotationLimit";
+const WORKSPACE_CHECKPOINTS_ENABLED_STORAGE_KEY = "faunaWorkspaceCheckpointsEnabled";
+const OLLAMA_AUTO_START_STORAGE_KEY = "faunaOllamaAutoStart";
+const COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY = "faunaCompletionNotificationsEnabled";
+const COMPLETION_SOUND_ENABLED_STORAGE_KEY = "faunaCompletionSoundEnabled";
+const COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY = "faunaCompletionOnlyUnfocused";
+const COMPLETION_BACKGROUND_ONLY_STORAGE_KEY = "faunaCompletionBackgroundOnly";
+const COMPLETION_SOUND_VOLUME_STORAGE_KEY = "faunaCompletionSoundVolume";
+const POTATO_MODE_ENABLED_STORAGE_KEY = "faunaPotatoModeEnabled";
+const POTATO_PARALLEL_CHATS_STORAGE_KEY = "faunaPotatoParallelChatsEnabled";
+const POTATO_AUTO_WEB_CONTEXT_STORAGE_KEY = "faunaPotatoAutoWebContextEnabled";
+const POTATO_AUTO_WORKSPACE_CONTEXT_STORAGE_KEY = "faunaPotatoAutoWorkspaceContextEnabled";
+const POTATO_MEDIA_GENERATION_STORAGE_KEY = "faunaPotatoMediaGenerationEnabled";
+const POTATO_SHORT_OUTPUTS_STORAGE_KEY = "faunaPotatoShortOutputsEnabled";
+const POTATO_TRIM_HISTORY_STORAGE_KEY = "faunaPotatoTrimHistoryEnabled";
+const POTATO_REDUCE_MOTION_STORAGE_KEY = "faunaPotatoReduceMotionEnabled";
+const PERSONA_DISPLAY_NAME_STORAGE_KEY = "faunaPersonaDisplayName";
 const WORKSPACE_URL_FRAGMENT_CHAT = "chat";
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const OLLAMA_BASE_URL_CANDIDATES = Array.from(new Set([
@@ -112,6 +156,7 @@ let updateState = {
   currentVersion: app.getVersion(),
   progress: 0
 };
+let autoUpdateInstallInFlight = false;
 
 function getAppRoot() {
   return path.resolve(__dirname, "..");
@@ -936,6 +981,575 @@ function getQuickModelStateBase() {
   };
 }
 
+const REMOTE_EDITABLE_SETTINGS = [
+  {
+    key: AUTO_INSTALL_UPDATES_STORAGE_KEY,
+    section: "Updates",
+    label: "Auto install updates",
+    description: "Install downloaded desktop updates automatically after a check.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: THEME_STORAGE_KEY,
+    section: "Appearance",
+    label: "Theme",
+    description: "Switch the desktop app theme.",
+    type: "select",
+    defaultValue: "dark",
+    options: [
+      { value: "dark", label: "Dark" },
+      { value: "light", label: "Light" }
+    ]
+  },
+  {
+    key: ACCENT_STORAGE_KEY,
+    section: "Appearance",
+    label: "Accent color",
+    description: "Use the same accent choices as desktop settings.",
+    type: "select",
+    defaultValue: "blue",
+    options: [
+      { value: "blue", label: "Blue" },
+      { value: "orange", label: "Claude Orange" },
+      { value: "green", label: "Green" },
+      { value: "red", label: "Red" }
+    ]
+  },
+  {
+    key: UI_COMPACT_MODE_STORAGE_KEY,
+    section: "Appearance",
+    label: "Compact UI",
+    description: "Reduce spacing in the desktop interface.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: AI_PROVIDER_STORAGE_KEY,
+    section: "Provider",
+    label: "AI provider",
+    description: "Choose the provider used for new desktop prompts.",
+    type: "select",
+    defaultValue: "local",
+    normalizer: "ai-provider",
+    options: [
+      { value: "local", label: "Ollama" },
+      { value: "openai", label: "OpenAI" }
+    ]
+  },
+  {
+    key: LOCAL_CHAT_MODEL_STORAGE_KEY,
+    section: "Provider",
+    label: "Ollama chat model",
+    description: "Set the local chat model id.",
+    type: "text",
+    defaultValue: DEFAULT_LOCAL_CHAT_MODEL,
+    maxLength: 120
+  },
+  {
+    key: OPENAI_CHAT_MODEL_STORAGE_KEY,
+    section: "Provider",
+    label: "OpenAI chat model",
+    description: "Set the OpenAI chat model id.",
+    type: "text",
+    defaultValue: DEFAULT_OPENAI_CHAT_MODEL,
+    maxLength: 120
+  },
+  {
+    key: OPENAI_REASONING_MODE_STORAGE_KEY,
+    section: "Provider",
+    label: "OpenAI reasoning",
+    description: "Choose the default reasoning mode.",
+    type: "select",
+    defaultValue: "medium",
+    options: [
+      { value: "", label: "Automatic" },
+      { value: "minimal", label: "Minimal" },
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" }
+    ]
+  },
+  {
+    key: OPENAI_VERBOSITY_STORAGE_KEY,
+    section: "Provider",
+    label: "OpenAI verbosity",
+    description: "Control answer verbosity for compatible models.",
+    type: "select",
+    defaultValue: "medium",
+    options: [
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" }
+    ]
+  },
+  {
+    key: AI_CACHING_STORAGE_KEY,
+    section: "Provider",
+    label: "AI caching",
+    description: "Use compatible provider prompt caching.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: OPENAI_IMAGE_MODEL_STORAGE_KEY,
+    section: "Media",
+    label: "OpenAI image model",
+    description: "Set the image generation model id.",
+    type: "text",
+    defaultValue: "gpt-image-1.5",
+    maxLength: 120
+  },
+  {
+    key: OPENAI_TRANSCRIPTION_MODEL_STORAGE_KEY,
+    section: "Voice",
+    label: "Transcription model",
+    description: "Set the OpenAI transcription model id.",
+    type: "text",
+    defaultValue: "gpt-4o-mini-transcribe",
+    maxLength: 120
+  },
+  {
+    key: OPENAI_SPEECH_MODEL_STORAGE_KEY,
+    section: "Voice",
+    label: "Speech model",
+    description: "Set the OpenAI text-to-speech model id.",
+    type: "text",
+    defaultValue: "gpt-4o-mini-tts",
+    maxLength: 120
+  },
+  {
+    key: OPENAI_REALTIME_MODEL_STORAGE_KEY,
+    section: "Voice",
+    label: "Realtime voice model",
+    description: "Set the OpenAI realtime model id.",
+    type: "text",
+    defaultValue: "gpt-realtime-2",
+    maxLength: 120
+  },
+  {
+    key: OPENAI_VOICE_STORAGE_KEY,
+    section: "Voice",
+    label: "OpenAI voice",
+    description: "Choose the default voice.",
+    type: "select",
+    defaultValue: "alloy",
+    options: [
+      { value: "alloy", label: "Alloy" },
+      { value: "ash", label: "Ash" },
+      { value: "ballad", label: "Ballad" },
+      { value: "coral", label: "Coral" },
+      { value: "echo", label: "Echo" },
+      { value: "fable", label: "Fable" },
+      { value: "marin", label: "Marin" },
+      { value: "nova", label: "Nova" },
+      { value: "onyx", label: "Onyx" },
+      { value: "sage", label: "Sage" },
+      { value: "shimmer", label: "Shimmer" },
+      { value: "verse", label: "Verse" }
+    ]
+  },
+  {
+    key: LOCAL_VOICE_TRANSCRIPTION_STORAGE_KEY,
+    section: "Voice",
+    label: "Local transcription",
+    description: "Use the local transcription endpoint.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: LOCAL_VOICE_TRANSCRIPTION_ENDPOINT_STORAGE_KEY,
+    section: "Voice",
+    label: "Local transcription endpoint",
+    description: "Set the local Whisper-compatible endpoint.",
+    type: "text",
+    defaultValue: "",
+    maxLength: 240
+  },
+  {
+    key: LOCAL_VOICE_TRANSCRIPTION_MODEL_STORAGE_KEY,
+    section: "Voice",
+    label: "Local transcription model",
+    description: "Set the local transcription model id.",
+    type: "text",
+    defaultValue: "whisper-large-v3",
+    maxLength: 120
+  },
+  {
+    key: LOCAL_VOICE_REPLY_ENDPOINT_STORAGE_KEY,
+    section: "Voice",
+    label: "Local voice endpoint",
+    description: "Set the local voice reply endpoint.",
+    type: "text",
+    defaultValue: "",
+    maxLength: 240
+  },
+  {
+    key: LOCAL_VOICE_REPLY_MODEL_STORAGE_KEY,
+    section: "Voice",
+    label: "Local voice model",
+    description: "Set the local voice reply model id.",
+    type: "text",
+    defaultValue: "",
+    maxLength: 120
+  },
+  {
+    key: AI_STREAMING_ENABLED_STORAGE_KEY,
+    section: "Response",
+    label: "Streaming",
+    description: "Stream desktop model responses while they generate.",
+    type: "boolean",
+    defaultValue: true
+  },
+  {
+    key: AI_TEMPERATURE_STORAGE_KEY,
+    section: "Response",
+    label: "Temperature",
+    description: "Control response randomness.",
+    type: "number",
+    defaultValue: 0.7,
+    min: 0,
+    max: 1.5,
+    step: 0.1
+  },
+  {
+    key: AI_MAX_OUTPUT_TOKENS_STORAGE_KEY,
+    section: "Response",
+    label: "Max output tokens",
+    description: "Use 0 for model default output length.",
+    type: "number",
+    defaultValue: 0,
+    min: 0,
+    max: 128000,
+    step: 256
+  },
+  {
+    key: AI_TOP_P_STORAGE_KEY,
+    section: "Response",
+    label: "Top P",
+    description: "Limit token sampling mass.",
+    type: "number",
+    defaultValue: 1,
+    min: 0.05,
+    max: 1,
+    step: 0.05
+  },
+  {
+    key: OLLAMA_TOP_K_STORAGE_KEY,
+    section: "Response",
+    label: "Ollama Top K",
+    description: "Limit Ollama token candidates.",
+    type: "number",
+    defaultValue: 40,
+    min: 0,
+    max: 200,
+    step: 1
+  },
+  {
+    key: AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY,
+    section: "Agent",
+    label: "Steps at a time",
+    description: "Maximum tool steps before yielding control.",
+    type: "number",
+    defaultValue: 4,
+    min: 1,
+    max: 32,
+    step: 1
+  },
+  {
+    key: AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY,
+    section: "Agent",
+    label: "Steps per run",
+    description: "Maximum tool steps per prompt.",
+    type: "number",
+    defaultValue: 16,
+    min: 1,
+    max: 64,
+    step: 1
+  },
+  {
+    key: CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY,
+    section: "Agent",
+    label: "Compaction threshold",
+    description: "Compact context at this percent full.",
+    type: "number",
+    defaultValue: 70,
+    min: 10,
+    max: 80,
+    step: 5
+  },
+  {
+    key: CONTEXT_COMPACTION_REVIEW_STORAGE_KEY,
+    section: "Agent",
+    label: "Review compactions",
+    description: "Show generated compaction notes in chat.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY,
+    section: "Agent",
+    label: "Compaction rotations",
+    description: "Keep this many compaction checkpoints.",
+    type: "number",
+    defaultValue: 2,
+    min: 1,
+    max: 6,
+    step: 1
+  },
+  {
+    key: WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY,
+    section: "Local workspace",
+    label: "Workspace bridge",
+    description: "Start or stop the desktop workspace bridge.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: WORKSPACE_ACCESS_POLICY_STORAGE_KEY,
+    section: "Local workspace",
+    label: "Agent access",
+    description: "Choose the desktop workspace access scope.",
+    type: "select",
+    defaultValue: WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT,
+    normalizer: "workspace-policy",
+    options: [
+      { value: WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT, label: "Output only" },
+      { value: WORKSPACE_ACCESS_POLICY_FULL_MACHINE, label: "Full machine" }
+    ]
+  },
+  {
+    key: WORKSPACE_CHECKPOINTS_ENABLED_STORAGE_KEY,
+    section: "Local workspace",
+    label: "Workspace checkpoints",
+    description: "Save checkpoints for workspace changes.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: OLLAMA_AUTO_START_STORAGE_KEY,
+    section: "Local services",
+    label: "Auto-start Ollama",
+    description: "Start Ollama when the desktop app opens.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: WAN_VIDEO_ENDPOINT_STORAGE_KEY,
+    section: "Local services",
+    label: "Wan endpoint",
+    description: "Set the ComfyUI/Wan endpoint.",
+    type: "text",
+    defaultValue: "http://localhost:8188",
+    maxLength: 240
+  },
+  {
+    key: COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY,
+    section: "Notifications",
+    label: "Completion alerts",
+    description: "Notify when a background response finishes.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: COMPLETION_SOUND_ENABLED_STORAGE_KEY,
+    section: "Notifications",
+    label: "Completion sound",
+    description: "Play a sound for completion alerts.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY,
+    section: "Notifications",
+    label: "Only when unfocused",
+    description: "Alert only when the desktop window is not focused.",
+    type: "boolean",
+    defaultValue: true
+  },
+  {
+    key: COMPLETION_BACKGROUND_ONLY_STORAGE_KEY,
+    section: "Notifications",
+    label: "Background chats only",
+    description: "Alert only for chats outside the active view.",
+    type: "boolean",
+    defaultValue: true
+  },
+  {
+    key: COMPLETION_SOUND_VOLUME_STORAGE_KEY,
+    section: "Notifications",
+    label: "Sound volume",
+    description: "Set the completion sound volume.",
+    type: "number",
+    defaultValue: 0.55,
+    min: 0,
+    max: 1,
+    step: 0.05
+  },
+  {
+    key: POTATO_MODE_ENABLED_STORAGE_KEY,
+    section: "Performance",
+    label: "Potato PC",
+    description: "Reduce expensive UI and generation behavior.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: POTATO_PARALLEL_CHATS_STORAGE_KEY,
+    section: "Performance",
+    label: "Parallel chats",
+    description: "Allow background chats while Potato PC is on.",
+    type: "boolean",
+    defaultValue: true
+  },
+  {
+    key: POTATO_AUTO_WEB_CONTEXT_STORAGE_KEY,
+    section: "Performance",
+    label: "Auto web context",
+    description: "Allow automatic web context in Potato PC.",
+    type: "boolean",
+    defaultValue: true
+  },
+  {
+    key: POTATO_AUTO_WORKSPACE_CONTEXT_STORAGE_KEY,
+    section: "Performance",
+    label: "Auto workspace context",
+    description: "Allow automatic workspace context in Potato PC.",
+    type: "boolean",
+    defaultValue: true
+  },
+  {
+    key: POTATO_MEDIA_GENERATION_STORAGE_KEY,
+    section: "Performance",
+    label: "Media generation",
+    description: "Allow media generation while Potato PC is on.",
+    type: "boolean",
+    defaultValue: true
+  },
+  {
+    key: POTATO_SHORT_OUTPUTS_STORAGE_KEY,
+    section: "Performance",
+    label: "Short outputs",
+    description: "Prefer shorter model outputs.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: POTATO_TRIM_HISTORY_STORAGE_KEY,
+    section: "Performance",
+    label: "Trim history",
+    description: "Keep fewer chat sessions locally.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: POTATO_REDUCE_MOTION_STORAGE_KEY,
+    section: "Performance",
+    label: "Reduce motion",
+    description: "Reduce desktop animations.",
+    type: "boolean",
+    defaultValue: false
+  },
+  {
+    key: PERSONA_DISPLAY_NAME_STORAGE_KEY,
+    section: "Personalization",
+    label: "Display name",
+    description: "Set the name used in personalized prompts.",
+    type: "text",
+    defaultValue: "",
+    maxLength: 40
+  }
+];
+
+function normalizeRemoteBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const text = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(text)) return true;
+  if (["false", "0", "no", "off"].includes(text)) return false;
+  return Boolean(fallback);
+}
+
+function decimalPlaces(value) {
+  const text = String(value ?? "");
+  const [, decimals = ""] = text.split(".");
+  return decimals.length;
+}
+
+function normalizeRemoteNumber(value, definition = {}) {
+  const fallback = Number(definition.defaultValue || 0);
+  const raw = Number(value);
+  const min = Number.isFinite(Number(definition.min)) ? Number(definition.min) : -Infinity;
+  const max = Number.isFinite(Number(definition.max)) ? Number(definition.max) : Infinity;
+  const step = Number(definition.step || 0);
+  let normalized = Number.isFinite(raw) ? raw : fallback;
+  normalized = Math.min(max, Math.max(min, normalized));
+  if (step > 0 && Number.isFinite(step)) {
+    normalized = Math.round(normalized / step) * step;
+  }
+  const precision = Math.min(6, Math.max(decimalPlaces(step), decimalPlaces(definition.defaultValue)));
+  return String(Number(normalized.toFixed(precision)));
+}
+
+function normalizeRemoteSettingStorageValue(definition = {}, value) {
+  if (!definition?.key) throw new Error("Unknown mobile setting.");
+  if (definition.normalizer === "ai-provider") return normalizeAiProvider(value);
+  if (definition.normalizer === "workspace-policy") return normalizeWorkspaceAccessPolicy(value);
+
+  if (definition.type === "boolean") {
+    return normalizeRemoteBoolean(value, definition.defaultValue) ? "true" : "false";
+  }
+  if (definition.type === "number") {
+    return normalizeRemoteNumber(value, definition);
+  }
+  if (definition.type === "select") {
+    const allowed = new Set((definition.options || []).map(option => String(option.value)));
+    const raw = String(value ?? definition.defaultValue ?? "").trim();
+    if (allowed.has(raw)) return raw;
+    return allowed.has(String(definition.defaultValue ?? "")) ? String(definition.defaultValue ?? "") : "";
+  }
+
+  const maxLength = Math.max(1, Math.min(4000, Number(definition.maxLength || 240)));
+  return String(value ?? definition.defaultValue ?? "").trim().slice(0, maxLength);
+}
+
+function parseRemoteSettingValue(definition = {}, storageValue) {
+  if (definition.type === "boolean") return normalizeRemoteBoolean(storageValue, definition.defaultValue);
+  if (definition.type === "number") return Number(normalizeRemoteNumber(storageValue, definition));
+  return normalizeRemoteSettingStorageValue(definition, storageValue);
+}
+
+function getRemoteSettingDefinition(key = "") {
+  const cleanKey = String(key || "").trim();
+  return REMOTE_EDITABLE_SETTINGS.find(setting => setting.key === cleanKey) || null;
+}
+
+function serializeRemoteSetting(definition = {}) {
+  const stored = storageGetSync(definition.key);
+  const storageValue = normalizeRemoteSettingStorageValue(
+    definition,
+    stored === null || stored === undefined ? definition.defaultValue : stored
+  );
+  return {
+    key: definition.key,
+    section: definition.section || "Settings",
+    label: definition.label || definition.key,
+    description: definition.description || "",
+    type: definition.type || "text",
+    value: parseRemoteSettingValue(definition, storageValue),
+    storageValue,
+    defaultValue: definition.defaultValue,
+    options: definition.options || [],
+    min: definition.min,
+    max: definition.max,
+    step: definition.step,
+    maxLength: definition.maxLength
+  };
+}
+
+function getRemoteEditableSettings() {
+  return REMOTE_EDITABLE_SETTINGS.map(serializeRemoteSetting);
+}
+
 function normalizeOllamaTagModel(model) {
   if (typeof model === "string") return model.trim();
   if (!model || typeof model !== "object") return "";
@@ -1375,7 +1989,7 @@ function getDesktopInfo() {
     projects: readWorkspaceProjectsSync(),
     activeChatId: getActiveChatIdSync(),
     remoteAccess: getRemoteAccessInfoSync(),
-    updateState
+    updateState: getDesktopUpdateState()
   };
 }
 
@@ -1708,6 +2322,63 @@ function setRemoteChatPinned(chatId = "", pinned = false) {
   return serializeRemoteChatSession(session);
 }
 
+function getRemoteSettingsPayload() {
+  return {
+    ok: true,
+    settings: getRemoteEditableSettings(),
+    update: getDesktopUpdateState(),
+    desktop: {
+      app: "Fauna",
+      version: app.getVersion(),
+      remoteAccess: getRemoteAccessInfoSync()
+    }
+  };
+}
+
+async function applyRemoteEditableSetting(key, value) {
+  const definition = getRemoteSettingDefinition(key);
+  if (!definition) throw new Error("This setting cannot be changed from mobile.");
+
+  const storageValue = normalizeRemoteSettingStorageValue(definition, value);
+  if (definition.key === AUTO_INSTALL_UPDATES_STORAGE_KEY) {
+    await setAutoInstallUpdatesEnabled(storageValue === "true");
+  } else if (definition.key === WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) {
+    storageSetSync(definition.key, storageValue);
+    if (storageValue === "true") {
+      await startWorkspaceBridge();
+    } else {
+      await stopWorkspaceBridge();
+    }
+  } else if (definition.key === WORKSPACE_ACCESS_POLICY_STORAGE_KEY) {
+    storageSetSync(definition.key, storageValue);
+    if (bridgeProcess && !bridgeProcess.killed) {
+      await startWorkspaceBridge();
+    }
+  } else {
+    storageSetSync(definition.key, storageValue);
+  }
+
+  const setting = serializeRemoteSetting(definition);
+  sendToRenderer("fauna:remote-settings-changed", {
+    key: setting.key,
+    value: setting.value,
+    storageValue: setting.storageValue,
+    setting
+  });
+  return setting;
+}
+
+async function applyRemoteSettingsPayload(body = {}) {
+  if (body && typeof body.settings === "object" && !Array.isArray(body.settings)) {
+    const changed = [];
+    for (const [key, value] of Object.entries(body.settings)) {
+      changed.push(await applyRemoteEditableSetting(key, value));
+    }
+    return changed;
+  }
+  return [await applyRemoteEditableSetting(body.key, body.value)];
+}
+
 async function handleRemoteApiRequest(req, res, requestUrl) {
   if (!isRemoteRequestAuthorized(req)) {
     sendRemoteJson(res, 401, { ok: false, error: "Unauthorized remote token" });
@@ -1724,6 +2395,35 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
 
   if (method === "GET" && requestUrl.pathname === "/api/info") {
     sendRemoteJson(res, 200, { ok: true, info: getDesktopInfo() });
+    return;
+  }
+
+  if (method === "GET" && requestUrl.pathname === "/api/settings") {
+    sendRemoteJson(res, 200, getRemoteSettingsPayload());
+    return;
+  }
+
+  if (method === "POST" && requestUrl.pathname === "/api/settings") {
+    const body = await readRemoteJsonBody(req);
+    const changed = await applyRemoteSettingsPayload(body);
+    sendRemoteJson(res, 200, { ...getRemoteSettingsPayload(), changed });
+    return;
+  }
+
+  if (method === "GET" && requestUrl.pathname === "/api/updates") {
+    sendRemoteJson(res, 200, { ok: true, update: getDesktopUpdateState() });
+    return;
+  }
+
+  if (method === "POST" && requestUrl.pathname === "/api/updates/check") {
+    const update = await checkForDesktopUpdate();
+    sendRemoteJson(res, 200, { ok: true, update });
+    return;
+  }
+
+  if (method === "POST" && requestUrl.pathname === "/api/updates/install") {
+    const update = await installDesktopUpdate();
+    sendRemoteJson(res, 200, { ok: true, update });
     return;
   }
 
@@ -2383,15 +3083,46 @@ function normalizeUpdateInfo(info = {}) {
   };
 }
 
+function getAutoInstallUpdatesEnabledSync() {
+  return storageGetSync(AUTO_INSTALL_UPDATES_STORAGE_KEY) === "true";
+}
+
+function getDesktopUpdateState() {
+  return {
+    ...updateState,
+    currentVersion: app.getVersion(),
+    autoInstall: getAutoInstallUpdatesEnabledSync(),
+    isPackaged: app.isPackaged
+  };
+}
+
 function setUpdateState(patch = {}) {
   updateState = {
     ...updateState,
     ...patch,
     currentVersion: app.getVersion(),
+    autoInstall: getAutoInstallUpdatesEnabledSync(),
     updatedAt: new Date().toISOString()
   };
-  sendToRenderer("fauna:update-status", updateState);
-  return updateState;
+  const state = getDesktopUpdateState();
+  sendToRenderer("fauna:update-status", state);
+  return state;
+}
+
+function scheduleAutoInstallUpdateIfEnabled() {
+  if (!getAutoInstallUpdatesEnabledSync()) return;
+  if (!["available", "downloaded"].includes(updateState.status)) return;
+  setTimeout(() => {
+    void installDesktopUpdate({ automatic: true });
+  }, 650);
+}
+
+async function setAutoInstallUpdatesEnabled(enabled) {
+  const nextEnabled = Boolean(enabled);
+  storageSetSync(AUTO_INSTALL_UPDATES_STORAGE_KEY, nextEnabled ? "true" : "false");
+  setUpdateState({});
+  if (nextEnabled) scheduleAutoInstallUpdateIfEnabled();
+  return getDesktopUpdateState();
 }
 
 function configureAutoUpdater() {
@@ -2417,6 +3148,7 @@ function configureAutoUpdater() {
       info: normalizedInfo,
       progress: 0
     });
+    scheduleAutoInstallUpdateIfEnabled();
   });
 
   autoUpdater.on("update-not-available", info => {
@@ -2448,6 +3180,7 @@ function configureAutoUpdater() {
       info: normalizedInfo,
       progress: 100
     });
+    scheduleAutoInstallUpdateIfEnabled();
   });
 
   autoUpdater.on("error", error => {
@@ -2478,15 +3211,17 @@ async function checkForDesktopUpdate() {
       canInstall: false
     });
   }
-  return updateState;
+  return getDesktopUpdateState();
 }
 
-async function installDesktopUpdate() {
+async function installDesktopUpdate({ automatic = false } = {}) {
+  if (automatic && autoUpdateInstallInFlight) return getDesktopUpdateState();
   if (updateState.status === "downloaded") {
+    autoUpdateInstallInFlight = true;
     autoUpdater.quitAndInstall(false, true);
     return setUpdateState({
       status: "installing",
-      message: "Installing update...",
+      message: automatic ? "Installing update automatically..." : "Installing update...",
       canInstall: false
     });
   }
@@ -2502,7 +3237,7 @@ async function installDesktopUpdate() {
       });
     }
   }
-  return updateState;
+  return getDesktopUpdateState();
 }
 
 function getAppIconPath() {
@@ -2915,7 +3650,7 @@ function createWindow({ chatId = "" } = {}) {
     mainRendererReady = false;
     sendNavigationState();
     sendWindowState();
-    sendToRenderer("fauna:update-status", updateState);
+    sendToRenderer("fauna:update-status", getDesktopUpdateState());
   });
 
   mainWindow.loadURL(getMainWindowUrl(chatId || pendingOpenChatId));
@@ -3030,7 +3765,7 @@ function registerIpc() {
     if (mainWindow?.webContents.canGoForward()) mainWindow.webContents.goForward();
     return getNavigationState();
   });
-  ipcMain.handle("fauna:update-state", () => updateState);
+  ipcMain.handle("fauna:update-state", () => getDesktopUpdateState());
   ipcMain.handle("fauna:update-check", () => checkForDesktopUpdate());
   ipcMain.handle("fauna:update-install", () => installDesktopUpdate());
   ipcMain.handle("fauna:main-renderer-ready", () => {

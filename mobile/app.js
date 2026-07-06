@@ -1,5 +1,6 @@
 const TOKEN_KEY = "faunaRemoteToken";
 const POLL_MS = 2600;
+const AUTO_INSTALL_SETTING_KEY = "faunaAutoInstallUpdates";
 
 const state = {
     token: "",
@@ -7,7 +8,10 @@ const state = {
     activeChatId: "",
     activeChat: null,
     polling: 0,
-    sending: false
+    sending: false,
+    settings: [],
+    update: null,
+    savingSettingKey: ""
 };
 
 const pairingView = document.getElementById("pairingView");
@@ -16,6 +20,7 @@ const tokenInput = document.getElementById("tokenInput");
 const saveTokenButton = document.getElementById("saveTokenButton");
 const pairingStatus = document.getElementById("pairingStatus");
 const connectionStatus = document.getElementById("connectionStatus");
+const settingsButton = document.getElementById("settingsButton");
 const refreshButton = document.getElementById("refreshButton");
 const disconnectButton = document.getElementById("disconnectButton");
 const chatList = document.getElementById("chatList");
@@ -25,6 +30,15 @@ const activeChatMeta = document.getElementById("activeChatMeta");
 const pinButton = document.getElementById("pinButton");
 const messageList = document.getElementById("messageList");
 const desktopComposerMount = document.getElementById("desktopComposerMount");
+const settingsPanel = document.getElementById("settingsPanel");
+const settingsStatus = document.getElementById("settingsStatus");
+const updateVersionLabel = document.getElementById("updateVersionLabel");
+const updateStatusBadge = document.getElementById("updateStatusBadge");
+const updateStatusText = document.getElementById("updateStatusText");
+const autoInstallMount = document.getElementById("autoInstallMount");
+const checkUpdateButton = document.getElementById("checkUpdateButton");
+const installUpdateButton = document.getElementById("installUpdateButton");
+const remoteSettingsList = document.getElementById("remoteSettingsList");
 let messageInput = null;
 let sendButton = null;
 
@@ -195,6 +209,259 @@ async function api(path, options = {}) {
         throw new Error(message);
     }
     return data;
+}
+
+function setSettingsStatus(text, kind = "normal") {
+    if (!settingsStatus) return;
+    settingsStatus.textContent = text || "";
+    settingsStatus.dataset.kind = kind;
+}
+
+function getSetting(key) {
+    return state.settings.find(setting => setting.key === key) || null;
+}
+
+function openSettingsPanel() {
+    if (!settingsPanel) return;
+    settingsPanel.hidden = false;
+    document.body.classList.add("mobile-settings-open");
+    void loadRemoteSettings();
+}
+
+function closeSettingsPanel() {
+    if (!settingsPanel) return;
+    settingsPanel.hidden = true;
+    document.body.classList.remove("mobile-settings-open");
+}
+
+function formatUpdateStatus(status = "") {
+    const clean = String(status || "idle").trim();
+    return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : "Idle";
+}
+
+function renderUpdatePanel() {
+    const update = state.update || {};
+    const current = update.currentVersion || "";
+    const available = update.availableVersion || "";
+    if (updateVersionLabel) {
+        updateVersionLabel.textContent = available && available !== current
+            ? `Fauna ${current || "Desktop"} to ${available}`
+            : `Fauna ${current || "Desktop"}`;
+    }
+    if (updateStatusBadge) {
+        const status = String(update.status || "idle");
+        updateStatusBadge.textContent = formatUpdateStatus(status);
+        updateStatusBadge.dataset.state = status;
+    }
+    if (updateStatusText) {
+        updateStatusText.textContent = update.message || "No update check yet.";
+    }
+    if (installUpdateButton) {
+        installUpdateButton.disabled = !update.canInstall;
+    }
+}
+
+function createSwitchControl(setting) {
+    const label = document.createElement("label");
+    label.className = "mobile-switch";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = Boolean(setting.value);
+    input.disabled = state.savingSettingKey === setting.key;
+    const track = document.createElement("span");
+    track.className = "mobile-switch-track";
+    const knob = document.createElement("span");
+    knob.className = "mobile-switch-knob";
+    track.appendChild(knob);
+    label.append(input, track);
+    input.addEventListener("change", () => {
+        void saveRemoteSetting(setting.key, input.checked);
+    });
+    return label;
+}
+
+function createSelectControl(setting) {
+    const wrap = document.createElement("div");
+    wrap.className = "mobile-segment";
+    wrap.setAttribute("role", "radiogroup");
+    wrap.setAttribute("aria-label", setting.label || "Setting");
+    (setting.options || []).forEach(option => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "mobile-segment-choice";
+        button.textContent = option.label || option.value || "Automatic";
+        button.disabled = state.savingSettingKey === setting.key;
+        const active = String(setting.storageValue ?? setting.value ?? "") === String(option.value);
+        button.classList.toggle("active", active);
+        button.setAttribute("role", "radio");
+        button.setAttribute("aria-checked", String(active));
+        button.addEventListener("click", () => {
+            if (active) return;
+            void saveRemoteSetting(setting.key, option.value);
+        });
+        wrap.appendChild(button);
+    });
+    return wrap;
+}
+
+function createInputControl(setting) {
+    const wrap = document.createElement("div");
+    wrap.className = "mobile-input-row";
+    const input = document.createElement("input");
+    input.className = "mobile-setting-input";
+    input.type = setting.type === "number" ? "number" : "text";
+    input.value = String(setting.value ?? "");
+    input.disabled = state.savingSettingKey === setting.key;
+    if (setting.type === "number") {
+        if (setting.min !== undefined) input.min = String(setting.min);
+        if (setting.max !== undefined) input.max = String(setting.max);
+        if (setting.step !== undefined) input.step = String(setting.step);
+    } else if (setting.maxLength) {
+        input.maxLength = Number(setting.maxLength) || 240;
+    }
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.className = "small-button";
+    saveButton.textContent = "Save";
+    saveButton.disabled = state.savingSettingKey === setting.key;
+    const save = () => void saveRemoteSetting(setting.key, input.value);
+    saveButton.addEventListener("click", save);
+    input.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            save();
+        }
+    });
+    input.addEventListener("change", save);
+    wrap.append(input, saveButton);
+    return wrap;
+}
+
+function createSettingControl(setting) {
+    if (setting.type === "boolean") return createSwitchControl(setting);
+    if (setting.type === "select") return createSelectControl(setting);
+    return createInputControl(setting);
+}
+
+function createSettingRow(setting) {
+    const row = document.createElement("article");
+    row.className = "mobile-setting-row";
+    row.dataset.settingKey = setting.key || "";
+
+    const copy = document.createElement("div");
+    copy.className = "mobile-setting-copy";
+    const title = document.createElement("strong");
+    title.textContent = setting.label || setting.key || "Setting";
+    const desc = document.createElement("span");
+    desc.textContent = setting.description || "";
+    copy.append(title, desc);
+
+    row.append(copy, createSettingControl(setting));
+    return row;
+}
+
+function renderRemoteSettingsList() {
+    renderUpdatePanel();
+
+    const autoSetting = getSetting(AUTO_INSTALL_SETTING_KEY);
+    if (autoInstallMount) {
+        autoInstallMount.replaceChildren();
+        if (autoSetting) autoInstallMount.appendChild(createSettingRow(autoSetting));
+    }
+
+    if (!remoteSettingsList) return;
+    remoteSettingsList.replaceChildren();
+    const visibleSettings = state.settings.filter(setting => setting.key !== AUTO_INSTALL_SETTING_KEY);
+    if (visibleSettings.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "No desktop settings available.";
+        remoteSettingsList.appendChild(empty);
+        return;
+    }
+
+    const sections = new Map();
+    visibleSettings.forEach(setting => {
+        const section = setting.section || "Settings";
+        if (!sections.has(section)) sections.set(section, []);
+        sections.get(section).push(setting);
+    });
+
+    sections.forEach((settings, section) => {
+        const group = document.createElement("section");
+        group.className = "mobile-settings-group";
+        const heading = document.createElement("h3");
+        heading.textContent = section;
+        group.appendChild(heading);
+        settings.forEach(setting => group.appendChild(createSettingRow(setting)));
+        remoteSettingsList.appendChild(group);
+    });
+}
+
+async function loadRemoteSettings() {
+    try {
+        setSettingsStatus("Syncing");
+        const data = await api("/api/settings");
+        state.settings = Array.isArray(data.settings) ? data.settings : [];
+        state.update = data.update || state.update;
+        renderRemoteSettingsList();
+        setSettingsStatus("Synced");
+    } catch (error) {
+        setSettingsStatus(error.message, "error");
+    }
+}
+
+async function saveRemoteSetting(key, value) {
+    if (!key || state.savingSettingKey) return;
+    state.savingSettingKey = key;
+    renderRemoteSettingsList();
+    try {
+        setSettingsStatus("Saving");
+        const data = await api("/api/settings", {
+            method: "POST",
+            body: JSON.stringify({ key, value })
+        });
+        state.settings = Array.isArray(data.settings) ? data.settings : state.settings;
+        state.update = data.update || state.update;
+        renderRemoteSettingsList();
+        setSettingsStatus("Saved");
+    } catch (error) {
+        setSettingsStatus(error.message, "error");
+        await loadRemoteSettings();
+    } finally {
+        state.savingSettingKey = "";
+        renderRemoteSettingsList();
+    }
+}
+
+async function checkForUpdates() {
+    if (checkUpdateButton) checkUpdateButton.disabled = true;
+    try {
+        setSettingsStatus("Checking");
+        const data = await api("/api/updates/check", { method: "POST", body: "{}" });
+        state.update = data.update || state.update;
+        renderRemoteSettingsList();
+        setSettingsStatus("Checked");
+    } catch (error) {
+        setSettingsStatus(error.message, "error");
+    } finally {
+        if (checkUpdateButton) checkUpdateButton.disabled = false;
+    }
+}
+
+async function installUpdate() {
+    if (installUpdateButton) installUpdateButton.disabled = true;
+    try {
+        setSettingsStatus("Installing");
+        const data = await api("/api/updates/install", { method: "POST", body: "{}" });
+        state.update = data.update || state.update;
+        renderRemoteSettingsList();
+        setSettingsStatus("Install started");
+    } catch (error) {
+        setSettingsStatus(error.message, "error");
+    } finally {
+        renderRemoteSettingsList();
+    }
 }
 
 function formatRelativeTime(value) {
@@ -458,6 +725,15 @@ async function boot() {
     tokenInput.addEventListener("keydown", event => {
         if (event.key === "Enter") void connectWithToken();
     });
+    settingsButton.addEventListener("click", openSettingsPanel);
+    settingsPanel?.addEventListener("click", event => {
+        if (event.target.closest("[data-mobile-settings-close]")) closeSettingsPanel();
+    });
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && settingsPanel && !settingsPanel.hidden) closeSettingsPanel();
+    });
+    checkUpdateButton?.addEventListener("click", () => void checkForUpdates());
+    installUpdateButton?.addEventListener("click", () => void installUpdate());
     refreshButton.addEventListener("click", () => void refresh());
     disconnectButton.addEventListener("click", disconnect);
     newChatButton.addEventListener("click", startNewChat);

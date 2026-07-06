@@ -1715,11 +1715,207 @@ function getRemoteAccessPrimaryUrl(remote = {}) {
     return String(remote?.endpoint || "");
 }
 
+function createRemotePairingDeepLink(url = "", token = "") {
+    const cleanUrl = String(url || "").trim();
+    const cleanToken = String(token || "").trim();
+    if (!cleanUrl || !cleanToken) return "";
+    return `fauna://pair?u=${encodeURIComponent(cleanUrl)}&t=${encodeURIComponent(cleanToken)}`;
+}
+
+function getQrGaloisTables() {
+    const exp = new Array(512).fill(0);
+    const log = new Array(256).fill(0);
+    let value = 1;
+    for (let i = 0; i < 255; i += 1) {
+        exp[i] = value;
+        log[value] = i;
+        value <<= 1;
+        if (value & 0x100) value ^= 0x11d;
+    }
+    for (let i = 255; i < 512; i += 1) exp[i] = exp[i - 255];
+    return { exp, log };
+}
+
+function multiplyQrGalois(left, right, tables) {
+    if (!left || !right) return 0;
+    return tables.exp[tables.log[left] + tables.log[right]];
+}
+
+function createQrGeneratorPolynomial(degree, tables) {
+    let result = [1];
+    for (let i = 0; i < degree; i += 1) {
+        const next = new Array(result.length + 1).fill(0);
+        result.forEach((coefficient, index) => {
+            next[index] ^= coefficient;
+            next[index + 1] ^= multiplyQrGalois(coefficient, tables.exp[i], tables);
+        });
+        result = next;
+    }
+    return result;
+}
+
+function createQrErrorCorrection(dataCodewords, degree) {
+    const tables = getQrGaloisTables();
+    const generator = createQrGeneratorPolynomial(degree, tables);
+    const remainder = new Array(degree).fill(0);
+    dataCodewords.forEach(codeword => {
+        const factor = codeword ^ remainder[0];
+        remainder.copyWithin(0, 1);
+        remainder[degree - 1] = 0;
+        for (let i = 0; i < degree; i += 1) {
+            remainder[i] ^= multiplyQrGalois(generator[i + 1], factor, tables);
+        }
+    });
+    return remainder;
+}
+
+function createQrByteCodewords(text = "") {
+    const bytes = Array.from(new TextEncoder().encode(String(text || "")));
+    const dataCapacity = 108;
+    if (bytes.length > 106) throw new Error("QR payload is too long.");
+
+    const bits = [];
+    const appendBits = (value, length) => {
+        for (let i = length - 1; i >= 0; i -= 1) bits.push((value >>> i) & 1);
+    };
+
+    appendBits(0b0100, 4);
+    appendBits(bytes.length, 8);
+    bytes.forEach(byte => appendBits(byte, 8));
+    const terminatorLength = Math.min(4, (dataCapacity * 8) - bits.length);
+    appendBits(0, terminatorLength);
+    while (bits.length % 8) bits.push(0);
+
+    const data = [];
+    for (let i = 0; i < bits.length; i += 8) {
+        data.push(bits.slice(i, i + 8).reduce((acc, bit) => (acc << 1) | bit, 0));
+    }
+    for (let padIndex = 0; data.length < dataCapacity; padIndex += 1) {
+        data.push(padIndex % 2 === 0 ? 0xec : 0x11);
+    }
+    return data.concat(createQrErrorCorrection(data, 26));
+}
+
+function createQrMatrix(text = "") {
+    const size = 37; // Version 5-L: enough for the short fauna://pair deep link.
+    const modules = Array.from({ length: size }, () => new Array(size).fill(false));
+    const reserved = Array.from({ length: size }, () => new Array(size).fill(false));
+    const setModule = (x, y, dark, reserve = true) => {
+        if (x < 0 || y < 0 || x >= size || y >= size) return;
+        modules[y][x] = Boolean(dark);
+        if (reserve) reserved[y][x] = true;
+    };
+
+    const drawFinder = (left, top) => {
+        for (let y = -1; y <= 7; y += 1) {
+            for (let x = -1; x <= 7; x += 1) {
+                const xx = left + x;
+                const yy = top + y;
+                const inFinder = x >= 0 && x <= 6 && y >= 0 && y <= 6;
+                const dark = inFinder && (x === 0 || x === 6 || y === 0 || y === 6 || (x >= 2 && x <= 4 && y >= 2 && y <= 4));
+                setModule(xx, yy, dark);
+            }
+        }
+    };
+
+    const drawAlignment = (centerX, centerY) => {
+        for (let y = -2; y <= 2; y += 1) {
+            for (let x = -2; x <= 2; x += 1) {
+                const distance = Math.max(Math.abs(x), Math.abs(y));
+                setModule(centerX + x, centerY + y, distance !== 1);
+            }
+        }
+    };
+
+    drawFinder(0, 0);
+    drawFinder(size - 7, 0);
+    drawFinder(0, size - 7);
+    drawAlignment(30, 30);
+
+    for (let i = 8; i < size - 8; i += 1) {
+        setModule(i, 6, i % 2 === 0);
+        setModule(6, i, i % 2 === 0);
+    }
+
+    const formatBits = 0b111011111000100; // Error correction L, mask 0.
+    for (let i = 0; i <= 5; i += 1) setModule(8, i, (formatBits >>> i) & 1);
+    setModule(8, 7, (formatBits >>> 6) & 1);
+    setModule(8, 8, (formatBits >>> 7) & 1);
+    setModule(7, 8, (formatBits >>> 8) & 1);
+    for (let i = 9; i < 15; i += 1) setModule(14 - i, 8, (formatBits >>> i) & 1);
+    for (let i = 0; i < 8; i += 1) setModule(size - 1 - i, 8, (formatBits >>> i) & 1);
+    for (let i = 8; i < 15; i += 1) setModule(8, size - 15 + i, (formatBits >>> i) & 1);
+    setModule(8, size - 8, true);
+
+    const codewords = createQrByteCodewords(text);
+    const bits = codewords.flatMap(codeword => Array.from({ length: 8 }, (_item, index) => (codeword >>> (7 - index)) & 1));
+    let bitIndex = 0;
+    let upward = true;
+    for (let right = size - 1; right >= 1; right -= 2) {
+        if (right === 6) right -= 1;
+        for (let vertical = 0; vertical < size; vertical += 1) {
+            const y = upward ? size - 1 - vertical : vertical;
+            for (let offset = 0; offset < 2; offset += 1) {
+                const x = right - offset;
+                if (reserved[y][x]) continue;
+                const bit = bitIndex < bits.length ? bits[bitIndex] : 0;
+                bitIndex += 1;
+                modules[y][x] = Boolean(bit ^ (((x + y) % 2 === 0) ? 1 : 0));
+            }
+        }
+        upward = !upward;
+    }
+
+    return modules;
+}
+
+function renderRemotePairingQr(payload = "") {
+    if (!appInfoRemoteQrCard || !appInfoRemoteQrCode) return;
+    appInfoRemoteQrCode.replaceChildren();
+    appInfoRemoteQrCard.hidden = !payload;
+    if (!payload) {
+        if (appInfoRemoteQrHint) appInfoRemoteQrHint.textContent = "Enable remote access to show QR pairing.";
+        return;
+    }
+    try {
+        const modules = createQrMatrix(payload);
+        const size = modules.length;
+        const quiet = 4;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", `0 0 ${size + quiet * 2} ${size + quiet * 2}`);
+        svg.setAttribute("role", "img");
+        svg.setAttribute("aria-label", "Fauna Phone pairing QR code");
+
+        const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        background.setAttribute("width", String(size + quiet * 2));
+        background.setAttribute("height", String(size + quiet * 2));
+        background.setAttribute("rx", "2");
+        background.setAttribute("fill", "currentColor");
+        background.setAttribute("class", "app-info-qr-background");
+        svg.appendChild(background);
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const data = [];
+        modules.forEach((row, y) => row.forEach((dark, x) => {
+            if (dark) data.push(`M${x + quiet},${y + quiet}h1v1h-1z`);
+        }));
+        path.setAttribute("d", data.join(""));
+        path.setAttribute("class", "app-info-qr-modules");
+        svg.appendChild(path);
+        appInfoRemoteQrCode.appendChild(svg);
+        if (appInfoRemoteQrHint) appInfoRemoteQrHint.textContent = "Scan with the phone camera to open Fauna Phone.";
+    } catch (error) {
+        appInfoRemoteQrCard.hidden = false;
+        if (appInfoRemoteQrHint) appInfoRemoteQrHint.textContent = "QR unavailable. Use Copy pairing instead.";
+    }
+}
+
 function renderAppInfoRemoteAccess(remote = {}, isDesktop = false) {
     const enabled = Boolean(remote?.enabled);
     const running = Boolean(remote?.running);
     const url = getRemoteAccessPrimaryUrl(remote);
     const token = String(remote?.token || "");
+    const pairingLink = enabled && running && url && token ? createRemotePairingDeepLink(url, token) : "";
 
     if (appInfoRemoteToggle) {
         appInfoRemoteToggle.checked = enabled;
@@ -1736,6 +1932,7 @@ function renderAppInfoRemoteAccess(remote = {}, isDesktop = false) {
     }
     setAppInfoText(appInfoRemoteUrl, enabled ? url : "", enabled ? "No LAN URL found" : "Enable remote access");
     setAppInfoText(appInfoRemoteToken, isDesktop ? token : "", isDesktop ? "Token unavailable" : "Desktop only");
+    renderRemotePairingQr(isDesktop ? pairingLink : "");
     if (appInfoRemoteCopyBtn) appInfoRemoteCopyBtn.disabled = !isDesktop || !enabled || !url || !token;
     if (appInfoRemoteRotateBtn) appInfoRemoteRotateBtn.disabled = !isDesktop;
 }
@@ -1854,7 +2051,8 @@ async function copyRemoteAccessPairingFromSettings() {
             showToast("Enable Android remote access before copying pairing details.", "warning");
             return;
         }
-        await writeTextToClipboard(`Fauna phone sync\nURL: ${url}\nToken: ${token}`);
+        const pairingLink = createRemotePairingDeepLink(url, token);
+        await writeTextToClipboard(`Fauna phone sync\nURL: ${url}\nToken: ${token}\nQR link: ${pairingLink}`);
         showToast("Phone pairing copied.", "success");
     } catch (err) {
         showToast(`Copy failed: ${err.message}`, "error");
@@ -4727,6 +4925,104 @@ async function applyWorkspaceAccessPolicy(policy) {
     }
 }
 
+function syncRemoteSettingIntoDesktopUi(payload = {}) {
+    const setting = payload.setting || {};
+    const key = String(setting.key || payload.key || "");
+    const storageValue = String(setting.storageValue ?? payload.storageValue ?? "");
+    if (!key) return;
+
+    safeLocalStorageSet(key, storageValue);
+
+    if (key === AI_PROVIDER_STORAGE_KEY) {
+        setActiveAiProvider(storageValue, { refreshStatus: false });
+    } else if (key === THEME_STORAGE_KEY) {
+        document.documentElement.dataset.theme = storageValue === "light" ? "light" : "dark";
+    } else if (key === ACCENT_STORAGE_KEY) {
+        const accent = ["blue", "orange", "green", "red"].includes(storageValue) ? storageValue : "blue";
+        document.documentElement.dataset.accent = accent;
+    } else if (key === LOCAL_CHAT_MODEL_STORAGE_KEY) {
+        OLLAMA_MODEL = normalizeModelId(storageValue) || OLLAMA_MODEL;
+        renderLocalModelChoices();
+        updateModelSwitcherForProvider();
+    } else if (key === OPENAI_CHAT_MODEL_STORAGE_KEY) {
+        if (openAiChatModelInput) openAiChatModelInput.value = storageValue;
+        updateOpenAiModelSelects();
+        updateModelSwitcherForProvider();
+    } else if (key === UI_COMPACT_MODE_STORAGE_KEY) {
+        setCompactModeEnabled(storageValue === "true", { persist: false });
+    } else if (key === AI_STREAMING_ENABLED_STORAGE_KEY) {
+        isAiStreamingEnabled = storageValue !== "false";
+    } else if (key === AI_TEMPERATURE_STORAGE_KEY) {
+        activeTemperature = normalizeAiTemperature(storageValue);
+    } else if (key === AI_MAX_OUTPUT_TOKENS_STORAGE_KEY) {
+        activeMaxOutputTokens = normalizeMaxOutputTokens(storageValue);
+    } else if (key === AI_TOP_P_STORAGE_KEY) {
+        activeTopP = normalizeTopP(storageValue);
+    } else if (key === OLLAMA_TOP_K_STORAGE_KEY) {
+        activeOllamaTopK = normalizeOllamaTopK(storageValue);
+    } else if (key === OPENAI_VERBOSITY_STORAGE_KEY) {
+        activeOpenAiVerbosity = normalizeOpenAiVerbosity(storageValue);
+    } else if (key === AGENT_MAX_STEPS_AT_A_TIME_STORAGE_KEY) {
+        activeAgentMaxStepsAtATime = normalizeAgentMaxStepsAtATime(storageValue);
+    } else if (key === AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY) {
+        activeAgentMaxStepsPerRun = normalizeAgentMaxStepsPerRun(storageValue);
+    } else if (key === CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY) {
+        activeContextCompactionThresholdPercent = normalizeContextCompactionThresholdPercent(storageValue);
+    } else if (key === CONTEXT_COMPACTION_REVIEW_STORAGE_KEY) {
+        isContextCompactionReviewEnabled = storageValue === "true";
+    } else if (key === CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY) {
+        activeContextCompactionRotationLimit = normalizeContextCompactionRotationLimit(storageValue);
+    } else if (key === AI_CACHING_STORAGE_KEY) {
+        isAiCachingEnabled = storageValue === "true";
+    } else if (key === OLLAMA_AUTO_START_STORAGE_KEY) {
+        isOllamaAutoStartEnabled = storageValue === "true";
+    } else if (key === WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) {
+        isWorkspaceBridgeEnabled = storageValue === "true";
+    } else if (key === WORKSPACE_ACCESS_POLICY_STORAGE_KEY) {
+        safeLocalStorageSet(WORKSPACE_ACCESS_POLICY_STORAGE_KEY, normalizeWorkspaceAccessPolicy(storageValue));
+    } else if (key === WORKSPACE_CHECKPOINTS_ENABLED_STORAGE_KEY) {
+        areWorkspaceCheckpointsEnabled = storageValue === "true";
+    } else if (key === POTATO_MODE_ENABLED_STORAGE_KEY) {
+        isPotatoModeEnabled = storageValue === "true";
+        applyPotatoDocumentMode();
+    } else if (key === POTATO_PARALLEL_CHATS_STORAGE_KEY) {
+        isPotatoParallelChatsEnabled = storageValue === "true";
+    } else if (key === POTATO_AUTO_WEB_CONTEXT_STORAGE_KEY) {
+        isPotatoAutoWebContextEnabled = storageValue === "true";
+    } else if (key === POTATO_AUTO_WORKSPACE_CONTEXT_STORAGE_KEY) {
+        isPotatoAutoWorkspaceContextEnabled = storageValue === "true";
+    } else if (key === POTATO_MEDIA_GENERATION_STORAGE_KEY) {
+        isPotatoMediaGenerationEnabled = storageValue === "true";
+    } else if (key === POTATO_SHORT_OUTPUTS_STORAGE_KEY) {
+        isPotatoShortOutputsEnabled = storageValue === "true";
+    } else if (key === POTATO_TRIM_HISTORY_STORAGE_KEY) {
+        isPotatoTrimHistoryEnabled = storageValue === "true";
+    } else if (key === POTATO_REDUCE_MOTION_STORAGE_KEY) {
+        isPotatoReduceMotionEnabled = storageValue === "true";
+        applyPotatoDocumentMode();
+    } else if ([
+        COMPLETION_NOTIFICATIONS_ENABLED_STORAGE_KEY,
+        COMPLETION_SOUND_ENABLED_STORAGE_KEY,
+        COMPLETION_ONLY_UNFOCUSED_STORAGE_KEY,
+        COMPLETION_BACKGROUND_ONLY_STORAGE_KEY,
+        COMPLETION_SOUND_VOLUME_STORAGE_KEY
+    ].includes(key)) {
+        loadNotificationSettings();
+        renderNotificationSettings();
+    }
+
+    updateAiCallSettingsUi();
+    updateProviderSettingsUi();
+    updateWanSettingsUi();
+    updateWorkspaceBridgeSettingsUi();
+    updateWorkspaceCheckpointSettingsUi();
+    updatePotatoSettingsUi();
+    updatePersonaSettingsUi();
+    updateVoiceQuickUi();
+    updateTokenDisplay();
+    showToast("Mobile settings synced.", "info");
+}
+
 workspaceBridgeSaveBtn?.addEventListener("click", () => {
     const endpoint = normalizeEndpointInputValue(workspaceBridgeEndpointInput?.value, DEFAULT_WORKSPACE_BRIDGE_URL);
     const token = (workspaceBridgeTokenInput?.value || "").trim();
@@ -4848,6 +5144,8 @@ wanTestBtn?.addEventListener("click", async () => {
         showToast(`ComfyUI test failed: ${err.message}`, "error");
     }
 });
+
+getFaunaDesktopApi()?.settings?.onRemoteChanged?.(syncRemoteSettingIntoDesktopUi);
 
 renderLocalModelChoices();
 updateProviderSettingsUi();

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Fauna Phone Sync</title>
-    <meta name="theme-color" content="#15171a">
+    <meta name="theme-color" content="#111214">
     <link rel="icon" type="image/png" href="/favicon.png">
     <link rel="stylesheet" href="/styles.css">
     <link rel="stylesheet" href="/mobile/styles.css">
@@ -15,6 +15,7 @@
             <img class="pairing-mark" src="/favicon.png" alt="" decoding="async">
             <h1 id="pairingTitle">Fauna</h1>
             <p class="pairing-subtitle">Phone sync</p>
+            <p class="pairing-note">Scan the QR in Fauna Desktop with your phone camera or paste the token here.</p>
             <label class="field-label" for="tokenInput">Token</label>
             <input id="tokenInput" class="text-input" autocomplete="off" spellcheck="false" inputmode="text">
             <button id="saveTokenButton" class="primary-button" type="button">Connect</button>
@@ -32,6 +33,9 @@
                 </div>
             </div>
             <div class="topbar-actions">
+                <button id="settingsButton" class="icon-button" type="button" aria-label="Open settings">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2a2 2 0 0 1-4 0V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 0 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H2.8a2 2 0 0 1 0-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7A2 2 0 0 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.2a2 2 0 0 1 4 0V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2a2 2 0 0 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg>
+                </button>
                 <button id="refreshButton" class="icon-button" type="button" aria-label="Refresh chats">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.3 6.4M3 12A9 9 0 0 1 18.3 5.6"></path><path d="M21 4v6h-6"></path><path d="M3 20v-6h6"></path></svg>
                 </button>
@@ -63,6 +67,39 @@
                 <div id="messageList" class="message-list" aria-live="polite"></div>
                 <div id="desktopComposerMount" class="desktop-composer-mount"></div>
             </section>
+        </section>
+
+        <section id="settingsPanel" class="mobile-settings-panel" hidden aria-labelledby="mobileSettingsTitle">
+            <div class="mobile-settings-backdrop" data-mobile-settings-close></div>
+            <aside class="mobile-settings-sheet">
+                <header class="mobile-settings-header">
+                    <div>
+                        <h2 id="mobileSettingsTitle">Settings</h2>
+                        <span id="settingsStatus">Desktop sync</span>
+                    </div>
+                    <button id="settingsCloseButton" class="icon-button" type="button" aria-label="Close settings" data-mobile-settings-close>
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                    </button>
+                </header>
+                <div class="mobile-settings-body">
+                    <section class="mobile-settings-card update-card">
+                        <div class="mobile-settings-card-head">
+                            <div>
+                                <span class="mobile-settings-kicker">Desktop updates</span>
+                                <strong id="updateVersionLabel">Fauna</strong>
+                            </div>
+                            <span id="updateStatusBadge" class="settings-badge">Idle</span>
+                        </div>
+                        <p id="updateStatusText" class="mobile-settings-desc">No update check yet.</p>
+                        <div id="autoInstallMount"></div>
+                        <div class="mobile-settings-actions">
+                            <button id="checkUpdateButton" class="small-button" type="button">Check</button>
+                            <button id="installUpdateButton" class="small-button" type="button" disabled>Install</button>
+                        </div>
+                    </section>
+                    <div id="remoteSettingsList" class="mobile-settings-list" aria-live="polite"></div>
+                </div>
+            </aside>
         </section>
     </main>
 

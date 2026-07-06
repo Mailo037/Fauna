@@ -380,6 +380,9 @@ const appInfoRemoteStatus = document.getElementById("appInfoRemoteStatus");
 const appInfoRemoteToggle = document.getElementById("appInfoRemoteToggle");
 const appInfoRemoteUrl = document.getElementById("appInfoRemoteUrl");
 const appInfoRemoteToken = document.getElementById("appInfoRemoteToken");
+const appInfoRemoteQrCard = document.getElementById("appInfoRemoteQrCard");
+const appInfoRemoteQrCode = document.getElementById("appInfoRemoteQrCode");
+const appInfoRemoteQrHint = document.getElementById("appInfoRemoteQrHint");
 const appInfoRemoteCopyBtn = document.getElementById("appInfoRemoteCopyBtn");
 const appInfoRemoteRotateBtn = document.getElementById("appInfoRemoteRotateBtn");
 const appInfoChatCount = document.getElementById("appInfoChatCount");
@@ -542,12 +545,25 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.3.0";
-const FAUNA_APP_BUILD_ID = "20260706-phone-sync";
+const FAUNA_APP_VERSION = "0.3.1";
+const FAUNA_APP_BUILD_ID = "20260706-phone-settings";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.3.1",
+        date: "2026-07-06",
+        commit: "v0.3.1",
+        title: "Phone QR pairing and settings",
+        changes: [
+            "Added a QR pairing card in Settings > Info so Android can open the PC connection directly.",
+            "Updated the Android companion to accept Fauna pairing deep links from the phone camera.",
+            "Matched the phone surfaces more closely to the desktop settings card colors and spacing.",
+            "Set the Android launcher icon from the Fauna app icon assets.",
+            "Added mobile Settings controls for desktop updates, auto-install, provider tuning, local workspace, notifications, performance, voice, media, and personalization settings."
+        ]
+    },
     {
         version: "0.3.0",
         date: "2026-07-06",

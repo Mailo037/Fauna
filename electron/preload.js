@@ -201,6 +201,11 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
       return onRendererEvent("fauna:navigation-changed", handler);
     }
   },
+  settings: {
+    onRemoteChanged(handler) {
+      return onRendererEvent("fauna:remote-settings-changed", handler);
+    }
+  },
   updates: {
     getState() {
       return ipcRenderer.invoke("fauna:update-state");

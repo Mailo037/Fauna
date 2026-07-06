@@ -2635,6 +2635,52 @@
     font-size: 11px;
 }
 
+.app-info-qr-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 132px;
+    align-items: center;
+    gap: 14px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.app-info-qr-card[hidden] {
+    display: none !important;
+}
+
+.app-info-qr-copy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.app-info-qr-code {
+    width: 132px;
+    height: 132px;
+    padding: 8px;
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, rgba(255, 255, 255, 0.1));
+    border-radius: 10px;
+    background: #f6f7fb;
+    color: #f6f7fb;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+.app-info-qr-code svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.app-info-qr-background {
+    color: #f6f7fb;
+}
+
+.app-info-qr-modules {
+    fill: #111214;
+}
+
 .app-info-key-list {
     display: flex;
     flex-wrap: wrap;
@@ -3026,6 +3072,11 @@
 
     .settings-pane[data-settings-pane-panel="general"] .accent-switcher {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .app-info-qr-card {
+        grid-template-columns: 1fr;
+        justify-items: start;
     }
 
     .local-model-list {
