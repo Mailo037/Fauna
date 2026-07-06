@@ -1722,6 +1722,14 @@ function updateTokenDisplay({ scheduleCount = true } = {}) {
         setLibraryHeaderSummary(collectLibraryItems());
         return;
     }
+    if (activeWorkspaceView === WORKSPACE_VIEW_CAPABILITIES) {
+        if (tokenCounter) {
+            tokenCounter.textContent = "Connectors and skills";
+            tokenCounter.dataset.tooltip = "Agent extension catalog.";
+            tokenCounter.setAttribute("aria-label", "Connectors and skills");
+        }
+        return;
+    }
     if (scheduleCount) scheduleComposerTokenCount();
     if (tokenCounter) {
         const parts = [`${sessionTotalTokens.toLocaleString()} Session Tokens`];

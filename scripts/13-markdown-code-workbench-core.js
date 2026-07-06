@@ -258,6 +258,29 @@ function formatInlinePlainText(segment) {
     return decorateHexColorsInFormattedText(safe);
 }
 
+function formatInlinePlainTextWithSkillMentions(segment) {
+    if (typeof getSkillMentionRecord !== "function" || typeof renderSkillMentionChip !== "function") {
+        return formatInlinePlainText(segment);
+    }
+    const source = String(segment || "");
+    let output = "";
+    let lastIndex = 0;
+    const mentionPattern = /(^|[\s([{])([$@])([A-Za-z0-9][A-Za-z0-9_.-]{1,80})\b/g;
+    for (const match of source.matchAll(mentionPattern)) {
+        const matchIndex = match.index || 0;
+        const prefix = match[1] || "";
+        const token = match[3] || "";
+        const skill = getSkillMentionRecord(token);
+        if (!skill) continue;
+        const mentionStart = matchIndex + prefix.length;
+        output += formatInlinePlainText(source.slice(lastIndex, mentionStart));
+        output += renderSkillMentionChip(skill);
+        lastIndex = mentionStart + match[2].length + token.length;
+    }
+    output += formatInlinePlainText(source.slice(lastIndex));
+    return output;
+}
+
 function absorbReferenceMarkdownEmphasis(text, candidate) {
     const source = String(text || "");
     const start = candidate.index || 0;
@@ -320,17 +343,17 @@ function renderPlainTextWithReferences(text) {
 
     for (const candidate of getInlineReferenceCandidates(text)) {
         if (candidate.index < lastIndex) continue;
-        output += formatInlinePlainText(text.slice(lastIndex, candidate.index));
+        output += formatInlinePlainTextWithSkillMentions(text.slice(lastIndex, candidate.index));
         if (candidate.type === "website") {
             output += renderWebsiteReference(candidate.url);
         } else {
             output += renderFileReference(candidate.path, candidate.line, candidate.endLine);
         }
-        output += candidate.suffix ? formatInlinePlainText(candidate.suffix) : "";
+        output += candidate.suffix ? formatInlinePlainTextWithSkillMentions(candidate.suffix) : "";
         lastIndex = candidate.index + candidate.length;
     }
 
-    output += formatInlinePlainText(text.slice(lastIndex));
+    output += formatInlinePlainTextWithSkillMentions(text.slice(lastIndex));
     return output;
 }
 

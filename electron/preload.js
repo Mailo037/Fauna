@@ -89,6 +89,20 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   getInfo() {
     return ipcRenderer.invoke("fauna:desktop-info");
   },
+  skills: {
+    list() {
+      return ipcRenderer.invoke("fauna:skills-list");
+    },
+    save(skill = {}) {
+      return ipcRenderer.invoke("fauna:skills-save", skill);
+    },
+    delete(nameOrId = "") {
+      return ipcRenderer.invoke("fauna:skills-delete", nameOrId);
+    },
+    openFolder() {
+      return ipcRenderer.invoke("fauna:skills-open-folder");
+    }
+  },
   getOllamaStatus() {
     return ipcRenderer.invoke("fauna:ollama-status");
   },
@@ -106,6 +120,9 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   },
   startOllama() {
     return ipcRenderer.invoke("fauna:start-ollama");
+  },
+  ensureWorkspaceBridge() {
+    return ipcRenderer.invoke("fauna:workspace-bridge-ensure");
   },
   setWorkspaceAccessPolicy(policy) {
     return ipcRenderer.invoke("fauna:set-workspace-access-policy", policy);

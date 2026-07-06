@@ -11,21 +11,24 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import html
 import ipaddress
 import json
 import os
+import queue
 import re
 import secrets
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
@@ -40,6 +43,13 @@ OPENAI_PROXY_TIMEOUT_SECONDS = 180
 MAX_LOCAL_AI_BODY_BYTES = 32_000_000
 MAX_LOCAL_AI_RESPONSE_BYTES = 32_000_000
 LOCAL_AI_PROXY_TIMEOUT_SECONDS = 180
+MAX_MCP_BODY_BYTES = 1_000_000
+MAX_MCP_RESULT_BYTES = 8_000_000
+MCP_REQUEST_TIMEOUT_SECONDS = 45
+MCP_PROTOCOL_VERSION = "2025-11-25"
+MAX_API_CALL_BODY_BYTES = 8_000_000
+MAX_API_CALL_RESPONSE_BYTES = 8_000_000
+API_CALL_TIMEOUT_SECONDS = 90
 OPENAI_API_BASE_URL = "https://api.openai.com/v1"
 BRIDGE_TOKEN_HEADER = "X-Fauna-Bridge-Token"
 LEGACY_BRIDGE_TOKEN_HEADER = "X-" + "Flo" + "ra-Bridge-Token"
@@ -61,11 +71,19 @@ WEB_FETCH_TIMEOUT_SECONDS = 20
 WEB_FETCH_MAX_REDIRECTS = 5
 WEB_FETCH_USER_AGENT = f"Fauna-Bridge/{VERSION} (+local user-requested fetch)"
 MAX_GIT_BRANCHES = 240
+BRIDGE_REQUEST_QUEUE_SIZE = 96
+BRIDGE_SLOT_WAIT_SECONDS = 5.0
+MAX_ACTIVE_BRIDGE_REQUESTS = 32
+MAX_CONCURRENT_EXEC_COMMANDS = 4
+MAX_CONCURRENT_FILE_MUTATIONS = 4
+MAX_CONCURRENT_NETWORK_REQUESTS = 8
+MAX_CONCURRENT_MCP_REQUESTS = 4
 SKIPPED_DIRS = {
     ".git",
     ".hg",
     ".svn",
     ".cache",
+    ".fauna-checkpoints",
     ".pytest_cache",
     "__pycache__",
     "node_modules",
@@ -74,6 +92,18 @@ SKIPPED_DIRS = {
     ".venv",
     "venv",
 }
+CHECKPOINT_DIR_NAME = ".fauna-checkpoints"
+CHECKPOINT_ID_RE = re.compile(r"^cp_[0-9]{13}_[a-f0-9]{8}$")
+CHECKPOINT_SKIPPED_DIRS = SKIPPED_DIRS | {
+    ".next",
+    ".turbo",
+    "coverage",
+    "out",
+}
+MAX_CHECKPOINTS_PER_SCOPE = 30
+MAX_CHECKPOINT_FILES = 2500
+MAX_CHECKPOINT_TOTAL_BYTES = 80_000_000
+MAX_CHECKPOINT_FILE_BYTES = 8_000_000
 DANGEROUS_COMMAND_PATTERNS = [
     r"\bshutdown\b",
     r"\breboot\b",
@@ -95,14 +125,125 @@ class NoRedirectHandler(HTTPRedirectHandler):
 WEB_FETCH_OPENER = build_opener(NoRedirectHandler)
 
 
+class BridgeBusyError(RuntimeError):
+    def __init__(self, lane: str, limit: int) -> None:
+        super().__init__(f"Bridge is busy handling {lane} actions; try again in a moment")
+        self.lane = lane
+        self.limit = limit
+        self.retry_after_ms = max(250, int(BRIDGE_SLOT_WAIT_SECONDS * 1000))
+
+
+class ConcurrencyLane:
+    def __init__(self, name: str, limit: int) -> None:
+        self.name = name
+        self.limit = max(1, limit)
+        self._semaphore = threading.BoundedSemaphore(self.limit)
+        self._lock = threading.Lock()
+        self._active = 0
+        self._peak = 0
+
+    def acquire(self, timeout_seconds: float = BRIDGE_SLOT_WAIT_SECONDS) -> "ConcurrencyLaneLease":
+        return ConcurrencyLaneLease(self, timeout_seconds)
+
+    def _enter(self, timeout_seconds: float) -> None:
+        if not self._semaphore.acquire(timeout=max(0, timeout_seconds)):
+            raise BridgeBusyError(self.name, self.limit)
+        with self._lock:
+            self._active += 1
+            self._peak = max(self._peak, self._active)
+
+    def _exit(self) -> None:
+        with self._lock:
+            self._active = max(0, self._active - 1)
+        self._semaphore.release()
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "active": self._active,
+                "limit": self.limit,
+                "peak": self._peak,
+            }
+
+
+class ConcurrencyLaneLease:
+    def __init__(self, lane: ConcurrencyLane, timeout_seconds: float) -> None:
+        self.lane = lane
+        self.timeout_seconds = timeout_seconds
+        self.acquired = False
+
+    def __enter__(self) -> "ConcurrencyLaneLease":
+        self.lane._enter(self.timeout_seconds)
+        self.acquired = True
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        if self.acquired:
+            self.lane._exit()
+            self.acquired = False
+
+
+class BridgeRuntime:
+    def __init__(self) -> None:
+        self.request_lane = ConcurrencyLane("requests", MAX_ACTIVE_BRIDGE_REQUESTS)
+        self.exec_lane = ConcurrencyLane("terminal", MAX_CONCURRENT_EXEC_COMMANDS)
+        self.file_lane = ConcurrencyLane("file", MAX_CONCURRENT_FILE_MUTATIONS)
+        self.network_lane = ConcurrencyLane("network", MAX_CONCURRENT_NETWORK_REQUESTS)
+        self.mcp_lane = ConcurrencyLane("mcp", MAX_CONCURRENT_MCP_REQUESTS)
+        self._path_locks: dict[str, threading.RLock] = {}
+        self._path_locks_lock = threading.Lock()
+
+    def path_lock(self, path: Path) -> threading.RLock:
+        try:
+            key_path = str(path.resolve())
+        except OSError:
+            key_path = str(path.absolute())
+        key = key_path.lower() if os.name == "nt" else key_path
+        with self._path_locks_lock:
+            lock = self._path_locks.get(key)
+            if lock is None:
+                lock = threading.RLock()
+                self._path_locks[key] = lock
+            return lock
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "requestQueueSize": BRIDGE_REQUEST_QUEUE_SIZE,
+            "lanes": {
+                "requests": self.request_lane.snapshot(),
+                "terminal": self.exec_lane.snapshot(),
+                "file": self.file_lane.snapshot(),
+                "network": self.network_lane.snapshot(),
+                "mcp": self.mcp_lane.snapshot(),
+            },
+        }
+
+
+class FaunaThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = BRIDGE_REQUEST_QUEUE_SIZE
+    allow_reuse_address = True
+
+
 class BridgeConfig:
-    def __init__(self, root: Path, token: str, shell: str, allow_dangerous: bool, access_policy: str, projects: dict[str, Path] | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        token: str,
+        shell: str,
+        allow_dangerous: bool,
+        access_policy: str,
+        projects: dict[str, Path] | None = None,
+        runtime: BridgeRuntime | None = None,
+    ) -> None:
         self.root = root.resolve()
         self.token = token
         self.shell = shell
         self.allow_dangerous = allow_dangerous
         self.access_policy = access_policy
         self.projects = projects or {}
+        self.runtime = runtime or BridgeRuntime()
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -362,12 +503,13 @@ def write_text_file(config: BridgeConfig, payload: dict[str, Any], append: bool 
     if not requested:
         raise ValueError("File path is required")
     target = resolve_bridge_path(config, requested, payload.get("scope"), create_scope=True)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and target.is_dir():
-        raise IsADirectoryError("Path is a directory")
-    content = str(payload.get("content") or payload.get("text") or "")
-    with target.open("a" if append else "w", encoding="utf-8", newline="") as handle:
-        handle.write(content)
+    with config.runtime.file_lane.acquire(), config.runtime.path_lock(target):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() and target.is_dir():
+            raise IsADirectoryError("Path is a directory")
+        content = str(payload.get("content") or payload.get("text") or "")
+        with target.open("a" if append else "w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
     return {
         "path": response_path(config, target, payload.get("scope")),
         "size": target.stat().st_size,
@@ -380,11 +522,310 @@ def make_directory(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, A
     if not requested:
         raise ValueError("Directory path is required")
     target = resolve_bridge_path(config, requested, payload.get("scope"), create_scope=True)
-    target.mkdir(parents=True, exist_ok=True)
+    with config.runtime.file_lane.acquire(), config.runtime.path_lock(target):
+        target.mkdir(parents=True, exist_ok=True)
     return {
         "path": response_path(config, target, payload.get("scope")),
         "created": True,
     }
+
+
+def path_is_inside(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def checkpoint_store_root(config: BridgeConfig) -> Path:
+    return (config.root / CHECKPOINT_DIR_NAME).resolve()
+
+
+def checkpoint_scope_key(config: BridgeConfig, scope: str | None) -> str:
+    target_root = resolve_bridge_path(config, ".", scope)
+    raw = f"{scope or ''}|{target_root.resolve()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def checkpoint_scope_store(config: BridgeConfig, scope: str | None) -> Path:
+    store_root = checkpoint_store_root(config)
+    store = (store_root / checkpoint_scope_key(config, scope)).resolve()
+    try:
+        store.relative_to(store_root)
+    except ValueError as exc:
+        raise ValueError("Invalid checkpoint scope") from exc
+    return store
+
+
+def validate_checkpoint_id(value: Any) -> str:
+    checkpoint_id = str(value or "").strip()
+    if not CHECKPOINT_ID_RE.fullmatch(checkpoint_id):
+        raise ValueError("Invalid checkpoint id")
+    return checkpoint_id
+
+
+def checkpoint_manifest_path(config: BridgeConfig, scope: str | None, checkpoint_id: str) -> Path:
+    return checkpoint_scope_store(config, scope) / validate_checkpoint_id(checkpoint_id) / "manifest.json"
+
+
+def checkpoint_files_root(config: BridgeConfig, scope: str | None, checkpoint_id: str) -> Path:
+    return checkpoint_manifest_path(config, scope, checkpoint_id).parent / "files"
+
+
+def compact_checkpoint_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in manifest.items()
+        if key not in {"files", "skippedPaths"}
+    }
+
+
+def read_checkpoint_manifest(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def list_checkpoint_manifests(config: BridgeConfig, scope: str | None) -> list[dict[str, Any]]:
+    store = checkpoint_scope_store(config, scope)
+    if not store.exists():
+        return []
+    manifests: list[dict[str, Any]] = []
+    for manifest_path in store.glob("*/manifest.json"):
+        manifest = read_checkpoint_manifest(manifest_path)
+        if manifest:
+            manifests.append(manifest)
+    return sorted(manifests, key=lambda item: str(item.get("createdAt") or ""), reverse=True)
+
+
+def prune_old_checkpoints(config: BridgeConfig, scope: str | None) -> None:
+    store = checkpoint_scope_store(config, scope)
+    manifests = list_checkpoint_manifests(config, scope)
+    for manifest in manifests[MAX_CHECKPOINTS_PER_SCOPE:]:
+        checkpoint_id = str(manifest.get("id") or "")
+        if not CHECKPOINT_ID_RE.fullmatch(checkpoint_id):
+            continue
+        checkpoint_dir = (store / checkpoint_id).resolve()
+        if path_is_inside(checkpoint_dir, store):
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+
+
+def should_skip_checkpoint_dir(path: Path, store_root: Path) -> bool:
+    if path.name in CHECKPOINT_SKIPPED_DIRS:
+        return True
+    if path_is_inside(path, store_root):
+        return True
+    try:
+        return path.is_symlink()
+    except OSError:
+        return True
+
+
+def iter_checkpoint_files(target_root: Path, store_root: Path) -> list[tuple[Path, str, int]]:
+    files: list[tuple[Path, str, int]] = []
+    if not target_root.exists():
+        return files
+
+    for current, dirs, filenames in os.walk(target_root):
+        current_path = Path(current)
+        dirs[:] = [
+            dirname
+            for dirname in dirs
+            if not should_skip_checkpoint_dir(current_path / dirname, store_root)
+        ]
+        for filename in sorted(filenames):
+            source = current_path / filename
+            try:
+                resolved = source.resolve()
+                if source.is_symlink() or not source.is_file():
+                    continue
+                if path_is_inside(resolved, store_root):
+                    continue
+                rel_path = resolved.relative_to(target_root).as_posix()
+                size = resolved.stat().st_size
+            except (OSError, ValueError):
+                continue
+            files.append((resolved, rel_path, size))
+    return files
+
+
+def write_checkpoint_manifest(path: Path, manifest: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def create_workspace_checkpoint(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    scope = payload.get("scope") or None
+    target_root = resolve_bridge_path(config, ".", scope, create_scope=bool(scope))
+    target_root.mkdir(parents=True, exist_ok=True)
+    store_root = checkpoint_store_root(config)
+    checkpoint_id = f"cp_{int(time.time() * 1000)}_{secrets.token_hex(4)}"
+    files_root = checkpoint_files_root(config, scope, checkpoint_id)
+    manifest_path = checkpoint_manifest_path(config, scope, checkpoint_id)
+
+    label = str(payload.get("label") or "").strip()[:120] or "Prompt checkpoint"
+    prompt = str(payload.get("prompt") or "").strip()
+    file_entries: list[dict[str, Any]] = []
+    total_bytes = 0
+    skipped_files = 0
+    skipped_bytes = 0
+    skipped_paths: list[str] = []
+    truncated = False
+
+    for source, rel_path, size in iter_checkpoint_files(target_root, store_root):
+        if size > MAX_CHECKPOINT_FILE_BYTES:
+            skipped_files += 1
+            skipped_bytes += size
+            skipped_paths.append(rel_path)
+            continue
+        if len(file_entries) >= MAX_CHECKPOINT_FILES or total_bytes + size > MAX_CHECKPOINT_TOTAL_BYTES:
+            skipped_files += 1
+            skipped_bytes += size
+            skipped_paths.append(rel_path)
+            truncated = True
+            continue
+        destination = files_root / rel_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        file_entries.append({
+            "path": rel_path,
+            "size": size,
+            "mtime": source.stat().st_mtime,
+        })
+        total_bytes += size
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    manifest = {
+        "id": checkpoint_id,
+        "label": label,
+        "prompt": prompt[:500],
+        "createdAt": now,
+        "scope": scope or "",
+        "root": str(target_root),
+        "fileCount": len(file_entries),
+        "totalBytes": total_bytes,
+        "skippedFiles": skipped_files,
+        "skippedBytes": skipped_bytes,
+        "skippedPaths": skipped_paths,
+        "truncated": truncated,
+        "files": file_entries,
+    }
+    write_checkpoint_manifest(manifest_path, manifest)
+    prune_old_checkpoints(config, scope)
+    return compact_checkpoint_manifest(manifest)
+
+
+def list_workspace_checkpoints(config: BridgeConfig, scope: str | None) -> dict[str, Any]:
+    target_root = resolve_bridge_path(config, ".", scope)
+    return {
+        "root": str(target_root),
+        "scope": scope or "",
+        "checkpoints": [compact_checkpoint_manifest(item) for item in list_checkpoint_manifests(config, scope)],
+        "maxCheckpoints": MAX_CHECKPOINTS_PER_SCOPE,
+    }
+
+
+def remove_empty_checkpoint_dirs(target_root: Path, store_root: Path) -> int:
+    removed = 0
+    for current, dirs, _filenames in os.walk(target_root, topdown=False):
+        current_path = Path(current)
+        if current_path == target_root:
+            continue
+        if should_skip_checkpoint_dir(current_path, store_root):
+            continue
+        try:
+            current_path.rmdir()
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def restore_workspace_checkpoint(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    scope = payload.get("scope") or None
+    checkpoint_id = validate_checkpoint_id(payload.get("id"))
+    target_root = resolve_bridge_path(config, ".", scope, create_scope=bool(scope))
+    manifest = read_checkpoint_manifest(checkpoint_manifest_path(config, scope, checkpoint_id))
+    if not manifest:
+        raise FileNotFoundError("Checkpoint does not exist")
+    files_root = checkpoint_files_root(config, scope, checkpoint_id)
+    if not files_root.exists():
+        raise FileNotFoundError("Checkpoint files are missing")
+
+    store_root = checkpoint_store_root(config)
+    snapshot_files = {
+        str(entry.get("path") or "")
+        for entry in manifest.get("files", [])
+        if entry.get("path")
+    }
+    protected_files = {
+        str(path or "")
+        for path in manifest.get("skippedPaths", [])
+        if path
+    }
+    restored_files = 0
+    for rel_path in sorted(snapshot_files):
+        source = (files_root / rel_path).resolve()
+        destination = (target_root / rel_path).resolve()
+        if not path_is_inside(source, files_root) or not path_is_inside(destination, target_root):
+            continue
+        if not source.exists() or not source.is_file():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        restored_files += 1
+
+    deleted_files = 0
+    delete_extra = payload.get("deleteExtra") is not False
+    if delete_extra:
+        for current_file, rel_path, _size in iter_checkpoint_files(target_root, store_root):
+            if rel_path in snapshot_files or rel_path in protected_files:
+                continue
+            try:
+                current_file.unlink()
+                deleted_files += 1
+            except OSError:
+                continue
+        remove_empty_checkpoint_dirs(target_root, store_root)
+
+    return {
+        "id": checkpoint_id,
+        "label": manifest.get("label") or "Checkpoint",
+        "createdAt": manifest.get("createdAt") or "",
+        "root": str(target_root),
+        "scope": scope or "",
+        "restoredFiles": restored_files,
+        "deletedFiles": deleted_files,
+    }
+
+
+def delete_workspace_checkpoint(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    scope = payload.get("scope") or None
+    checkpoint_id = validate_checkpoint_id(payload.get("id"))
+    store = checkpoint_scope_store(config, scope)
+    checkpoint_dir = (store / checkpoint_id).resolve()
+    if not path_is_inside(checkpoint_dir, store):
+        raise ValueError("Invalid checkpoint path")
+    if not checkpoint_dir.exists():
+        raise FileNotFoundError("Checkpoint does not exist")
+    shutil.rmtree(checkpoint_dir)
+    return {"id": checkpoint_id, "deleted": True}
+
+
+def handle_checkpoint_action(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    action = str(payload.get("action") or "create").strip().lower()
+    scope = payload.get("scope") or None
+    with config.runtime.file_lane.acquire(), config.runtime.path_lock(checkpoint_scope_store(config, scope)):
+        if action == "create":
+            return create_workspace_checkpoint(config, payload)
+        if action == "restore":
+            return restore_workspace_checkpoint(config, payload)
+        if action == "delete":
+            return delete_workspace_checkpoint(config, payload)
+    raise ValueError("Unknown checkpoint action")
 
 
 def public_ip_allowed(address: str) -> bool:
@@ -553,6 +994,424 @@ def fetch_public_url(payload: dict[str, Any]) -> dict[str, Any]:
     raise PermissionError("Too many redirects while inspecting URL")
 
 
+def connector_ip_allowed(address: str, allow_local: bool) -> bool:
+    ip = ipaddress.ip_address(address)
+    if public_ip_allowed(address):
+        return True
+    return allow_local and (ip.is_private or ip.is_loopback or ip.is_link_local)
+
+
+def validate_connector_http_url(raw_url: Any, allow_local: bool = True) -> str:
+    url = str(raw_url or "").strip()
+    if not url:
+        raise ValueError("Connector URL is required")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise PermissionError("Connector URLs must use http or https")
+    if parsed.username or parsed.password:
+        raise PermissionError("Connector URLs with embedded credentials are not allowed")
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Connector URL must include a hostname")
+
+    try:
+        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve connector host: {host}") from exc
+
+    if not addresses:
+        raise PermissionError("Connector host did not resolve to an address")
+    for address in addresses:
+        ip_text = address[4][0]
+        if not connector_ip_allowed(ip_text, allow_local):
+            if allow_local:
+                raise PermissionError("Connector host resolved to a reserved or unsupported address")
+            raise PermissionError("Private, local, reserved, and link-local network addresses are not allowed")
+
+    return parsed._replace(fragment="").geturl()
+
+
+def sanitize_connector_headers(headers: Any) -> dict[str, str]:
+    if not isinstance(headers, dict):
+        return {}
+    blocked = {
+        "host",
+        "content-length",
+        "connection",
+        "transfer-encoding",
+        "upgrade",
+        "proxy-authorization",
+        "proxy-authenticate",
+    }
+    sanitized: dict[str, str] = {}
+    for key, value in headers.items():
+        name = str(key or "").strip()
+        if not name or name.lower() in blocked or "\n" in name or "\r" in name:
+            continue
+        if value is None:
+            continue
+        sanitized[name] = str(value)
+    return sanitized
+
+
+def build_connector_url(base_url: str, requested_path: Any, query: Any = None, allow_local: bool = True) -> str:
+    base = validate_connector_http_url(base_url, allow_local=allow_local).rstrip("/")
+    path = str(requested_path or "/").strip()
+    if re.match(r"^https?://", path, re.IGNORECASE):
+        raise PermissionError("Connector paths must be relative to the configured base URL")
+    path = "/" + path.lstrip("/")
+    url = f"{base}{path}"
+    if isinstance(query, dict) and query:
+        pairs: list[tuple[str, str]] = []
+        for key, value in query.items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                pairs.extend((str(key), str(item)) for item in value)
+            else:
+                pairs.append((str(key), str(value)))
+        if pairs:
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}{urlencode(pairs)}"
+    return validate_connector_http_url(url, allow_local=allow_local)
+
+
+def encode_api_request_body(body: Any, headers: dict[str, str]) -> bytes | None:
+    if body is None:
+        return None
+    has_content_type = any(key.lower() == "content-type" for key in headers)
+    if isinstance(body, str):
+        if not has_content_type:
+            headers["Content-Type"] = "text/plain; charset=utf-8"
+        return body.encode("utf-8")
+    if not has_content_type:
+        headers["Content-Type"] = "application/json"
+    return json.dumps(body, ensure_ascii=False).encode("utf-8")
+
+
+def execute_api_call(payload: dict[str, Any]) -> dict[str, Any]:
+    connector = payload.get("connector")
+    if not isinstance(connector, dict):
+        raise ValueError("API connector is required")
+    method = str(payload.get("method") or connector.get("method") or "GET").strip().upper()
+    if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+        raise PermissionError("Unsupported API method")
+    allow_local = bool(connector.get("allowLocalNetwork"))
+    url = build_connector_url(connector.get("baseUrl") or connector.get("url"), payload.get("path") or connector.get("path") or "/", payload.get("query"), allow_local)
+    headers = {
+        "Accept": "application/json,text/plain,*/*",
+        "User-Agent": WEB_FETCH_USER_AGENT,
+        **sanitize_connector_headers(connector.get("headers")),
+        **sanitize_connector_headers(payload.get("headers")),
+    }
+    data = None if method in {"GET", "DELETE"} else encode_api_request_body(payload.get("body"), headers)
+    request = Request(url, headers=headers, data=data, method=method)
+    try:
+        response = urlopen(request, timeout=API_CALL_TIMEOUT_SECONDS)
+    except HTTPError as exc:
+        response = exc
+    except URLError as exc:
+        raise ValueError(f"API call failed: {exc.reason}") from exc
+
+    with response:
+        body, truncated = read_limited_web_body(response, MAX_API_CALL_RESPONSE_BYTES)
+        content_type = response.headers.get("Content-Type", "")
+        text_body = decode_web_body(body, content_type)
+        return {
+            "ok": True,
+            "url": url,
+            "status": int(getattr(response, "status", getattr(response, "code", 0)) or 0),
+            "contentType": content_type,
+            "headers": {
+                key: value
+                for key, value in response.headers.items()
+                if key.lower() in {"content-type", "x-request-id", "etag", "last-modified"}
+            },
+            "body": text_body,
+            "truncated": truncated,
+        }
+
+
+def normalize_mcp_server_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    server = payload.get("server")
+    if not isinstance(server, dict):
+        raise ValueError("MCP server is required")
+    transport = str(server.get("transport") or ("streamable_http" if server.get("url") else "stdio")).strip().lower().replace("-", "_")
+    if transport in {"http", "streamable"}:
+        transport = "streamable_http"
+    elif transport in {"sse", "http_sse"}:
+        transport = "legacy_sse"
+    elif transport != "stdio":
+        transport = "stdio"
+    return {
+        "name": str(server.get("name") or "mcp-server").strip() or "mcp-server",
+        "transport": transport,
+        "command": str(server.get("command") or "").strip(),
+        "args": [str(item) for item in server.get("args") or [] if str(item).strip()],
+        "url": str(server.get("url") or "").strip(),
+        "cwd": str(server.get("cwd") or ".").strip() or ".",
+        "env": server.get("env") if isinstance(server.get("env"), dict) else {},
+        "headers": sanitize_connector_headers(server.get("headers")),
+    }
+
+
+def json_rpc_payload(method: str, params: dict[str, Any] | None = None, request_id: int | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+    if request_id is not None:
+        payload["id"] = request_id
+    if params is not None:
+        payload["params"] = params
+    return payload
+
+
+def parse_sse_json_response(raw_text: str, request_id: int | None = None) -> dict[str, Any]:
+    for event in re.split(r"\r?\n\r?\n", raw_text):
+        data_lines = [
+            line[5:].strip()
+            for line in event.splitlines()
+            if line.startswith("data:")
+        ]
+        if not data_lines:
+            continue
+        parsed = json.loads("\n".join(data_lines))
+        if request_id is None or parsed.get("id") == request_id:
+            return parsed
+    raise ValueError("SSE response did not include a matching JSON-RPC message")
+
+
+def http_json_rpc_request(url: str, headers: dict[str, str], payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request_headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "MCP-Protocol-Version": MCP_PROTOCOL_VERSION,
+        "User-Agent": WEB_FETCH_USER_AGENT,
+        **headers,
+    }
+    request = Request(url, headers=request_headers, data=body, method="POST")
+    try:
+        response = urlopen(request, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
+    except HTTPError as exc:
+        response = exc
+    except URLError as exc:
+        raise ValueError(f"MCP HTTP request failed: {exc.reason}") from exc
+
+    with response:
+        status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
+        raw_body, truncated = read_limited_web_body(response, MAX_MCP_RESULT_BYTES)
+        if status < 200 or status >= 300:
+            detail = decode_web_body(raw_body, response.headers.get("Content-Type", ""))
+            raise ValueError(f"MCP HTTP request failed with {status}: {detail[:400]}")
+        if truncated:
+            raise ValueError("MCP response exceeded the bridge response limit")
+        text = decode_web_body(raw_body, response.headers.get("Content-Type", ""))
+        if "text/event-stream" in response.headers.get("Content-Type", "").lower():
+            parsed = parse_sse_json_response(text, payload.get("id"))
+        else:
+            parsed = json.loads(text or "{}")
+        if isinstance(parsed, list):
+            parsed = next((item for item in parsed if item.get("id") == payload.get("id")), parsed[0] if parsed else {})
+        if parsed.get("error"):
+            raise ValueError(f"MCP error: {parsed['error']}")
+        response_headers = {key.lower(): value for key, value in response.headers.items()}
+        return parsed, response_headers
+
+
+def read_legacy_sse_endpoint(url: str, headers: dict[str, str]) -> str:
+    request = Request(
+        validate_connector_http_url(url, allow_local=True),
+        headers={
+            "Accept": "text/event-stream",
+            "User-Agent": WEB_FETCH_USER_AGENT,
+            **headers,
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=MCP_REQUEST_TIMEOUT_SECONDS) as response:
+            raw = response.read(64_000).decode("utf-8", errors="replace")
+    except URLError as exc:
+        raise ValueError(f"Legacy MCP SSE endpoint discovery failed: {exc.reason}") from exc
+    for event in re.split(r"\r?\n\r?\n", raw):
+        endpoint_lines = [
+            line[5:].strip()
+            for line in event.splitlines()
+            if line.startswith("data:")
+        ]
+        event_name = next((line[6:].strip() for line in event.splitlines() if line.startswith("event:")), "")
+        if event_name == "endpoint" and endpoint_lines:
+            return urljoin(url, endpoint_lines[0])
+    raise ValueError("Legacy MCP server did not advertise a POST endpoint")
+
+
+def run_mcp_http(server: dict[str, Any], method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    url = validate_connector_http_url(server.get("url"), allow_local=True)
+    headers = server.get("headers") or {}
+    if server.get("transport") == "legacy_sse":
+        url = read_legacy_sse_endpoint(url, headers)
+
+    init_id = int(time.time() * 1000)
+    initialized_id = init_id + 1
+    request_id = init_id + 2
+    init_result, init_headers = http_json_rpc_request(url, headers, json_rpc_payload("initialize", {
+        "protocolVersion": MCP_PROTOCOL_VERSION,
+        "capabilities": {},
+        "clientInfo": {"name": "Fauna", "version": VERSION},
+    }, init_id))
+    session_id = init_headers.get("mcp-session-id")
+    session_headers = {**headers}
+    if session_id:
+        session_headers["Mcp-Session-Id"] = session_id
+    try:
+        http_json_rpc_request(url, session_headers, json_rpc_payload("notifications/initialized", {}, None))
+    except Exception:
+        pass
+    result, _headers = http_json_rpc_request(url, session_headers, json_rpc_payload(method, params or {}, request_id))
+    return {
+        "serverInfo": init_result.get("result", {}).get("serverInfo") or {},
+        "instructions": init_result.get("result", {}).get("instructions") or "",
+        "result": result.get("result") or {},
+    }
+
+
+def resolve_mcp_cwd(config: BridgeConfig, server: dict[str, Any], scope: str | None = None) -> Path:
+    requested = server.get("cwd") or "."
+    return resolve_bridge_path(config, requested, scope)
+
+
+def start_mcp_stdio_process(config: BridgeConfig, server: dict[str, Any], scope: str | None = None) -> subprocess.Popen[str]:
+    command = server.get("command")
+    if not command:
+        raise ValueError("stdio MCP server command is required")
+    executable = shutil.which(command) or command
+    args = [str(item) for item in server.get("args") or []]
+    env = os.environ.copy()
+    for key, value in (server.get("env") or {}).items():
+        clean_key = str(key or "").strip()
+        if clean_key:
+            env[clean_key] = str(value)
+    return subprocess.Popen(
+        [executable, *args],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        cwd=str(resolve_mcp_cwd(config, server, scope)),
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        shell=False,
+    )
+
+
+def read_mcp_stdio_line(proc: subprocess.Popen[str], timeout_seconds: float) -> str:
+    if not proc.stdout:
+        raise ValueError("MCP process stdout is unavailable")
+    result_queue: queue.Queue[str] = queue.Queue(maxsize=1)
+
+    def reader() -> None:
+        try:
+            result_queue.put(proc.stdout.readline())
+        except Exception:
+            result_queue.put("")
+
+    threading.Thread(target=reader, daemon=True).start()
+    try:
+        return result_queue.get(timeout=timeout_seconds)
+    except queue.Empty as exc:
+        raise TimeoutError("Timed out waiting for MCP stdio response") from exc
+
+
+def mcp_stdio_request(proc: subprocess.Popen[str], method: str, params: dict[str, Any] | None = None, request_id: int | None = None) -> dict[str, Any]:
+    if not proc.stdin:
+        raise ValueError("MCP process stdin is unavailable")
+    payload = json_rpc_payload(method, params or {}, request_id)
+    proc.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    proc.stdin.flush()
+    if request_id is None:
+        return {}
+    deadline = time.monotonic() + MCP_REQUEST_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise ValueError(f"MCP process exited with code {proc.returncode}")
+        line = read_mcp_stdio_line(proc, max(0.1, deadline - time.monotonic()))
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if parsed.get("id") != request_id:
+            continue
+        if parsed.get("error"):
+            raise ValueError(f"MCP error: {parsed['error']}")
+        return parsed
+    raise TimeoutError("Timed out waiting for MCP stdio response")
+
+
+def stop_mcp_process(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
+def run_mcp_stdio(config: BridgeConfig, server: dict[str, Any], method: str, params: dict[str, Any] | None = None, scope: str | None = None) -> dict[str, Any]:
+    proc = start_mcp_stdio_process(config, server, scope)
+    try:
+        request_id = int(time.time() * 1000)
+        init_result = mcp_stdio_request(proc, "initialize", {
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "Fauna", "version": VERSION},
+        }, request_id)
+        mcp_stdio_request(proc, "notifications/initialized", {}, None)
+        result = mcp_stdio_request(proc, method, params or {}, request_id + 1)
+        return {
+            "serverInfo": init_result.get("result", {}).get("serverInfo") or {},
+            "instructions": init_result.get("result", {}).get("instructions") or "",
+            "result": result.get("result") or {},
+        }
+    finally:
+        stop_mcp_process(proc)
+
+
+def discover_mcp_server(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    server = normalize_mcp_server_payload(payload)
+    scope = str(payload.get("scope") or "").strip() or None
+    if server["transport"] == "stdio":
+        result = run_mcp_stdio(config, server, "tools/list", {}, scope)
+    else:
+        result = run_mcp_http(server, "tools/list", {})
+    tool_result = result.get("result") or {}
+    return {
+        "ok": True,
+        "serverInfo": result.get("serverInfo") or {},
+        "instructions": result.get("instructions") or "",
+        "tools": tool_result.get("tools") if isinstance(tool_result, dict) else [],
+    }
+
+
+def call_mcp_tool(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    server = normalize_mcp_server_payload(payload)
+    tool_name = str(payload.get("tool") or payload.get("toolName") or "").strip()
+    if not tool_name:
+        raise ValueError("MCP tool name is required")
+    arguments = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
+    scope = str(payload.get("scope") or "").strip() or None
+    params = {"name": tool_name, "arguments": arguments}
+    if server["transport"] == "stdio":
+        result = run_mcp_stdio(config, server, "tools/call", params, scope)
+    else:
+        result = run_mcp_http(server, "tools/call", params)
+    return {"ok": True, "result": result.get("result") or {}}
+
+
 def command_is_blocked(command: str) -> str | None:
     normalized = command.strip()
     if not normalized:
@@ -593,16 +1452,17 @@ def run_command(config: BridgeConfig, payload: dict[str, Any]) -> dict[str, Any]
     args, use_shell = shell_command_args(command, config.shell)
     started = time.monotonic()
     try:
-        completed = subprocess.run(
-            args,
-            cwd=str(cwd),
-            shell=use_shell,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-        )
+        with config.runtime.exec_lane.acquire():
+            completed = subprocess.run(
+                args,
+                cwd=str(cwd),
+                shell=use_shell,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
         duration_ms = int((time.monotonic() - started) * 1000)
         stdout = completed.stdout[-MAX_TEXT_BYTES:]
         stderr = completed.stderr[-MAX_TEXT_BYTES:]
@@ -638,15 +1498,16 @@ def run_git_command(
     cwd = resolve_bridge_path(config, requested or ".", scope, create_scope=bool(scope))
     if not cwd.exists() or not cwd.is_dir():
         raise NotADirectoryError("Git cwd is not a directory")
-    return subprocess.run(
-        ["git", *args],
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=max(1, min(MAX_EXEC_SECONDS, timeout)),
-    )
+    with config.runtime.exec_lane.acquire():
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(1, min(MAX_EXEC_SECONDS, timeout)),
+        )
 
 
 def get_git_output(
@@ -1064,12 +1925,29 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         sys.stdout.write("%s - %s\n" % (self.address_string(), format % args))
 
+    def bridge_busy_response(self, exc: BridgeBusyError) -> None:
+        json_response(self, 429, {
+            "ok": False,
+            "busy": True,
+            "lane": exc.lane,
+            "limit": exc.limit,
+            "retryAfterMs": exc.retry_after_ms,
+            "error": str(exc),
+        })
+
     def do_OPTIONS(self) -> None:
         self.send_response(204)
         set_cors_headers(self)
         self.end_headers()
 
     def do_GET(self) -> None:
+        try:
+            with self.config.runtime.request_lane.acquire(timeout_seconds=0.1):
+                self.handle_get()
+        except BridgeBusyError as exc:
+            self.bridge_busy_response(exc)
+
+    def handle_get(self) -> None:
         if not self.authorized():
             json_response(self, 401, {"ok": False, "error": "Unauthorized bridge token"})
             return
@@ -1086,6 +1964,7 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
                     "accessPolicy": self.config.access_policy,
                     "allowDangerous": self.config.allow_dangerous,
                     "projects": len(self.config.projects),
+                    "concurrency": self.config.runtime.snapshot(),
                 })
             elif parsed.path == "/tree":
                 result = list_tree(
@@ -1111,12 +1990,27 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
                     query.get("path", ["."])[0],
                 )
                 json_response(self, 200, {"ok": True, **result})
+            elif parsed.path == "/checkpoints":
+                result = list_workspace_checkpoints(
+                    self.config,
+                    query.get("scope", [""])[0] or None,
+                )
+                json_response(self, 200, {"ok": True, **result})
             else:
                 json_response(self, 404, {"ok": False, "error": "Unknown endpoint"})
+        except BridgeBusyError as exc:
+            self.bridge_busy_response(exc)
         except Exception as exc:  # noqa: BLE001 - local API returns readable errors.
             json_response(self, 400, {"ok": False, "error": str(exc)})
 
     def do_POST(self) -> None:
+        try:
+            with self.config.runtime.request_lane.acquire(timeout_seconds=0.1):
+                self.handle_post()
+        except BridgeBusyError as exc:
+            self.bridge_busy_response(exc)
+
+    def handle_post(self) -> None:
         if not self.authorized():
             json_response(self, 401, {"ok": False, "error": "Unauthorized bridge token"})
             return
@@ -1131,6 +2025,10 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
             max_body_bytes = MAX_OPENAI_BODY_BYTES
         elif parsed.path == "/local-ai":
             max_body_bytes = MAX_LOCAL_AI_BODY_BYTES
+        elif parsed.path in {"/mcp/discover", "/mcp/call"}:
+            max_body_bytes = MAX_MCP_BODY_BYTES
+        elif parsed.path == "/api-call":
+            max_body_bytes = MAX_API_CALL_BODY_BYTES
         elif parsed.path == "/write":
             max_body_bytes = MAX_WRITE_BODY_BYTES
         if length > max_body_bytes:
@@ -1152,20 +2050,40 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/mkdir":
                 result = make_directory(self.config, payload)
                 json_response(self, 200, {"ok": True, **result})
-            elif parsed.path == "/openai":
-                if payload.get("streamResponse"):
-                    stream_openai_request(payload, self)
-                else:
-                    result = proxy_openai_request(payload)
-                    json_response(self, 200, result)
-            elif parsed.path == "/local-ai":
-                result = proxy_local_ai_request(payload)
-                json_response(self, 200, result)
-            elif parsed.path == "/fetch-url":
-                result = fetch_public_url(payload)
+            elif parsed.path == "/checkpoints":
+                result = handle_checkpoint_action(self.config, payload)
                 json_response(self, 200, {"ok": True, **result})
+            elif parsed.path == "/openai":
+                with self.config.runtime.network_lane.acquire():
+                    if payload.get("streamResponse"):
+                        stream_openai_request(payload, self)
+                    else:
+                        result = proxy_openai_request(payload)
+                        json_response(self, 200, result)
+            elif parsed.path == "/local-ai":
+                with self.config.runtime.network_lane.acquire():
+                    result = proxy_local_ai_request(payload)
+                    json_response(self, 200, result)
+            elif parsed.path == "/mcp/discover":
+                with self.config.runtime.mcp_lane.acquire():
+                    result = discover_mcp_server(self.config, payload)
+                    json_response(self, 200, result)
+            elif parsed.path == "/mcp/call":
+                with self.config.runtime.mcp_lane.acquire():
+                    result = call_mcp_tool(self.config, payload)
+                    json_response(self, 200, result)
+            elif parsed.path == "/api-call":
+                with self.config.runtime.network_lane.acquire():
+                    result = execute_api_call(payload)
+                    json_response(self, 200, result)
+            elif parsed.path == "/fetch-url":
+                with self.config.runtime.network_lane.acquire():
+                    result = fetch_public_url(payload)
+                    json_response(self, 200, {"ok": True, **result})
             else:
                 json_response(self, 404, {"ok": False, "error": "Unknown endpoint"})
+        except BridgeBusyError as exc:
+            self.bridge_busy_response(exc)
         except Exception as exc:  # noqa: BLE001 - local API returns readable errors.
             status = 403 if isinstance(exc, PermissionError) else 400
             json_response(self, status, {"ok": False, "error": str(exc)})
@@ -1223,7 +2141,7 @@ def main() -> None:
     token = args.token or secrets.token_urlsafe(24)
     projects = parse_project_roots(args.projects_json)
     FaunaBridgeHandler.config = BridgeConfig(root, token, args.shell, args.allow_dangerous, args.access_policy, projects)
-    server = ThreadingHTTPServer((args.host, args.port), FaunaBridgeHandler)
+    server = FaunaThreadingHTTPServer((args.host, args.port), FaunaBridgeHandler)
 
     print("Fauna local workspace bridge")
     print(f"URL: http://{args.host}:{args.port}")
@@ -1231,6 +2149,14 @@ def main() -> None:
     print(f"Access policy: {args.access_policy}")
     print(f"Registered projects: {len(projects)}")
     print(f"Command blocklist: {'off' if args.allow_dangerous else 'on'}")
+    print(
+        "Concurrency: "
+        f"{MAX_ACTIVE_BRIDGE_REQUESTS} requests, "
+        f"{MAX_CONCURRENT_EXEC_COMMANDS} terminal, "
+        f"{MAX_CONCURRENT_FILE_MUTATIONS} file, "
+        f"{MAX_CONCURRENT_NETWORK_REQUESTS} network, "
+        f"{MAX_CONCURRENT_MCP_REQUESTS} MCP"
+    )
     print(f"Token: {token}")
     print("Paste the URL and token into Fauna Settings > Local Workspace Bridge.")
     print("Press Ctrl+C to stop.")

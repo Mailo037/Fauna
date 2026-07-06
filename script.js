@@ -16,7 +16,7 @@ import {
     safeLocalStorageRemove
 } from "./modules/storage.js";
 
-const FAUNA_SCRIPT_CHUNK_VERSION = "20260705-no-caps";
+const FAUNA_SCRIPT_CHUNK_VERSION = "20260706-capabilities-release";
 const FAUNA_SCRIPT_DEPENDENCIES_KEY = "__faunaScriptDependencies";
 const FAUNA_SCRIPT_CHUNKS = [
     "./scripts/01-dom-state-feedback.js",
@@ -27,6 +27,7 @@ const FAUNA_SCRIPT_CHUNKS = [
     "./scripts/06-memory-sessions-library-core.js",
     "./scripts/07-library-provider-web-start.js",
     "./scripts/08-web-local-tools.js",
+    "./scripts/09-capabilities-connectors.js",
     "./scripts/09-clarifying-files-composer.js",
     "./scripts/10-usage-commands-pipeline.js",
     "./scripts/11-media-generation.js",

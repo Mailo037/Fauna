@@ -2312,6 +2312,14 @@ const SLASH_COMMANDS = [
 ];
 let activeSlashCommandIndex = 0;
 let visibleSlashCommandMatches = [];
+let activeComposerPaletteTrigger = null;
+let skillMentionPaletteState = {
+    input: null,
+    palette: null,
+    trigger: null,
+    matches: [],
+    index: 0
+};
 let commandMenu = null;
 let commandMenuSearchInput = null;
 let commandMenuList = null;
@@ -2319,15 +2327,54 @@ let commandMenuItems = [];
 let visibleCommandMenuItems = [];
 let activeCommandMenuIndex = 0;
 
-function getSlashCommandQuery() {
+function getSlashCommandTrigger() {
     if (!input) return null;
     const value = input.value || "";
     const caret = Number.isInteger(input.selectionStart) ? input.selectionStart : value.length;
     const beforeCaret = value.slice(0, caret);
     const afterCaret = value.slice(caret);
-    if (afterCaret.trim()) return null;
-    const match = beforeCaret.match(/^\/([^\s/]*)$/);
-    return match ? match[1].toLowerCase() : null;
+    if (/^[^\s]/.test(afterCaret)) return null;
+    const match = beforeCaret.match(/(^|\s)\/([^\s/]*)$/);
+    if (!match) return null;
+    const query = match[2] || "";
+    const start = caret - query.length - 1;
+    return match ? {
+        type: "slash",
+        query: query.toLowerCase(),
+        start,
+        end: caret
+    } : null;
+}
+
+function getSkillMentionTriggerForInput(targetInput) {
+    if (!targetInput) return null;
+    const value = targetInput.value || "";
+    const caret = Number.isInteger(targetInput.selectionStart) ? targetInput.selectionStart : value.length;
+    const beforeCaret = value.slice(0, caret);
+    const afterCaret = value.slice(caret);
+    if (/^[A-Za-z0-9_.-]/.test(afterCaret)) return null;
+    const match = beforeCaret.match(/(^|\s)([$@])([A-Za-z0-9_.-]*)$/);
+    if (!match) return null;
+    return {
+        type: "skill",
+        trigger: match[2],
+        query: match[3].toLowerCase(),
+        start: caret - match[2].length - match[3].length,
+        end: caret
+    };
+}
+
+function getSkillMentionTrigger() {
+    return getSkillMentionTriggerForInput(input);
+}
+
+function getComposerPaletteTrigger() {
+    return getSkillMentionTrigger() || getSlashCommandTrigger();
+}
+
+function getSlashCommandQuery() {
+    const trigger = getSlashCommandTrigger();
+    return trigger ? trigger.query : null;
 }
 
 function getSlashCommandMatches(query = "") {
@@ -2356,6 +2403,7 @@ function hideSlashCommandPalette() {
     slashCommandPalette.hidden = true;
     slashCommandPalette.replaceChildren();
     visibleSlashCommandMatches = [];
+    activeComposerPaletteTrigger = null;
     activeSlashCommandIndex = 0;
     input?.removeAttribute("aria-activedescendant");
 }
@@ -2384,9 +2432,39 @@ function getSlashCommandUnavailableReason(command) {
 
 function applySlashCommandSuggestion(command) {
     if (!command || !input) return;
+    if (command.type === "skill") {
+        applySkillSuggestion(command.skill);
+        return;
+    }
+    command = command.command || command;
     const unavailableReason = getSlashCommandUnavailableReason(command);
     if (unavailableReason) {
         showToast(unavailableReason, "warning");
+        return;
+    }
+    const trigger = activeComposerPaletteTrigger || getComposerPaletteTrigger();
+    const value = input.value || "";
+    const start = Number.isInteger(trigger?.start) ? trigger.start : 0;
+    const end = Number.isInteger(trigger?.end) ? trigger.end : value.length;
+    const beforeTrigger = value.slice(0, start).trim();
+    const afterTrigger = value.slice(end).trim();
+    const hasSurroundingPrompt = Boolean(beforeTrigger || afterTrigger);
+    if (hasSurroundingPrompt && command.acceptsPrompt) {
+        const existingPrompt = [beforeTrigger, afterTrigger].filter(Boolean).join(" ");
+        input.value = `${command.command} ${existingPrompt} `;
+        input.selectionStart = input.selectionEnd = input.value.length;
+        input.style.height = "auto";
+        input.style.height = `${input.scrollHeight}px`;
+        updateTokenDisplay();
+        scheduleComposerDraftSave({ render: true });
+        hideSlashCommandPalette();
+        input.focus();
+        return;
+    }
+    if (hasSurroundingPrompt && !command.acceptsPrompt) {
+        showToast(`Use ${command.command} from an empty prompt.`, "info");
+        hideSlashCommandPalette();
+        input.focus();
         return;
     }
     if (command.name === "model") {
@@ -2416,52 +2494,250 @@ function applySlashCommandSuggestion(command) {
     input.focus();
 }
 
+function applySkillSuggestion(skill) {
+    if (!skill || !input) return;
+    const trigger = activeComposerPaletteTrigger || getComposerPaletteTrigger();
+    insertSkillMentionSuggestion(input, trigger, skill, {
+        afterChange: () => {
+            updateTokenDisplay();
+            scheduleComposerDraftSave({ render: true });
+        }
+    });
+    hideSlashCommandPalette();
+}
+
+function insertSkillMentionSuggestion(targetInput, trigger, skill, { afterChange = null } = {}) {
+    if (!targetInput || !skill) return;
+    const inputValue = targetInput.value || "";
+    const caret = Number.isInteger(targetInput.selectionStart) ? targetInput.selectionStart : inputValue.length;
+    const start = Number.isInteger(trigger?.start) ? trigger.start : caret;
+    const end = Number.isInteger(trigger?.end) ? trigger.end : caret;
+    const mention = `$${skill.name} `;
+    targetInput.value = `${inputValue.slice(0, start)}${mention}${inputValue.slice(end)}`;
+    targetInput.selectionStart = targetInput.selectionEnd = start + mention.length;
+    targetInput.style.height = "auto";
+    targetInput.style.height = `${targetInput.scrollHeight}px`;
+    if (typeof afterChange === "function") afterChange();
+    targetInput.focus();
+}
+
+function createSlashPaletteHeader(label) {
+    const header = document.createElement("div");
+    header.className = "slash-command-section-label";
+    header.setAttribute("role", "presentation");
+    header.setAttribute("aria-hidden", "true");
+    header.textContent = label;
+    return header;
+}
+
+function createSkillPaletteOption(skill, index) {
+    return createSkillPaletteOptionForInput(skill, index, input, slashCommandPalette, () => activeComposerPaletteTrigger, skill => applySlashCommandSuggestion({ type: "skill", skill }));
+}
+
+function createSkillPaletteOptionForInput(skill, index, targetInput, targetPalette, getTrigger, applySkill) {
+    const option = document.createElement("button");
+    option.id = `slash-skill-${String(skill.id || skill.name || index).replace(/[^a-z0-9_-]/gi, "-")}-${index}`;
+    option.className = "slash-command-option slash-skill-option";
+    option.type = "button";
+    option.setAttribute("role", "option");
+    const selectedIndex = targetPalette === slashCommandPalette ? activeSlashCommandIndex : skillMentionPaletteState.index;
+    option.setAttribute("aria-selected", String(index === selectedIndex));
+    option.innerHTML = `
+        <span class="slash-command-icon slash-skill-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.05" stroke-linecap="round" stroke-linejoin="round">${typeof getCapabilitySkillIconSvg === "function" ? getCapabilitySkillIconSvg() : ""}</svg>
+        </span>
+        <span class="slash-command-copy slash-skill-copy">
+            <span class="slash-command-name">${escapeHtml(typeof formatSkillDisplayName === "function" ? formatSkillDisplayName(skill.name) : skill.name)}</span>
+            <span class="slash-command-desc">${escapeHtml(skill.description || "")}</span>
+        </span>
+        <span class="slash-command-scope">Personal</span>
+    `;
+    option.addEventListener("mousedown", event => event.preventDefault());
+    option.addEventListener("click", () => {
+        if (typeof applySkill === "function") {
+            applySkill(skill, getTrigger?.());
+        } else {
+            insertSkillMentionSuggestion(targetInput, getTrigger?.(), skill);
+            if (targetPalette) hideSkillMentionPalette(targetPalette, targetInput);
+        }
+    });
+    return option;
+}
+
+function createCommandPaletteOption(command, index) {
+    const displayCommand = String(command.command || command.name || "").replace(/^\//, "");
+    const unavailableReason = getSlashCommandUnavailableReason(command);
+    const option = document.createElement("button");
+    option.id = `slash-command-${command.name}`;
+    option.className = "slash-command-option";
+    option.type = "button";
+    option.disabled = Boolean(unavailableReason);
+    option.classList.toggle("composer-control-unavailable", Boolean(unavailableReason));
+    if (unavailableReason) option.dataset.tooltip = unavailableReason;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(index === activeSlashCommandIndex));
+    option.innerHTML = `
+        <span class="slash-command-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${command.icon}</svg>
+        </span>
+        <span class="slash-command-copy">
+            <span class="slash-command-name">${escapeHtml(displayCommand)}</span>
+            <span class="slash-command-desc">${escapeHtml(command.description)}</span>
+        </span>
+    `;
+    option.addEventListener("mousedown", event => event.preventDefault());
+    option.addEventListener("click", () => applySlashCommandSuggestion({ type: "command", command }));
+    return option;
+}
+
 function renderSlashCommandPalette() {
     if (!slashCommandPalette || !input || isGenerating) {
         hideSlashCommandPalette();
         return;
     }
 
-    const query = getSlashCommandQuery();
-    if (query === null) {
+    const trigger = getComposerPaletteTrigger();
+    if (!trigger) {
         hideSlashCommandPalette();
         return;
     }
 
-    visibleSlashCommandMatches = getSlashCommandMatches(query);
+    activeComposerPaletteTrigger = trigger;
+    const commandMatches = trigger.type === "slash"
+        ? getSlashCommandMatches(trigger.query).map(command => ({ type: "command", command }))
+        : [];
+    const skillMatches = typeof getComposerSkillMatches === "function"
+        ? getComposerSkillMatches(trigger.query, trigger.type === "skill" ? 16 : 8).map(skill => ({ type: "skill", skill }))
+        : [];
+    visibleSlashCommandMatches = trigger.type === "skill"
+        ? skillMatches
+        : [...commandMatches, ...skillMatches];
     if (visibleSlashCommandMatches.length === 0) {
         hideSlashCommandPalette();
         return;
     }
 
     activeSlashCommandIndex = Math.min(activeSlashCommandIndex, visibleSlashCommandMatches.length - 1);
-    slashCommandPalette.replaceChildren(...visibleSlashCommandMatches.map((command, index) => {
-        const displayCommand = String(command.command || command.name || "").replace(/^\//, "");
-        const unavailableReason = getSlashCommandUnavailableReason(command);
-        const option = document.createElement("button");
-        option.id = `slash-command-${command.name}`;
-        option.className = "slash-command-option";
-        option.type = "button";
-        option.disabled = Boolean(unavailableReason);
-        option.classList.toggle("composer-control-unavailable", Boolean(unavailableReason));
-        if (unavailableReason) option.dataset.tooltip = unavailableReason;
-        option.setAttribute("role", "option");
-        option.setAttribute("aria-selected", String(index === activeSlashCommandIndex));
-        option.innerHTML = `
-            <span class="slash-command-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">${command.icon}</svg>
-            </span>
-            <span class="slash-command-copy">
-                <span class="slash-command-name">${escapeHtml(displayCommand)}</span>
-                <span class="slash-command-desc">${escapeHtml(command.description)}</span>
-            </span>
-        `;
-        option.addEventListener("mousedown", event => event.preventDefault());
-        option.addEventListener("click", () => applySlashCommandSuggestion(command));
-        return option;
-    }));
+    const children = [];
+    let optionIndex = 0;
+    const commands = visibleSlashCommandMatches.filter(entry => entry.type === "command");
+    const skills = visibleSlashCommandMatches.filter(entry => entry.type === "skill");
+    if (commands.length) {
+        if (skills.length) children.push(createSlashPaletteHeader("Commands"));
+        commands.forEach(entry => {
+            children.push(createCommandPaletteOption(entry.command, optionIndex));
+            optionIndex += 1;
+        });
+    }
+    if (skills.length) {
+        children.push(createSlashPaletteHeader("Skills"));
+        skills.forEach(entry => {
+            children.push(createSkillPaletteOption(entry.skill, optionIndex));
+            optionIndex += 1;
+        });
+    }
+    slashCommandPalette.replaceChildren(...children);
     slashCommandPalette.hidden = false;
     updateSlashCommandSelection();
+}
+
+function hideSkillMentionPalette(targetPalette, targetInput = null) {
+    if (!targetPalette) return;
+    targetPalette.hidden = true;
+    targetPalette.replaceChildren();
+    if (!targetInput || skillMentionPaletteState.input === targetInput) {
+        skillMentionPaletteState = {
+            input: null,
+            palette: null,
+            trigger: null,
+            matches: [],
+            index: 0
+        };
+    }
+    targetInput?.removeAttribute("aria-activedescendant");
+}
+
+function updateSkillMentionPaletteSelection() {
+    const { input: targetInput, palette, index } = skillMentionPaletteState;
+    if (!targetInput || !palette || palette.hidden) return;
+    const options = Array.from(palette.querySelectorAll(".slash-command-option"));
+    options.forEach((option, optionIndex) => {
+        const active = optionIndex === index;
+        option.classList.toggle("active", active);
+        option.setAttribute("aria-selected", String(active));
+        if (active) {
+            targetInput.setAttribute("aria-activedescendant", option.id);
+            option.scrollIntoView({ block: "nearest" });
+        }
+    });
+}
+
+function renderSkillMentionPaletteForInput(targetInput, targetPalette) {
+    if (!targetInput || !targetPalette) return;
+    const trigger = getSkillMentionTriggerForInput(targetInput);
+    if (!trigger || typeof getComposerSkillMatches !== "function") {
+        hideSkillMentionPalette(targetPalette, targetInput);
+        return;
+    }
+    const skills = getComposerSkillMatches(trigger.query, 16);
+    if (skills.length === 0) {
+        hideSkillMentionPalette(targetPalette, targetInput);
+        return;
+    }
+    skillMentionPaletteState = {
+        input: targetInput,
+        palette: targetPalette,
+        trigger,
+        matches: skills,
+        index: Math.min(skillMentionPaletteState.index || 0, skills.length - 1)
+    };
+    const applySkill = skill => {
+        insertSkillMentionSuggestion(targetInput, skillMentionPaletteState.trigger, skill);
+        hideSkillMentionPalette(targetPalette, targetInput);
+    };
+    targetPalette.replaceChildren(
+        createSlashPaletteHeader("Skills"),
+        ...skills.map((skill, index) => createSkillPaletteOptionForInput(
+            skill,
+            index,
+            targetInput,
+            targetPalette,
+            () => skillMentionPaletteState.trigger,
+            applySkill
+        ))
+    );
+    targetPalette.hidden = false;
+    updateSkillMentionPaletteSelection();
+}
+
+function handleSkillMentionPaletteKeydown(event, targetInput, targetPalette) {
+    if (!targetInput || !targetPalette || targetPalette.hidden) return false;
+    if (skillMentionPaletteState.input !== targetInput || skillMentionPaletteState.palette !== targetPalette) return false;
+    if (skillMentionPaletteState.matches.length === 0) return false;
+
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        skillMentionPaletteState.index = (skillMentionPaletteState.index + direction + skillMentionPaletteState.matches.length) % skillMentionPaletteState.matches.length;
+        updateSkillMentionPaletteSelection();
+        return true;
+    }
+
+    if ((event.key === "Enter" && !event.ctrlKey && !event.metaKey) || event.key === "Tab") {
+        event.preventDefault();
+        const skill = skillMentionPaletteState.matches[skillMentionPaletteState.index];
+        insertSkillMentionSuggestion(targetInput, skillMentionPaletteState.trigger, skill);
+        hideSkillMentionPalette(targetPalette, targetInput);
+        return true;
+    }
+
+    if (event.key === "Escape") {
+        event.preventDefault();
+        hideSkillMentionPalette(targetPalette, targetInput);
+        return true;
+    }
+
+    return false;
 }
 
 function handleSlashCommandKeydown(event) {

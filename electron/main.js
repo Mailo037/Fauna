@@ -22,6 +22,7 @@ const WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT = "chat-output";
 const WORKSPACE_ACCESS_POLICY_FULL_MACHINE = "full-machine";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
+const SKILL_LIBRARY_STORAGE_KEY = "faunaSkills";
 const AI_PROVIDER_STORAGE_KEY = "faunaAiProvider";
 const LOCAL_CHAT_MODEL_STORAGE_KEY = "faunaLocalChatModel";
 const OPENAI_CHAT_MODEL_STORAGE_KEY = "faunaOpenAiChatModel";
@@ -541,12 +542,173 @@ function getSettingsPath() {
   return path.join(getUserDataRoot(), "settings.json");
 }
 
+function getSkillsRoot() {
+  return path.join(getUserDataRoot(), "skills");
+}
+
+function getSkillsIndexPath() {
+  return path.join(getSkillsRoot(), "index.json");
+}
+
 function readSettingsSync() {
   return readJsonFileSync(getSettingsPath(), {});
 }
 
 function writeSettingsSync(settings) {
   writeJsonFileSync(getSettingsPath(), settings && typeof settings === "object" ? settings : {});
+}
+
+function parseSkillMetadata(content = "") {
+  const match = String(content || "").replace(/^\uFEFF/, "").match(/^---\s*\n([\s\S]*?)\n---\s*/);
+  const metadata = {};
+  if (!match) return metadata;
+  for (const line of match[1].split(/\r?\n/)) {
+    const item = line.match(/^\s*([A-Za-z0-9_.-]+)\s*:\s*(.*?)\s*$/);
+    if (!item) continue;
+    metadata[item[1].toLowerCase()] = item[2].replace(/^["']|["']$/g, "").trim();
+  }
+  return metadata;
+}
+
+function inferSkillDescription(content = "") {
+  const metadata = parseSkillMetadata(content);
+  if (metadata.description) return metadata.description;
+  const bodyLine = String(content || "")
+    .replace(/^---\s*\n[\s\S]*?\n---\s*/, "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(line => line && !line.startsWith("#"));
+  return bodyLine || "Reusable assistant instructions.";
+}
+
+function normalizeSkillFolderName(value) {
+  return sanitizeId(String(value || "").toLowerCase(), "skill").slice(0, 80) || "skill";
+}
+
+function normalizeDesktopSkillRecord(skill) {
+  if (!skill || typeof skill !== "object") return null;
+  const content = String(skill.content || skill.markdown || "").slice(0, 80_000).trim();
+  if (!content) return null;
+  const metadata = parseSkillMetadata(content);
+  const name = normalizeSkillFolderName(skill.name || metadata.name || "skill");
+  const now = new Date().toISOString();
+  return {
+    id: String(skill.id || `skill-${name}`),
+    name,
+    description: String(skill.description || metadata.description || inferSkillDescription(content)).replace(/\s+/g, " ").trim().slice(0, 320),
+    content,
+    enabled: skill.enabled !== false,
+    source: String(skill.source || "manual"),
+    installedAt: String(skill.installedAt || now),
+    updatedAt: String(skill.updatedAt || now)
+  };
+}
+
+function readSkillsIndexSync() {
+  const index = readJsonFileSync(getSkillsIndexPath(), { skills: [] });
+  return Array.isArray(index?.skills) ? index.skills : [];
+}
+
+function readSkillsFromDiskSync() {
+  const root = getSkillsRoot();
+  const indexed = new Map(readSkillsIndexSync().map(item => [normalizeSkillFolderName(item?.name || item?.id), item]));
+  const skills = [];
+
+  try {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const folderName = normalizeSkillFolderName(entry.name);
+      const skillPath = path.join(root, entry.name, "SKILL.md");
+      if (!fs.existsSync(skillPath)) continue;
+      const content = fs.readFileSync(skillPath, "utf8");
+      const metadata = indexed.get(folderName) || {};
+      const normalized = normalizeDesktopSkillRecord({
+        ...metadata,
+        name: metadata.name || folderName,
+        content
+      });
+      if (normalized) skills.push(normalized);
+    }
+  } catch {
+    // Missing skill folders are handled below by the settings migration.
+  }
+
+  if (skills.length === 0) {
+    const settings = readSettingsSync();
+    const storedSkills = settings[SKILL_LIBRARY_STORAGE_KEY];
+    let legacySkills = [];
+    try {
+      legacySkills = storedSkills ? JSON.parse(storedSkills) : [];
+    } catch {
+      legacySkills = [];
+    }
+    if (legacySkills.length > 0 && writeSkillsToDiskSync(legacySkills)) {
+      delete settings[SKILL_LIBRARY_STORAGE_KEY];
+      writeSettingsSync(settings);
+      return readSkillsFromDiskSync();
+    }
+  }
+
+  return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function writeSkillsToDiskSync(rawValue) {
+  let parsed = [];
+  try {
+    parsed = typeof rawValue === "string" ? JSON.parse(rawValue) : rawValue;
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(parsed)) return false;
+
+  const root = getSkillsRoot();
+  ensureDirSync(root);
+  const skills = parsed.map(normalizeDesktopSkillRecord).filter(Boolean);
+  const keptFolders = new Set();
+
+  for (const skill of skills) {
+    const folderName = normalizeSkillFolderName(skill.name);
+    const folderPath = path.join(root, folderName);
+    if (!isPathInside(folderPath, root)) continue;
+    ensureDirSync(folderPath);
+    fs.writeFileSync(path.join(folderPath, "SKILL.md"), `${skill.content.trim()}\n`, "utf8");
+    keptFolders.add(folderName);
+  }
+
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const folderName = normalizeSkillFolderName(entry.name);
+    if (keptFolders.has(folderName)) continue;
+    const folderPath = path.join(root, entry.name);
+    if (!isPathInside(folderPath, root)) continue;
+    if (fs.existsSync(path.join(folderPath, "SKILL.md"))) {
+      fs.rmSync(folderPath, { recursive: true, force: true });
+    }
+  }
+
+  writeJsonFileSync(getSkillsIndexPath(), {
+    updatedAt: new Date().toISOString(),
+    skills: skills.map(({ content, ...metadata }) => metadata)
+  });
+  return true;
+}
+
+function removeSkillsFromDiskSync() {
+  const root = getSkillsRoot();
+  if (!isPathInside(root, getUserDataRoot())) return false;
+  fs.rmSync(root, { recursive: true, force: true });
+  return true;
+}
+
+async function openSkillsFolder() {
+  const root = getSkillsRoot();
+  ensureDirSync(root);
+  const error = await shell.openPath(root);
+  return {
+    ok: !error,
+    path: root,
+    error: error || ""
+  };
 }
 
 function getChatsRoot() {
@@ -693,6 +855,10 @@ function storageGetSync(key) {
     const sessions = readChatSessionsSync();
     return sessions.length > 0 ? JSON.stringify(sessions) : null;
   }
+  if (key === SKILL_LIBRARY_STORAGE_KEY) {
+    const skills = readSkillsFromDiskSync();
+    return skills.length > 0 || fs.existsSync(getSkillsIndexPath()) ? JSON.stringify(skills) : null;
+  }
   const settings = readSettingsSync();
   return Object.prototype.hasOwnProperty.call(settings, key) ? String(settings[key]) : null;
 }
@@ -700,6 +866,9 @@ function storageGetSync(key) {
 function storageSetSync(key, value) {
   if (key === CHAT_SESSIONS_STORAGE_KEY) {
     return writeChatSessionsSync(value);
+  }
+  if (key === SKILL_LIBRARY_STORAGE_KEY) {
+    return writeSkillsToDiskSync(value);
   }
   const settings = readSettingsSync();
   settings[key] = String(value ?? "");
@@ -711,6 +880,9 @@ function storageRemoveSync(key) {
   if (key === CHAT_SESSIONS_STORAGE_KEY) {
     writeChatSessionsSync("[]");
     return true;
+  }
+  if (key === SKILL_LIBRARY_STORAGE_KEY) {
+    return removeSkillsFromDiskSync();
   }
   const settings = readSettingsSync();
   delete settings[key];
@@ -1180,6 +1352,7 @@ function getDesktopInfo() {
     chatsPath: getChatsRoot(),
     mediaPath: path.join(getChatsRoot(), "<chatId>", "media"),
     outputPath: path.join(getChatsRoot(), "<chatId>", "output"),
+    skillsPath: getSkillsRoot(),
     fileRefsPath: getFileRefsPath(),
     bridgeEndpoint: storageGetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY),
     bridgeRoot: getBridgeRootForPolicy(workspaceAccessPolicy),
@@ -2282,6 +2455,29 @@ function registerIpc() {
   ipcMain.handle("fauna:notifications-show", (_event, payload) => showNativeNotification(payload));
   ipcMain.handle("fauna:save-generated-media", (_event, payload) => saveGeneratedMedia(payload));
   ipcMain.handle("fauna:desktop-info", () => getDesktopInfo());
+  ipcMain.handle("fauna:skills-list", () => ({
+    ok: true,
+    path: getSkillsRoot(),
+    skills: readSkillsFromDiskSync()
+  }));
+  ipcMain.handle("fauna:skills-save", (_event, skill) => {
+    const existing = readSkillsFromDiskSync();
+    const normalized = normalizeDesktopSkillRecord(skill);
+    if (!normalized) throw new Error("Skill content is required.");
+    const next = existing.filter(item => item.id !== normalized.id && item.name.toLowerCase() !== normalized.name.toLowerCase());
+    next.push(normalized);
+    return {
+      ok: writeSkillsToDiskSync(next),
+      path: path.join(getSkillsRoot(), normalizeSkillFolderName(normalized.name), "SKILL.md"),
+      skill: normalized
+    };
+  });
+  ipcMain.handle("fauna:skills-delete", (_event, nameOrId) => {
+    const target = String(nameOrId || "").trim().toLowerCase();
+    const next = readSkillsFromDiskSync().filter(skill => skill.id.toLowerCase() !== target && skill.name.toLowerCase() !== target);
+    return { ok: writeSkillsToDiskSync(next), skills: next };
+  });
+  ipcMain.handle("fauna:skills-open-folder", () => openSkillsFolder());
   ipcMain.handle("fauna:projects-choose-folders", () => chooseWorkspaceProjectFolders());
   ipcMain.handle("fauna:projects-save", (_event, projects) => saveWorkspaceProjects(projects));
   ipcMain.handle("fauna:projects-open-path", (_event, projectPath) => openWorkspaceProjectPath(projectPath));
@@ -2295,6 +2491,10 @@ function registerIpc() {
   ipcMain.handle("fauna:ollama-pull", (event, payload) => pullOllamaModelWithProgress(event, payload));
   ipcMain.handle("fauna:ollama-pull-cancel", (_event, payload) => cancelOllamaPull(payload));
   ipcMain.handle("fauna:start-ollama", () => startOllamaHttpService());
+  ipcMain.handle("fauna:workspace-bridge-ensure", async () => {
+    await startWorkspaceBridge();
+    return getDesktopInfo();
+  });
   ipcMain.handle("fauna:set-workspace-access-policy", async (_event, policy) => {
     storageSetSync(WORKSPACE_ACCESS_POLICY_STORAGE_KEY, normalizeWorkspaceAccessPolicy(policy));
     await startWorkspaceBridge();

@@ -8,7 +8,7 @@
     <meta name="theme-color" content="#5b7cfa" />
     <link rel="icon" type="image/png" href="favicon.png?v=20260705-brand-icon">
     <link rel="apple-touch-icon" href="favicon.png?v=20260705-brand-icon">
-    <link rel="stylesheet" href="styles.css?v=20260705-no-caps">
+    <link rel="stylesheet" href="styles.css?v=20260706-capabilities-release">
 </head>
 <body>
     <div data-include="components/window-bar.html"></div>
@@ -101,6 +101,250 @@
                 </div>
             </div>
         </section>
+        <section id="capabilitiesView" class="library-view capabilities-view" aria-labelledby="capabilitiesTitle" hidden>
+            <h1 id="capabilitiesTitle" class="visually-hidden">Capabilities</h1>
+            <div class="capabilities-shell">
+                <header class="capabilities-header">
+                    <div class="capabilities-heading">
+                        <span class="capabilities-eyebrow">Agent extensions</span>
+                        <h2>Connectors and skills</h2>
+                        <p>Install reusable instructions, connect model context servers, and expose api connectors the assistant can call during chat.</p>
+                    </div>
+                    <div class="library-stats capabilities-stats" aria-label="Installed capabilities">
+                        <div class="library-stat capability-stat">
+                            <strong id="capabilitiesSkillCount">0</strong>
+                            <span>Skills</span>
+                        </div>
+                        <div class="library-stat capability-stat">
+                            <strong id="capabilitiesMcpCount">0</strong>
+                            <span>Servers</span>
+                        </div>
+                        <div class="library-stat capability-stat">
+                            <strong id="capabilitiesApiCount">0</strong>
+                            <span>Connectors</span>
+                        </div>
+                    </div>
+                </header>
+                <div class="library-toolbar capabilities-toolbar" role="toolbar" aria-label="Capabilities controls">
+                    <div class="library-toolbar-left">
+                        <div class="library-filter-group capabilities-tabs" role="tablist" aria-label="Capability areas">
+                            <button id="capabilityTabSkills" class="library-filter capability-tab active" type="button" role="tab" aria-selected="true" aria-controls="capabilityPaneSkills" data-capability-tab="skills">Skills</button>
+                            <button id="capabilityTabMcp" class="library-filter capability-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilityPaneMcp" data-capability-tab="mcp">Servers</button>
+                            <button id="capabilityTabApis" class="library-filter capability-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilityPaneApis" data-capability-tab="apis">Api connectors</button>
+                            <button id="capabilityTabImport" class="library-filter capability-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilityPaneImport" data-capability-tab="import">Import</button>
+                        </div>
+                    </div>
+                </div>
+
+                <section id="capabilityPaneSkills" class="capability-pane active" role="tabpanel" aria-labelledby="capabilityTabSkills" data-capability-pane="skills">
+                    <div class="capability-layout">
+                        <div class="capability-primary-stack">
+                            <article class="provider-model-section settings-panel-section settings-panel-section-first capability-panel">
+                                <div class="settings-section-heading capability-panel-header">
+                                    <div>
+                                        <p class="provider-section-label">Install a skill</p>
+                                        <p class="settings-section-desc">Paste a Codex or Claude-style skill file. Fauna keeps the full instructions hidden until the assistant needs them.</p>
+                                    </div>
+                                </div>
+                                <div class="capability-form-grid">
+                                    <label class="settings-field-label capability-field">
+                                        <span>Name</span>
+                                        <input id="skillInstallName" class="settings-input" type="text" autocomplete="off" placeholder="repo-review">
+                                    </label>
+                                    <label class="settings-field-label capability-field capability-field-wide">
+                                        <span>Skill file</span>
+                                        <textarea id="skillInstallContent" class="settings-textarea capability-textarea-large" rows="10" spellcheck="false" placeholder="---&#10;name: repo-review&#10;description: Review code for regressions and missing tests.&#10;---&#10;Use this skill when..."></textarea>
+                                    </label>
+                                </div>
+                                <div class="provider-actions capability-actions">
+                                    <button id="installSkillBtn" class="provider-btn provider-btn-primary capability-btn capability-btn-primary" type="button">Install skill</button>
+                                    <button id="clearSkillDraftBtn" class="provider-btn provider-btn-ghost capability-btn" type="button">Clear</button>
+                                </div>
+                            </article>
+                            <div class="settings-section-heading capability-section-heading">
+                                <p class="provider-section-label">Installed skills</p>
+                                <div class="provider-actions capability-heading-actions">
+                                    <button id="openSkillsFolderBtn" class="provider-btn provider-btn-secondary settings-inline-btn capability-mini-btn" type="button" hidden>Open folder</button>
+                                </div>
+                            </div>
+                            <div id="installedSkillList" class="capability-list" aria-live="polite"></div>
+                        </div>
+                        <aside class="provider-model-section settings-panel-section settings-panel-section-first capability-panel capability-panel-secondary">
+                            <div class="settings-section-heading capability-panel-header">
+                                <div>
+                                    <p class="provider-section-label">Starter skills</p>
+                                    <p class="settings-section-desc">Install a useful base skill, then edit it like any other skill.</p>
+                                </div>
+                            </div>
+                            <div id="skillPresetList" class="capability-card-list"></div>
+                        </aside>
+                    </div>
+                </section>
+
+                <section id="capabilityPaneMcp" class="capability-pane" role="tabpanel" aria-labelledby="capabilityTabMcp" data-capability-pane="mcp" hidden>
+                    <div class="capability-layout">
+                        <article class="provider-model-section settings-panel-section settings-panel-section-first capability-panel">
+                            <div class="settings-section-heading capability-panel-header">
+                                <div>
+                                    <p class="provider-section-label">Add server</p>
+                                    <p class="settings-section-desc">Connect stdio servers through the local workspace bridge, or web servers from browser and desktop.</p>
+                                </div>
+                            </div>
+                            <div class="capability-form-grid">
+                                <label class="settings-field-label capability-field">
+                                    <span>Name</span>
+                                    <input id="mcpNameInput" class="settings-input" type="text" autocomplete="off" placeholder="filesystem">
+                                </label>
+                                <div class="settings-field-label capability-field">
+                                    <span>Transport</span>
+                                    <div id="mcpTransportButtons" class="settings-mini-segment capability-segment" role="group" aria-label="Server transport">
+                                        <button class="settings-mini-choice active" type="button" data-mcp-transport="stdio" aria-pressed="true">stdio</button>
+                                        <button class="settings-mini-choice" type="button" data-mcp-transport="streamable_http" aria-pressed="false">http</button>
+                                        <button class="settings-mini-choice" type="button" data-mcp-transport="legacy_sse" aria-pressed="false">sse</button>
+                                    </div>
+                                </div>
+                                <label class="settings-field-label capability-field capability-stdio-field">
+                                    <span>Command</span>
+                                    <input id="mcpCommandInput" class="settings-input" type="text" autocomplete="off" placeholder="npx">
+                                </label>
+                                <label class="settings-field-label capability-field capability-stdio-field">
+                                    <span>Arguments</span>
+                                    <input id="mcpArgsInput" class="settings-input" type="text" autocomplete="off" placeholder="-y @modelcontextprotocol/server-filesystem .">
+                                </label>
+                                <label class="settings-field-label capability-field capability-http-field">
+                                    <span>Url</span>
+                                    <input id="mcpUrlInput" class="settings-input" type="url" autocomplete="off" placeholder="https://example.com/mcp">
+                                </label>
+                                <label class="settings-field-label capability-field">
+                                    <span>Working directory</span>
+                                    <input id="mcpCwdInput" class="settings-input" type="text" autocomplete="off" placeholder=".">
+                                </label>
+                                <label class="settings-field-label capability-field capability-field-wide">
+                                    <span>Environment json</span>
+                                    <textarea id="mcpEnvInput" class="settings-textarea" rows="4" spellcheck="false" placeholder="{&quot;token&quot;:&quot;...&quot;}"></textarea>
+                                </label>
+                                <label class="settings-field-label capability-field capability-field-wide">
+                                    <span>Headers json</span>
+                                    <textarea id="mcpHeadersInput" class="settings-textarea" rows="4" spellcheck="false" placeholder="{&quot;authorization&quot;:&quot;bearer ...&quot;}"></textarea>
+                                </label>
+                            </div>
+                            <div class="provider-actions capability-actions">
+                                <button id="mcpAddBtn" class="provider-btn provider-btn-primary capability-btn capability-btn-primary" type="button">Save server</button>
+                                <button id="mcpDiscoverAllBtn" class="provider-btn provider-btn-secondary capability-btn" type="button">Discover tools</button>
+                            </div>
+                        </article>
+                        <aside class="provider-model-section settings-panel-section settings-panel-section-first capability-panel capability-panel-secondary">
+                            <div class="settings-section-heading capability-panel-header">
+                                <div>
+                                    <p class="provider-section-label">Connection formats</p>
+                                    <p class="settings-section-desc">Use Import for Claude json, Codex toml, or <code>codex mcp add</code> snippets.</p>
+                                </div>
+                            </div>
+                            <ul class="capability-note-list">
+                                <li>stdio runs through the token-protected bridge.</li>
+                                <li>Streamable http uses json-rpc over http.</li>
+                                <li>Legacy sse falls back to endpoint discovery.</li>
+                            </ul>
+                        </aside>
+                    </div>
+                    <div class="settings-section-heading capability-section-heading">
+                        <p class="provider-section-label">Configured servers</p>
+                        <span id="mcpEnabledSummary" class="settings-status-badge">0 enabled</span>
+                    </div>
+                    <div id="mcpServerList" class="capability-list" aria-live="polite"></div>
+                </section>
+
+                <section id="capabilityPaneApis" class="capability-pane" role="tabpanel" aria-labelledby="capabilityTabApis" data-capability-pane="apis" hidden>
+                    <div class="capability-layout">
+                        <article class="provider-model-section settings-panel-section settings-panel-section-first capability-panel">
+                            <div class="settings-section-heading capability-panel-header">
+                                <div>
+                                    <p class="provider-section-label">Add api connector</p>
+                                    <p class="settings-section-desc">Create a focused http connector with a default path, method, and headers.</p>
+                                </div>
+                            </div>
+                            <div class="capability-form-grid">
+                                <label class="settings-field-label capability-field">
+                                    <span>Name</span>
+                                    <input id="apiNameInput" class="settings-input" type="text" autocomplete="off" placeholder="github-search">
+                                </label>
+                                <label class="settings-field-label capability-field">
+                                    <span>Base url</span>
+                                    <input id="apiBaseUrlInput" class="settings-input" type="url" autocomplete="off" placeholder="https://api.example.com">
+                                </label>
+                                <label class="settings-field-label capability-field capability-field-wide">
+                                    <span>Description</span>
+                                    <textarea id="apiDescriptionInput" class="settings-textarea" rows="3" placeholder="Search issues and repository metadata."></textarea>
+                                </label>
+                                <div class="settings-field-label capability-field">
+                                    <span>Default method</span>
+                                    <div id="apiMethodButtons" class="settings-mini-segment capability-segment capability-method-segment" role="group" aria-label="Api method">
+                                        <button class="settings-mini-choice active" type="button" data-api-method="GET" aria-pressed="true">get</button>
+                                        <button class="settings-mini-choice" type="button" data-api-method="POST" aria-pressed="false">post</button>
+                                        <button class="settings-mini-choice" type="button" data-api-method="PUT" aria-pressed="false">put</button>
+                                        <button class="settings-mini-choice" type="button" data-api-method="PATCH" aria-pressed="false">patch</button>
+                                        <button class="settings-mini-choice" type="button" data-api-method="DELETE" aria-pressed="false">delete</button>
+                                    </div>
+                                </div>
+                                <label class="settings-field-label capability-field">
+                                    <span>Default path</span>
+                                    <input id="apiPathInput" class="settings-input" type="text" autocomplete="off" placeholder="/v1/search">
+                                </label>
+                                <label class="settings-field-label capability-field capability-field-wide">
+                                    <span>Headers json</span>
+                                    <textarea id="apiHeadersInput" class="settings-textarea" rows="4" spellcheck="false" placeholder="{&quot;authorization&quot;:&quot;bearer ...&quot;}"></textarea>
+                                </label>
+                                <label class="capability-check">
+                                    <input id="apiLocalNetworkToggle" type="checkbox">
+                                    <span>Allow localhost or private-network targets through the bridge</span>
+                                </label>
+                            </div>
+                            <div class="provider-actions capability-actions">
+                                <button id="apiAddBtn" class="provider-btn provider-btn-primary capability-btn capability-btn-primary" type="button">Save api</button>
+                                <button id="clearApiDraftBtn" class="provider-btn provider-btn-ghost capability-btn" type="button">Clear</button>
+                            </div>
+                        </article>
+                        <aside class="provider-model-section settings-panel-section settings-panel-section-first capability-panel capability-panel-secondary">
+                            <div class="settings-section-heading capability-panel-header">
+                                <div>
+                                    <p class="provider-section-label">Runtime use</p>
+                                    <p class="settings-section-desc">The assistant sees only the connector name, description, and allowed call shape. Requests run through Fauna tools.</p>
+                                </div>
+                            </div>
+                            <ul class="capability-note-list">
+                                <li>Secrets stay in local storage and bridge requests.</li>
+                                <li>Browser fallback works only when cors permits it.</li>
+                                <li>Response bodies are capped before returning to the model.</li>
+                            </ul>
+                        </aside>
+                    </div>
+                    <div class="settings-section-heading capability-section-heading">
+                        <p class="provider-section-label">Configured api connectors</p>
+                        <span id="apisEnabledSummary" class="settings-status-badge">0 enabled</span>
+                    </div>
+                    <div id="apiConnectorList" class="capability-list" aria-live="polite"></div>
+                </section>
+
+                <section id="capabilityPaneImport" class="capability-pane" role="tabpanel" aria-labelledby="capabilityTabImport" data-capability-pane="import" hidden>
+                    <article class="provider-model-section settings-panel-section settings-panel-section-first capability-panel">
+                        <div class="settings-section-heading capability-panel-header">
+                            <div>
+                                <p class="provider-section-label">Import configuration</p>
+                                <p class="settings-section-desc">Paste Claude Desktop server json, Codex server toml, api connector json, a <code>codex mcp add</code> command, or a raw skill file.</p>
+                            </div>
+                        </div>
+                        <label class="settings-field-label capability-field capability-field-wide">
+                            <span>Configuration</span>
+                            <textarea id="capabilityImportText" class="settings-textarea capability-textarea-large" rows="16" spellcheck="false" placeholder="{&quot;mcp_servers&quot;:{&quot;filesystem&quot;:{&quot;command&quot;:&quot;npx&quot;,&quot;args&quot;:[&quot;-y&quot;,&quot;@modelcontextprotocol/server-filesystem&quot;,&quot;.&quot;]}},&quot;api_connectors&quot;:{&quot;search&quot;:{&quot;base_url&quot;:&quot;https://api.example.com&quot;,&quot;path&quot;:&quot;/search&quot;}}}"></textarea>
+                        </label>
+                        <div class="provider-actions capability-actions">
+                            <button id="capabilityImportBtn" class="provider-btn provider-btn-primary capability-btn capability-btn-primary" type="button">Import</button>
+                            <button id="capabilityImportClearBtn" class="provider-btn provider-btn-ghost capability-btn" type="button">Clear</button>
+                        </div>
+                    </article>
+                </section>
+            </div>
+        </section>
         <div id="chat" class="chat-stream"></div>
         <div data-include="components/composer.html"></div>
     </main>
@@ -109,6 +353,6 @@
     <div data-include="components/overlays.html"></div>
     <div data-include="components/templates.html"></div>
 
-    <script type="module" src="app-shell.js?v=20260705-no-caps"></script>
+    <script type="module" src="app-shell.js?v=20260706-capabilities-release"></script>
 </body>
 </html>

@@ -805,6 +805,23 @@ function getSlashCommandSubmission(text) {
     };
 }
 
+function normalizeInlineSlashCommandSubmission(text) {
+    const value = String(text || "").trim();
+    if (!value || value.startsWith("/")) return value;
+    const match = value.match(/(^|\s)\/([a-z][\w-]*)$/i);
+    if (!match) return value;
+    const commandName = String(match[2] || "").toLowerCase();
+    const command = typeof SLASH_COMMANDS !== "undefined" && Array.isArray(SLASH_COMMANDS)
+        ? SLASH_COMMANDS.find(item => item.name === commandName
+            || String(item.command || "").slice(1).toLowerCase() === commandName
+            || (item.aliases || []).some(alias => String(alias).toLowerCase() === commandName))
+        : null;
+    if (!command?.acceptsPrompt) return value;
+    const prompt = value.slice(0, match.index + match[1].length).trim();
+    if (!prompt) return value;
+    return `${command.command} ${prompt}`;
+}
+
 function isComposerToolSlashCommand(commandName = "") {
     return ["search", "web", "tree", "files", "read", "run", "cmd", "shell", "terminal", "ps", "weather", "wetter", "temp", "temperature", "location", "ip-location", "wait", "timer", "sleep", "wait_for", "stopwatch", "time", "measure"].includes(
         String(commandName || "").trim().toLowerCase()
@@ -1002,7 +1019,7 @@ async function processWorkspaceEntry(options = {}) {
     try {
     const skipWorkspaceContext = options?.skipWorkspaceContext === true;
     const hasRetryPayload = typeof options?.textValue === "string" || Array.isArray(options?.files);
-    const textValue = (hasRetryPayload ? options.textValue || "" : input.value).trim();
+    const textValue = normalizeInlineSlashCommandSubmission(hasRetryPayload ? options.textValue || "" : input.value);
     const sourceFiles = Array.isArray(options?.files) ? options.files : attachedFiles;
     if (!textValue && sourceFiles.length === 0) return;
 
@@ -1096,6 +1113,8 @@ async function processWorkspaceEntry(options = {}) {
                 createdAt: userMessageCreatedAt,
                 voiceRecording
             });
+
+        await createPromptWorkspaceCheckpoint(textValue, generationSignal);
 
         if (videoPrompt !== null) {
             await processVideoGeneration(videoPrompt, currentFiles, generationSignal, {

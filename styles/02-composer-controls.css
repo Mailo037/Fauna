@@ -638,18 +638,23 @@ textarea#prompt::placeholder,
 }
 
 .send-btn-loader {
-    width: 12px;
-    height: 12px;
-    border: 2px solid color-mix(in srgb, currentColor 45%, transparent);
-    border-top-color: transparent;
-    border-right-color: transparent;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
-    animation: fauna-send-spinner 0.85s linear infinite;
+    background: currentColor;
+    animation: fauna-send-spinner 0.96s ease-in-out infinite;
 }
 
 @keyframes fauna-send-spinner {
-    to {
-        transform: rotate(360deg);
+    0%,
+    100% {
+        opacity: 0.45;
+        transform: scale(0.72);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1);
     }
 }
 

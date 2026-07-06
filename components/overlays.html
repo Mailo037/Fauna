@@ -72,6 +72,18 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
             </button>
 
+            <div class="settings-search" role="search">
+                <label class="visually-hidden" for="settingsSearchInput">Search settings</label>
+                <div class="settings-search-wrap">
+                    <svg class="settings-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+                    <input id="settingsSearchInput" class="settings-search-input" type="text" autocomplete="off" spellcheck="false" placeholder="Search settings" aria-describedby="settingsSearchStatus">
+                    <button id="settingsSearchClearBtn" class="settings-search-clear" type="button" aria-label="Clear settings search" hidden>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                    </button>
+                </div>
+                <div id="settingsSearchStatus" class="settings-search-status" aria-live="polite" hidden></div>
+            </div>
+
             <nav class="settings-nav">
                 <button class="settings-nav-item active" type="button" data-settings-pane="general" aria-selected="true">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.36a1.7 1.7 0 0 0-1 .58V20a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1-.58 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.64 15a1.7 1.7 0 0 0-.58-1H4a2 2 0 1 1 0-4h.08a1.7 1.7 0 0 0 .58-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.64a1.7 1.7 0 0 0 1-.58V4a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1 .58 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.36 9c.22.36.42.7.58 1H20a2 2 0 1 1 0 4h-.08a1.7 1.7 0 0 0-.52 1Z"></path></svg>
@@ -124,6 +136,11 @@
             <header class="settings-content-header">
                 <h2 id="settingsTitle">General</h2>
             </header>
+
+            <div id="settingsSearchEmpty" class="settings-search-empty" hidden>
+                <strong>No matching settings</strong>
+                <span>Try another word or a shorter search.</span>
+            </div>
 
             <div class="settings-pane active" data-settings-pane-panel="general">
                 <div class="provider-model-section settings-panel-section settings-panel-section-first">
@@ -909,6 +926,13 @@
                         <span class="provider-actions-spacer"></span>
                         <button id="workspaceBridgeClearBtn" class="provider-btn provider-btn-ghost" type="button">Clear</button>
                     </div>
+                    <div id="workspaceBridgeDesktopCard" class="workspace-desktop-bridge-card" hidden>
+                        <div class="setting-info">
+                            <span class="setting-title">Desktop bridge</span>
+                            <span id="workspaceBridgeDesktopStatus" class="setting-desc">Fauna Desktop can start the workspace bridge automatically.</span>
+                        </div>
+                        <button id="workspaceBridgeDesktopStartBtn" class="provider-btn provider-btn-secondary" type="button">Restart bridge</button>
+                    </div>
                     <code class="settings-command-hint">py -3 local-bridge.py --root . --port 8765</code>
                     <div id="workspaceAccessPolicySection" class="workspace-policy-section" hidden>
                         <div class="settings-section-heading">
@@ -925,6 +949,30 @@
                                 <span>Full machine</span>
                                 <small>Allow absolute paths and unblocked terminal commands.</small>
                             </button>
+                        </div>
+                    </div>
+                    <div class="workspace-checkpoints-section">
+                        <div class="settings-section-heading">
+                            <p class="provider-section-label">Checkpoints</p>
+                            <span id="workspaceCheckpointStatus" class="settings-status-badge">Off</span>
+                        </div>
+                        <p class="settings-section-desc">Create a code checkpoint after each prompt so the workspace can be restored before the prompt's local changes.</p>
+                        <div class="settings-control-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Prompt checkpoints</span>
+                                <span class="setting-desc">Uses the token-protected bridge and the current agent access scope.</span>
+                            </div>
+                            <label class="switch">
+                                <input type="checkbox" id="workspaceCheckpointToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="provider-actions workspace-checkpoint-actions">
+                            <button id="workspaceCheckpointRefreshBtn" class="provider-btn provider-btn-secondary" type="button">Refresh</button>
+                            <button id="workspaceCheckpointCreateBtn" class="provider-btn provider-btn-secondary" type="button">Create now</button>
+                        </div>
+                        <div id="workspaceCheckpointList" class="workspace-checkpoint-list" aria-live="polite">
+                            <p class="workspace-checkpoint-empty">No checkpoints yet.</p>
                         </div>
                     </div>
                 </div>
@@ -988,6 +1036,10 @@
                         <div class="app-info-path-row">
                             <span>Agent output</span>
                             <code id="appInfoOutputPath">chats/&lt;chatId&gt;/output</code>
+                        </div>
+                        <div class="app-info-path-row">
+                            <span>Skills</span>
+                            <code id="appInfoSkillsPath">skills</code>
                         </div>
                     </div>
                 </div>

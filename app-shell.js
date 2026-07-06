@@ -12,12 +12,11 @@ function createBootLoader() {
     loader.className = "app-boot-loader";
     loader.setAttribute("role", "status");
     loader.setAttribute("aria-live", "polite");
+    loader.setAttribute("aria-label", "Starting Fauna");
     loader.innerHTML = `
         <div class="app-boot-loader-mark" aria-hidden="true">
             ${APP_ICON_MARKUP}
         </div>
-        <div class="app-boot-loader-text">Starting Fauna</div>
-        <div class="app-boot-loader-bar" aria-hidden="true"><span></span></div>
     `;
     document.body.appendChild(loader);
 }
@@ -176,7 +175,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260705-no-caps");
+        await import("./script.js?v=20260706-capabilities-release");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));

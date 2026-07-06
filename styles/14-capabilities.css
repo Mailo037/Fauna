@@ -1,0 +1,336 @@
+.capabilities-view {
+    overflow: hidden auto;
+}
+
+.capabilities-shell {
+    display: grid;
+    gap: 14px;
+    width: min(1120px, 100%);
+    margin: 0 auto;
+    padding: 24px 0 40px;
+}
+
+.capabilities-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: end;
+}
+
+.capabilities-heading {
+    min-width: 0;
+}
+
+.capabilities-eyebrow {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--accent);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0;
+}
+
+.capabilities-heading h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: clamp(1.45rem, 2vw, 1.9rem);
+    line-height: 1.12;
+    letter-spacing: 0;
+}
+
+.capabilities-heading p {
+    max-width: 760px;
+    margin: 7px 0 0;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.capabilities-stats {
+    min-width: min(270px, 32vw);
+}
+
+.capabilities-toolbar {
+    padding-bottom: 0;
+}
+
+.capabilities-tabs {
+    width: max-content;
+}
+
+.capabilities-status {
+    justify-self: start;
+}
+
+.capability-pane {
+    display: none;
+}
+
+.capability-pane.active {
+    display: grid;
+    gap: 16px;
+}
+
+.capability-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.44fr);
+    gap: 14px;
+    align-items: start;
+}
+
+.capability-primary-stack {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+
+.capability-panel {
+    min-width: 0;
+    padding: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.capability-panel-secondary {
+    gap: 8px;
+}
+
+.capability-panel-header {
+    margin: 0;
+}
+
+.capability-panel .provider-section-label,
+.capability-section-heading .provider-section-label {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 760;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.capability-panel .settings-section-desc {
+    color: color-mix(in srgb, var(--text-muted) 86%, var(--text));
+}
+
+.capability-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.capability-field {
+    min-width: 0;
+}
+
+.capability-field-wide,
+.capability-check {
+    grid-column: 1 / -1;
+}
+
+.capability-textarea-large {
+    min-height: 150px;
+}
+
+.capability-actions {
+    margin-top: 2px;
+    padding-top: 10px;
+}
+
+.capability-card-list,
+.capability-list {
+    display: grid;
+    gap: 8px;
+}
+
+.capability-section-heading {
+    margin-top: 2px;
+}
+
+.capability-section-heading .provider-section-label {
+    margin: 0;
+}
+
+.capability-heading-actions {
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.capability-item {
+    align-items: center;
+    min-width: 0;
+}
+
+.capability-item-main {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.capability-item-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+}
+
+.capability-item-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.capability-item-description,
+.capability-item-meta,
+.capability-empty {
+    min-width: 0;
+    color: color-mix(in srgb, var(--text-muted) 88%, var(--text));
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.capability-item-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.capability-item-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 4px;
+}
+
+.capability-item-actions {
+    justify-content: flex-end;
+}
+
+.capability-mini-btn {
+    min-height: 30px;
+}
+
+.capability-note-list {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.capability-preset {
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.capability-preset .provider-actions {
+    justify-content: flex-start;
+    padding-top: 6px;
+}
+
+.capability-check {
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.capability-check input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+.capability-method-segment {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.fauna-skill-mention {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 4px;
+    vertical-align: -0.16em;
+    color: color-mix(in srgb, var(--accent) 72%, #7dd3fc);
+    font-weight: 760;
+    white-space: nowrap;
+}
+
+.fauna-skill-mention-icon {
+    display: inline-flex;
+    width: 15px;
+    height: 15px;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    color: currentColor;
+}
+
+.fauna-skill-mention-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.fauna-skill-mention-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.capability-http-field[hidden],
+.capability-stdio-field[hidden] {
+    display: none;
+}
+
+@media (max-width: 1020px) {
+    .capabilities-header,
+    .capability-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .capabilities-stats {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 768px) {
+    .capabilities-shell {
+        width: 100%;
+        padding: 16px 0 32px;
+    }
+
+    .capabilities-toolbar .library-toolbar-left,
+    .capabilities-tabs {
+        width: 100%;
+    }
+
+    .capabilities-tabs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .capability-tab {
+        justify-content: center;
+    }
+
+    .capability-form-grid,
+    .capability-primary-stack,
+    .capability-item {
+        grid-template-columns: 1fr;
+    }
+
+    .capability-item-actions {
+        justify-content: flex-start;
+    }
+
+    .capability-method-segment {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}

@@ -433,6 +433,7 @@ function openSettingsModal() {
     settingsModal.hidden = false;
     settingsModal.setAttribute("aria-hidden", "false");
     document.body.classList.add("settings-modal-open");
+    applySettingsSearchFilter();
     scheduleAnimatedSegmentIndicators();
     window.setTimeout(() => settingsCloseBtn?.focus(), 0);
 }
@@ -463,6 +464,297 @@ function getSettingsNavButton(paneName) {
 
 function getSettingsPane(paneName) {
     return Array.from(settingsPanes).find(pane => pane.dataset.settingsPanePanel === paneName) || null;
+}
+
+const SETTINGS_SEARCH_CANDIDATE_SELECTOR = [
+    ".setting-title",
+    ".setting-desc",
+    ".provider-section-label",
+    ".settings-section-desc",
+    ".settings-status-badge",
+    ".settings-field-label > span",
+    ".settings-select-like",
+    ".provider-btn",
+    ".settings-inline-btn",
+    ".settings-theme-toggle",
+    ".accent-choice",
+    ".local-model-choice",
+    ".voice-choice",
+    ".workspace-policy-option",
+    ".app-info-row",
+    ".app-info-section-toggle",
+    ".app-legal-card",
+    ".persona-field-hint",
+    ".usage-view-tab",
+    ".usage-stat-item",
+    ".usage-insight-card",
+    ".shortcut-settings-row",
+    "code",
+    "input[aria-label]",
+    "input[placeholder]",
+    "textarea[aria-label]",
+    "textarea[placeholder]"
+].join(",");
+
+const SETTINGS_SEARCH_HIGHLIGHT_TARGET_SELECTOR = [
+    ".settings-control-card",
+    ".settings-row",
+    ".persona-toggle-row",
+    ".local-model-choice",
+    ".voice-choice",
+    ".accent-choice",
+    ".workspace-policy-option",
+    ".app-info-row",
+    ".app-info-section-toggle",
+    ".app-legal-card",
+    ".usage-stat-item",
+    ".usage-insight-card",
+    ".shortcut-settings-row",
+    ".local-task-missing-card",
+    ".provider-btn",
+    ".settings-inline-btn"
+].join(",");
+
+function normalizeSettingsSearchText(value = "") {
+    return String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+
+function getSettingsSearchTokens(value = "") {
+    const normalized = normalizeSettingsSearchText(value);
+    return normalized ? normalized.split(/\s+/).filter(Boolean) : [];
+}
+
+function getLevenshteinDistance(a = "", b = "") {
+    if (a === b) return 0;
+    if (!a) return b.length;
+    if (!b) return a.length;
+
+    const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+    const current = new Array(b.length + 1);
+
+    for (let i = 1; i <= a.length; i += 1) {
+        current[0] = i;
+        for (let j = 1; j <= b.length; j += 1) {
+            const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1;
+            current[j] = Math.min(
+                current[j - 1] + 1,
+                previous[j] + 1,
+                previous[j - 1] + substitutionCost
+            );
+        }
+        for (let j = 0; j <= b.length; j += 1) {
+            previous[j] = current[j];
+        }
+    }
+
+    return previous[b.length];
+}
+
+function getSettingsSearchTokenScore(token, word) {
+    if (!token || !word) return 0;
+    if (word === token) return 1;
+    if (word.includes(token)) return 0.96;
+    if (token.length >= 4 && word.length >= 3 && token.includes(word) && word.length / token.length >= 0.72) return 0.82;
+    if (token.length < 3 || word.length < 3) return 0;
+
+    const fullDistance = getLevenshteinDistance(token, word);
+    const fullScore = 1 - (fullDistance / Math.max(token.length, word.length));
+    const prefix = word.length > token.length ? word.slice(0, token.length) : "";
+    const prefixScore = prefix
+        ? 1 - (getLevenshteinDistance(token, prefix) / Math.max(token.length, prefix.length))
+        : 0;
+
+    return Math.max(fullScore, prefixScore);
+}
+
+function scoreSettingsSearchText(text = "", query = "") {
+    const normalizedQuery = normalizeSettingsSearchText(query);
+    if (!normalizedQuery) return 0;
+
+    const normalizedText = normalizeSettingsSearchText(text);
+    if (!normalizedText) return 0;
+    if (normalizedText.includes(normalizedQuery)) return 1;
+
+    const words = Array.from(new Set(getSettingsSearchTokens(normalizedText)));
+    const queryTokens = getSettingsSearchTokens(normalizedQuery);
+    if (words.length === 0 || queryTokens.length === 0) return 0;
+
+    const tokenScores = queryTokens.map(token => {
+        let bestScore = 0;
+        words.forEach(word => {
+            bestScore = Math.max(bestScore, getSettingsSearchTokenScore(token, word));
+        });
+        return bestScore;
+    });
+    const averageScore = tokenScores.reduce((sum, score) => sum + score, 0) / tokenScores.length;
+    const lowestScore = Math.min(...tokenScores);
+    const requiredLowestScore = queryTokens.length > 1 ? 0.56 : 0.64;
+
+    return lowestScore >= requiredLowestScore && averageScore >= 0.68 ? averageScore : 0;
+}
+
+function getSettingsSearchCandidateText(element) {
+    if (!(element instanceof HTMLElement)) return "";
+
+    const parts = [element.textContent || ""];
+    const ariaLabel = element.getAttribute("aria-label");
+    const placeholder = element.getAttribute("placeholder");
+    if (ariaLabel) parts.push(ariaLabel);
+    if (placeholder) parts.push(placeholder);
+
+    return parts.join(" ");
+}
+
+function collectSettingsPaneSearchText(pane, button) {
+    const parts = [button?.textContent || "", pane?.textContent || ""];
+    pane?.querySelectorAll("input[aria-label], input[placeholder], textarea[aria-label], textarea[placeholder], [aria-label]").forEach(element => {
+        parts.push(getSettingsSearchCandidateText(element));
+    });
+    return parts.join(" ");
+}
+
+function getSettingsSearchHighlightTarget(element) {
+    if (!(element instanceof HTMLElement)) return null;
+    if (element.matches(".provider-section-label, .settings-section-desc, .setting-desc, .settings-field-label > span, .settings-status-badge, code, input, textarea")) {
+        return element;
+    }
+    return element.closest(SETTINGS_SEARCH_HIGHLIGHT_TARGET_SELECTOR) || element;
+}
+
+function clearSettingsSearchHighlights() {
+    settingsModal?.querySelectorAll(".settings-search-highlight, .settings-search-text-hit").forEach(element => {
+        element.classList.remove("settings-search-highlight", "settings-search-text-hit");
+    });
+    settingsPanes.forEach(pane => pane.classList.remove("settings-pane-search-match"));
+    settingsNavButtons.forEach(button => button.classList.remove("settings-search-tab-match"));
+}
+
+function applySettingsSearchPaneHighlights(pane, query) {
+    if (!pane) return 0;
+    const highlightedTargets = new Set();
+
+    pane.querySelectorAll(SETTINGS_SEARCH_CANDIDATE_SELECTOR).forEach(element => {
+        if (!(element instanceof HTMLElement)) return;
+        if (element.closest(".settings-search-empty")) return;
+        const score = scoreSettingsSearchText(getSettingsSearchCandidateText(element), query);
+        if (score <= 0) return;
+        element.classList.add("settings-search-text-hit");
+        const target = getSettingsSearchHighlightTarget(element);
+        if (target) highlightedTargets.add(target);
+    });
+
+    highlightedTargets.forEach(element => element.classList.add("settings-search-highlight"));
+    return highlightedTargets.size;
+}
+
+function scrollSettingsSearchToActiveMatch() {
+    if (!settingsModal || !normalizeSettingsSearchText(settingsSearchInput?.value || "")) return;
+    const activePane = Array.from(settingsPanes).find(pane => pane.classList.contains("active"));
+    const firstMatch = activePane?.querySelector(".settings-search-highlight, .settings-search-text-hit");
+    if (!(firstMatch instanceof HTMLElement)) return;
+
+    window.requestAnimationFrame(() => {
+        firstMatch.scrollIntoView({
+            block: "center",
+            inline: "nearest",
+            behavior: "smooth"
+        });
+    });
+}
+
+function setSettingsSearchStatus(query, matchCount) {
+    if (!settingsSearchStatus) return;
+    if (!normalizeSettingsSearchText(query)) {
+        settingsSearchStatus.hidden = true;
+        settingsSearchStatus.textContent = "";
+        return;
+    }
+
+    settingsSearchStatus.hidden = false;
+    settingsSearchStatus.textContent = matchCount === 1
+        ? "1 matching tab"
+        : `${matchCount} matching tabs`;
+}
+
+function applySettingsSearchFilter() {
+    const query = settingsSearchInput?.value || "";
+    const isSearching = Boolean(normalizeSettingsSearchText(query));
+
+    clearSettingsSearchHighlights();
+    settingsModal?.classList.toggle("settings-search-active", isSearching);
+    if (settingsSearchClearBtn) settingsSearchClearBtn.hidden = !isSearching;
+
+    if (!isSearching) {
+        settingsNavButtons.forEach(button => {
+            button.hidden = false;
+        });
+        if (settingsSearchEmpty) settingsSearchEmpty.hidden = true;
+        setSettingsSearchStatus("", 0);
+        if (!Array.from(settingsPanes).some(pane => pane.classList.contains("active"))) {
+            setSettingsPane("general");
+        }
+        return;
+    }
+
+    const matches = Array.from(settingsNavButtons)
+        .map(button => {
+            const paneName = button.dataset.settingsPane;
+            const pane = getSettingsPane(paneName);
+            const score = Math.max(
+                scoreSettingsSearchText(button.textContent || "", query),
+                scoreSettingsSearchText(collectSettingsPaneSearchText(pane, button), query)
+            );
+            const highlightedCount = applySettingsSearchPaneHighlights(pane, query);
+            return {
+                button,
+                pane,
+                paneName,
+                score,
+                highlightedCount
+            };
+        })
+        .filter(result => result.score > 0 || result.highlightedCount > 0);
+
+    const matchNames = new Set(matches.map(result => result.paneName));
+    settingsNavButtons.forEach(button => {
+        const isMatch = matchNames.has(button.dataset.settingsPane);
+        button.hidden = !isMatch;
+        button.classList.toggle("settings-search-tab-match", isMatch);
+    });
+    matches.forEach(result => {
+        result.pane?.classList.add("settings-pane-search-match");
+    });
+
+    setSettingsSearchStatus(query, matches.length);
+
+    if (matches.length === 0) {
+        settingsNavButtons.forEach(button => {
+            button.classList.remove("active");
+            button.setAttribute("aria-selected", "false");
+        });
+        settingsPanes.forEach(pane => {
+            pane.hidden = true;
+            pane.classList.remove("active");
+        });
+        if (settingsTitle) settingsTitle.textContent = "No results";
+        if (settingsSearchEmpty) settingsSearchEmpty.hidden = false;
+        return;
+    }
+
+    if (settingsSearchEmpty) settingsSearchEmpty.hidden = true;
+    const activeButton = Array.from(settingsNavButtons).find(button => button.classList.contains("active"));
+    if (!activeButton || !matchNames.has(activeButton.dataset.settingsPane)) {
+        const bestMatch = matches
+            .slice()
+            .sort((a, b) => b.score - a.score || b.highlightedCount - a.highlightedCount)[0];
+        setSettingsPane(bestMatch?.paneName || matches[0].paneName);
+    }
+    scrollSettingsSearchToActiveMatch();
 }
 
 function updateOpenAiVoiceSettingsAvailability() {
@@ -547,6 +839,10 @@ function setSettingsPane(paneName = "general") {
     }
     if (normalized === "potato") {
         updatePotatoSettingsUi();
+    }
+    if (normalized === "services") {
+        updateWorkspaceCheckpointSettingsUi();
+        void refreshWorkspaceCheckpointList({ silent: true });
     }
     scheduleAnimatedSegmentIndicators();
 }
@@ -754,6 +1050,7 @@ function setCompactModeEnabled(enabled, { persist = true, notify = false } = {})
 }
 
 isCompactModeEnabled = readStoredBoolean(UI_COMPACT_MODE_STORAGE_KEY, false);
+areWorkspaceCheckpointsEnabled = readStoredBoolean(WORKSPACE_CHECKPOINTS_ENABLED_STORAGE_KEY, false);
 applyCompactModeUi();
 
 let hasRunOllamaStartupCheck = false;
@@ -1454,6 +1751,7 @@ async function updateAppInfoPane() {
     setAppInfoText(appInfoChatsPath, info?.chatsPath, isDesktop ? "chats/<chatId>/chat.json" : "localStorage");
     setAppInfoText(appInfoMediaPath, info?.mediaPath, isDesktop ? "chats/<chatId>/media" : "Browser blob/data URLs");
     setAppInfoText(appInfoOutputPath, info?.outputPath, isDesktop ? "chats/<chatId>/output" : "Browser localStorage");
+    setAppInfoText(appInfoSkillsPath, info?.skillsPath, isDesktop ? "skills" : "Browser localStorage");
 
     if (appInfoUpdateStatus) {
         const status = String(updateStateInfo?.status || "").trim();
@@ -1463,7 +1761,7 @@ async function updateAppInfoPane() {
 
     const desktopKeys = Array.isArray(info?.settingsKeys) ? info.settingsKeys : null;
     const keys = desktopKeys
-        ? [...desktopKeys, "faunaChatSessions -> chats/<chatId>/chat.json"]
+        ? [...desktopKeys, "faunaChatSessions -> chats/<chatId>/chat.json", "faunaSkills -> skills/<name>/SKILL.md"]
         : getWebStoredFaunaKeys();
     renderAppInfoStoredKeys(keys);
 }
@@ -2173,6 +2471,9 @@ function executeKeyboardShortcutAction(actionId) {
         case "openLibrary":
             setWorkspaceView(WORKSPACE_VIEW_LIBRARY, { closeSidebar: false, updateUrl: true });
             return true;
+        case "openCapabilities":
+            setWorkspaceView(WORKSPACE_VIEW_CAPABILITIES, { closeSidebar: false, updateUrl: true });
+            return true;
         case "openChat":
             setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { focusComposer: false, closeSidebar: false, updateUrl: true });
             return true;
@@ -2245,6 +2546,25 @@ function handleShortcutRecorderKeydown(event) {
 
 settingsNavButtons.forEach(button => {
     button.addEventListener("click", () => setSettingsPane(button.dataset.settingsPane));
+});
+
+settingsSearchInput?.addEventListener("input", () => {
+    applySettingsSearchFilter();
+});
+
+settingsSearchInput?.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !settingsSearchInput.value) return;
+    event.preventDefault();
+    event.stopPropagation();
+    settingsSearchInput.value = "";
+    applySettingsSearchFilter();
+});
+
+settingsSearchClearBtn?.addEventListener("click", () => {
+    if (!settingsSearchInput) return;
+    settingsSearchInput.value = "";
+    applySettingsSearchFilter();
+    settingsSearchInput.focus({ preventScroll: true });
 });
 
 settingsModal?.addEventListener("click", event => {
@@ -2512,6 +2832,32 @@ if (toggleWorkspaceBridge) {
         if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
     };
 }
+
+workspaceCheckpointToggle?.addEventListener("change", event => {
+    areWorkspaceCheckpointsEnabled = Boolean(event.target.checked);
+    safeLocalStorageSet(WORKSPACE_CHECKPOINTS_ENABLED_STORAGE_KEY, areWorkspaceCheckpointsEnabled ? "true" : "false");
+    updateWorkspaceCheckpointSettingsUi();
+    if (areWorkspaceCheckpointsEnabled) {
+        showToast("Prompt checkpoints enabled.", "success");
+        void refreshWorkspaceCheckpointList({ silent: true });
+    } else {
+        showToast("Prompt checkpoints disabled.", "info");
+    }
+});
+
+workspaceCheckpointRefreshBtn?.addEventListener("click", () => {
+    void refreshWorkspaceCheckpointList({ allowDesktopStart: true });
+});
+
+workspaceCheckpointCreateBtn?.addEventListener("click", () => {
+    void createManualWorkspaceCheckpoint();
+});
+
+workspaceCheckpointList?.addEventListener("click", event => {
+    const restoreButton = event.target.closest("[data-workspace-checkpoint-restore]");
+    if (!restoreButton) return;
+    void confirmAndRestoreWorkspaceCheckpoint(restoreButton.dataset.workspaceCheckpointRestore);
+});
 
 if (toggleMemoryBeta) {
     toggleMemoryBeta.checked = isMemoryEnabled;
@@ -4003,20 +4349,252 @@ function updateWorkspaceBridgeSettingsUi() {
     const endpoint = getWorkspaceBridgeBaseUrl();
     const token = getWorkspaceBridgeToken();
     const policy = getEffectiveWorkspaceAccessPolicy();
+    const isDesktop = isFaunaDesktopApp();
     if (workspaceBridgeEndpointInput) workspaceBridgeEndpointInput.value = endpoint;
     if (workspaceBridgeTokenInput) workspaceBridgeTokenInput.value = token;
     if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
+    if (workspaceBridgeDesktopCard) workspaceBridgeDesktopCard.hidden = !isDesktop;
+    if (workspaceBridgeDesktopStatus) {
+        workspaceBridgeDesktopStatus.textContent = isDesktop
+            ? (token
+                ? `Auto-started on ${endpoint || "local endpoint"} with ${getWorkspaceAccessPolicyLabel(policy)} access.`
+                : "Fauna Desktop can start the workspace bridge and save the token automatically.")
+            : "Start local-bridge.py manually in the browser.";
+    }
     updateWorkspaceAccessPolicyUi(policy);
 
     if (!token) {
-        setWorkspaceBridgeStatus("Token needed", "missing");
+        setWorkspaceBridgeStatus(isDesktop ? "Start needed" : "Token needed", "missing");
     } else if (isWorkspaceBridgeEnabled) {
-        setWorkspaceBridgeStatus(isFaunaDesktopApp() ? `Auto-started · ${getWorkspaceAccessPolicyLabel(policy)}` : "Ready", "configured");
+        setWorkspaceBridgeStatus(isDesktop ? `Auto-started · ${getWorkspaceAccessPolicyLabel(policy)}` : "Ready", "configured");
     } else {
         setWorkspaceBridgeStatus("Saved off", "missing");
     }
     updateWorkspaceBridgeSaveButtonState();
     updateVoiceButtonAvailability();
+    updateWorkspaceCheckpointSettingsUi();
+}
+
+let cachedWorkspaceCheckpoints = [];
+let isWorkspaceCheckpointListLoading = false;
+let isDesktopWorkspaceBridgeStarting = false;
+
+function syncDesktopWorkspaceBridgeInfo(info = {}) {
+    if (info?.bridgeEndpoint) safeLocalStorageSet(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY, info.bridgeEndpoint);
+    if (info?.workspaceAccessPolicy) safeLocalStorageSet(WORKSPACE_ACCESS_POLICY_STORAGE_KEY, normalizeWorkspaceAccessPolicy(info.workspaceAccessPolicy));
+    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
+    isWorkspaceBridgeEnabled = true;
+    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = true;
+}
+
+async function ensureDesktopWorkspaceBridgeForCheckpoints({ silent = false, refresh = true, force = false } = {}) {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi) return hasWorkspaceBridgeAccess();
+    if (hasWorkspaceBridgeAccess() && !force && !isDesktopWorkspaceBridgeStarting) return true;
+    if (isDesktopWorkspaceBridgeStarting) return false;
+
+    isDesktopWorkspaceBridgeStarting = true;
+    setWorkspaceBridgeStatus("Starting bridge...", "missing");
+    setWorkspaceCheckpointStatus("Starting bridge", "missing");
+    updateWorkspaceCheckpointSettingsUi();
+    try {
+        const info = typeof desktopApi.ensureWorkspaceBridge === "function"
+            ? await desktopApi.ensureWorkspaceBridge()
+            : await desktopApi.setWorkspaceAccessPolicy?.(getEffectiveWorkspaceAccessPolicy());
+        syncDesktopWorkspaceBridgeInfo(info || {});
+        updateWorkspaceBridgeSettingsUi();
+        updateProviderSettingsUi();
+        if (refresh) void refreshWorkspaceCheckpointList({ silent: true, allowDesktopStart: false });
+        if (!silent) showToast("Desktop workspace bridge is ready.", "success");
+        return hasWorkspaceBridgeAccess();
+    } catch (err) {
+        updateWorkspaceBridgeSettingsUi();
+        if (!silent) showToast(`Could not start desktop bridge: ${err.message}`, "error");
+        return false;
+    } finally {
+        isDesktopWorkspaceBridgeStarting = false;
+        updateWorkspaceCheckpointSettingsUi();
+    }
+}
+
+function setWorkspaceCheckpointStatus(text, state = "missing") {
+    if (!workspaceCheckpointStatus) return;
+    workspaceCheckpointStatus.textContent = text;
+    workspaceCheckpointStatus.dataset.state = state;
+}
+
+function formatWorkspaceCheckpointBytes(value = 0) {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+    const digits = unitIndex === 0 || size >= 10 ? 0 : 1;
+    return `${size.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+function formatWorkspaceCheckpointDate(value = "") {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Unknown time";
+    return date.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+    });
+}
+
+function getWorkspaceCheckpointMeta(checkpoint = {}) {
+    const pieces = [
+        formatWorkspaceCheckpointDate(checkpoint.createdAt),
+        `${Number(checkpoint.fileCount || 0).toLocaleString()} files`,
+        formatWorkspaceCheckpointBytes(checkpoint.totalBytes)
+    ];
+    const skipped = Number(checkpoint.skippedFiles || 0);
+    if (skipped > 0) pieces.push(`${skipped.toLocaleString()} skipped`);
+    return pieces.join(" · ");
+}
+
+function updateWorkspaceCheckpointSettingsUi() {
+    if (workspaceCheckpointToggle) {
+        workspaceCheckpointToggle.checked = areWorkspaceCheckpointsEnabled;
+    }
+    const hasBridge = hasWorkspaceBridgeAccess();
+    if (isDesktopWorkspaceBridgeStarting) {
+        setWorkspaceCheckpointStatus("Starting bridge", "missing");
+    } else if (!hasBridge) {
+        setWorkspaceCheckpointStatus(isFaunaDesktopApp() ? "Start needed" : "Bridge needed", "missing");
+    } else if (isWorkspaceCheckpointListLoading) {
+        setWorkspaceCheckpointStatus("Loading", "missing");
+    } else if (areWorkspaceCheckpointsEnabled) {
+        setWorkspaceCheckpointStatus(`${cachedWorkspaceCheckpoints.length} saved`, "configured");
+    } else {
+        setWorkspaceCheckpointStatus("Off", "missing");
+    }
+    const canUseCheckpointActions = hasBridge || isFaunaDesktopApp();
+    if (workspaceCheckpointRefreshBtn) workspaceCheckpointRefreshBtn.disabled = !canUseCheckpointActions || isWorkspaceCheckpointListLoading || isDesktopWorkspaceBridgeStarting;
+    if (workspaceCheckpointCreateBtn) workspaceCheckpointCreateBtn.disabled = !canUseCheckpointActions || isWorkspaceCheckpointListLoading || isDesktopWorkspaceBridgeStarting;
+}
+
+function renderWorkspaceCheckpointList(checkpoints = []) {
+    if (!workspaceCheckpointList) return;
+    cachedWorkspaceCheckpoints = Array.isArray(checkpoints) ? checkpoints : [];
+    if (!hasWorkspaceBridgeAccess()) {
+        workspaceCheckpointList.innerHTML = `<p class="workspace-checkpoint-empty">Enable and test the Local Workspace Bridge to use checkpoints.</p>`;
+        updateWorkspaceCheckpointSettingsUi();
+        return;
+    }
+    if (!cachedWorkspaceCheckpoints.length) {
+        workspaceCheckpointList.innerHTML = `<p class="workspace-checkpoint-empty">No checkpoints yet.</p>`;
+        updateWorkspaceCheckpointSettingsUi();
+        return;
+    }
+    workspaceCheckpointList.innerHTML = cachedWorkspaceCheckpoints.map(checkpoint => `
+        <article class="workspace-checkpoint-row" data-workspace-checkpoint-id="${escapeHtml(checkpoint.id || "")}">
+            <div class="workspace-checkpoint-main">
+                <span class="workspace-checkpoint-title">${escapeHtml(checkpoint.label || "Prompt checkpoint")}</span>
+                <span class="workspace-checkpoint-meta">${escapeHtml(getWorkspaceCheckpointMeta(checkpoint))}</span>
+            </div>
+            <button class="provider-btn provider-btn-secondary" type="button" data-workspace-checkpoint-restore="${escapeHtml(checkpoint.id || "")}">
+                Restore
+            </button>
+        </article>
+    `).join("");
+    updateWorkspaceCheckpointSettingsUi();
+}
+
+function shouldRestartDesktopBridgeForCheckpointError(error) {
+    return isFaunaDesktopApp() && /Workspace bridge is unreachable|Unknown endpoint|checkpoints/i.test(error?.message || "");
+}
+
+async function refreshWorkspaceCheckpointList({ silent = false, retryStarted = false, allowDesktopStart = areWorkspaceCheckpointsEnabled } = {}) {
+    if (!workspaceCheckpointList) return;
+    if (!hasWorkspaceBridgeAccess()) {
+        if (allowDesktopStart && isFaunaDesktopApp() && await ensureDesktopWorkspaceBridgeForCheckpoints({ silent, refresh: false })) {
+            return refreshWorkspaceCheckpointList({ silent, allowDesktopStart: false });
+        }
+        renderWorkspaceCheckpointList([]);
+        return;
+    }
+    isWorkspaceCheckpointListLoading = true;
+    updateWorkspaceCheckpointSettingsUi();
+    try {
+        const result = await listWorkspaceCheckpoints();
+        renderWorkspaceCheckpointList(result.checkpoints || []);
+    } catch (err) {
+        cachedWorkspaceCheckpoints = [];
+        const needsRestart = shouldRestartDesktopBridgeForCheckpointError(err);
+        if (needsRestart && !retryStarted && await ensureDesktopWorkspaceBridgeForCheckpoints({ silent: true, refresh: false, force: true })) {
+            return refreshWorkspaceCheckpointList({ silent, retryStarted: true, allowDesktopStart: false });
+        }
+        workspaceCheckpointList.innerHTML = `<p class="workspace-checkpoint-empty">${escapeHtml(needsRestart ? "Restart the Local Workspace Bridge to use checkpoints." : `Could not load checkpoints: ${err.message}`)}</p>`;
+        if (!silent) {
+            showToast(needsRestart ? "Restart the Local Workspace Bridge to use checkpoints." : `Checkpoint list failed: ${err.message}`, "warning");
+        }
+    } finally {
+        isWorkspaceCheckpointListLoading = false;
+        updateWorkspaceCheckpointSettingsUi();
+    }
+}
+
+async function createManualWorkspaceCheckpoint({ retryStarted = false } = {}) {
+    if (!hasWorkspaceBridgeAccess()) {
+        if (isFaunaDesktopApp() && await ensureDesktopWorkspaceBridgeForCheckpoints({ refresh: false })) {
+            return createManualWorkspaceCheckpoint();
+        }
+        showToast("Enable Local Workspace Bridge before creating checkpoints.", "warning");
+        return;
+    }
+    if (workspaceCheckpointCreateBtn) workspaceCheckpointCreateBtn.disabled = true;
+    setWorkspaceCheckpointStatus("Creating", "missing");
+    try {
+        const checkpoint = await createWorkspaceCheckpoint({ label: "Manual checkpoint" });
+        showToast(`Checkpoint created: ${Number(checkpoint.fileCount || 0).toLocaleString()} files.`, "success");
+        await refreshWorkspaceCheckpointList({ silent: true });
+    } catch (err) {
+        const needsRestart = shouldRestartDesktopBridgeForCheckpointError(err);
+        if (needsRestart && !retryStarted && await ensureDesktopWorkspaceBridgeForCheckpoints({ silent: true, refresh: false, force: true })) {
+            return createManualWorkspaceCheckpoint({ retryStarted: true });
+        }
+        showToast(needsRestart ? "Restart the Local Workspace Bridge to use checkpoints." : `Checkpoint failed: ${err.message}`, "error");
+    } finally {
+        updateWorkspaceCheckpointSettingsUi();
+    }
+}
+
+async function confirmAndRestoreWorkspaceCheckpoint(checkpointId) {
+    const checkpoint = cachedWorkspaceCheckpoints.find(item => item.id === checkpointId);
+    if (!checkpoint) return;
+    const approved = await showApprovalDialog({
+        title: "Restore checkpoint?",
+        message: "This resets code files in the current bridge scope to the selected checkpoint.",
+        details: [
+            "Files changed after this checkpoint will be overwritten.",
+            "Files created after this checkpoint will be deleted from the same scope.",
+            `Checkpoint: ${checkpoint.label || "Prompt checkpoint"} (${getWorkspaceCheckpointMeta(checkpoint)})`
+        ],
+        confirmLabel: "Restore code"
+    });
+    if (!approved) {
+        showToast("Checkpoint restore cancelled.", "info");
+        return;
+    }
+
+    setWorkspaceCheckpointStatus("Restoring", "missing");
+    try {
+        const result = await restoreWorkspaceCheckpoint(checkpointId);
+        showToast(`Checkpoint restored: ${Number(result.restoredFiles || 0).toLocaleString()} files, ${Number(result.deletedFiles || 0).toLocaleString()} removed.`, "success");
+        await refreshWorkspaceCheckpointList({ silent: true });
+    } catch (err) {
+        const needsRestart = /Unknown endpoint|checkpoints/i.test(err.message || "");
+        showToast(needsRestart ? "Restart the Local Workspace Bridge to use checkpoints." : `Restore failed: ${err.message}`, "error");
+    } finally {
+        updateWorkspaceCheckpointSettingsUi();
+    }
 }
 
 async function applyWorkspaceAccessPolicy(policy) {
@@ -4031,13 +4609,10 @@ async function applyWorkspaceAccessPolicy(policy) {
     setWorkspaceBridgeStatus("Restarting bridge...", "missing");
     try {
         const info = await getFaunaDesktopApi()?.setWorkspaceAccessPolicy?.(normalized);
-        if (info?.bridgeEndpoint) {
-            safeLocalStorageSet(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY, info.bridgeEndpoint);
-        }
-        safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
-        isWorkspaceBridgeEnabled = true;
+        syncDesktopWorkspaceBridgeInfo(info || {});
         updateWorkspaceBridgeSettingsUi();
         updateProviderSettingsUi();
+        void refreshWorkspaceCheckpointList({ silent: true });
         showToast(`Desktop agent access set to ${getWorkspaceAccessPolicyLabel(normalized)}.`, normalized === WORKSPACE_ACCESS_POLICY_FULL_MACHINE ? "warning" : "success");
     } catch (err) {
         updateWorkspaceBridgeSettingsUi();
@@ -4061,6 +4636,7 @@ workspaceBridgeSaveBtn?.addEventListener("click", () => {
     isWorkspaceBridgeEnabled = true;
     updateWorkspaceBridgeSettingsUi();
     updateProviderSettingsUi();
+    void refreshWorkspaceCheckpointList({ silent: true });
     showToast("Workspace bridge saved and enabled.", "success");
 });
 
@@ -4071,7 +4647,12 @@ workspaceBridgeClearBtn?.addEventListener("click", () => {
     isWorkspaceBridgeEnabled = false;
     updateWorkspaceBridgeSettingsUi();
     updateProviderSettingsUi();
+    renderWorkspaceCheckpointList([]);
     showToast("Workspace bridge cleared.", "info");
+});
+
+workspaceBridgeDesktopStartBtn?.addEventListener("click", () => {
+    void ensureDesktopWorkspaceBridgeForCheckpoints({ refresh: true, force: true });
 });
 
 workspaceBridgeTestBtn?.addEventListener("click", async () => {
@@ -4097,6 +4678,7 @@ workspaceBridgeTestBtn?.addEventListener("click", async () => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
         setWorkspaceBridgeStatus("Reachable", "configured");
+        void refreshWorkspaceCheckpointList({ silent: true });
         showToast("Workspace bridge reachable.", "success");
     } catch (err) {
         setWorkspaceBridgeStatus("Offline", "missing");
@@ -4164,6 +4746,7 @@ renderLocalModelChoices();
 updateProviderSettingsUi();
 updateWanSettingsUi();
 updateWorkspaceBridgeSettingsUi();
+void refreshWorkspaceCheckpointList({ silent: true });
 updateMemorySettingsUi();
 updatePersonaSettingsUi();
 scheduleOllamaStartupCheck();

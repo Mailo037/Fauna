@@ -418,6 +418,12 @@ function refreshLibraryViewIfActive() {
     if (activeWorkspaceView === WORKSPACE_VIEW_LIBRARY) renderLibraryView();
 }
 
+function refreshCapabilitiesViewIfActive() {
+    if (activeWorkspaceView === WORKSPACE_VIEW_CAPABILITIES && typeof renderCapabilitiesView === "function") {
+        renderCapabilitiesView();
+    }
+}
+
 function safelyDecodeFragment(value = "") {
     try {
         return decodeURIComponent(value);
@@ -433,9 +439,9 @@ function getChatUrlFragment() {
 }
 
 function getWorkspaceUrlFragment() {
-    return activeWorkspaceView === WORKSPACE_VIEW_LIBRARY
-        ? WORKSPACE_URL_FRAGMENT_LIBRARY
-        : getChatUrlFragment();
+    if (activeWorkspaceView === WORKSPACE_VIEW_LIBRARY) return WORKSPACE_URL_FRAGMENT_LIBRARY;
+    if (activeWorkspaceView === WORKSPACE_VIEW_CAPABILITIES) return WORKSPACE_URL_FRAGMENT_CAPABILITIES;
+    return getChatUrlFragment();
 }
 
 function updateWorkspaceUrlFragment({ replace = false } = {}) {
@@ -462,6 +468,9 @@ function parseWorkspaceUrlFragment() {
     if (normalizedFragment === WORKSPACE_URL_FRAGMENT_LIBRARY) {
         return { view: WORKSPACE_VIEW_LIBRARY, sessionId: "" };
     }
+    if (normalizedFragment === WORKSPACE_URL_FRAGMENT_CAPABILITIES) {
+        return { view: WORKSPACE_VIEW_CAPABILITIES, sessionId: "" };
+    }
     if (normalizedFragment === WORKSPACE_URL_FRAGMENT_CHAT || normalizedFragment === WORKSPACE_VIEW_PLAYGROUND) {
         return { view: WORKSPACE_VIEW_PLAYGROUND, sessionId: "" };
     }
@@ -483,6 +492,8 @@ function applyWorkspaceUrlFragment({ normalize = false } = {}) {
 
     if (route?.view === WORKSPACE_VIEW_LIBRARY) {
         setWorkspaceView(WORKSPACE_VIEW_LIBRARY, { closeSidebar: false, updateUrl: false });
+    } else if (route?.view === WORKSPACE_VIEW_CAPABILITIES) {
+        setWorkspaceView(WORKSPACE_VIEW_CAPABILITIES, { closeSidebar: false, updateUrl: false });
     } else if (route?.view === WORKSPACE_VIEW_PLAYGROUND) {
         if (route.sessionId && chatSessions.some(session => session.id === route.sessionId && !session.archived)) {
             activateChatSession(route.sessionId, { captureCurrent: false, closeSidebar: false, updateUrl: false });
@@ -498,13 +509,19 @@ function applyWorkspaceUrlFragment({ normalize = false } = {}) {
 }
 
 function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, updateUrl = true, urlMode = "push" } = {}) {
-    const nextView = view === WORKSPACE_VIEW_LIBRARY ? WORKSPACE_VIEW_LIBRARY : WORKSPACE_VIEW_PLAYGROUND;
+    const nextView = view === WORKSPACE_VIEW_LIBRARY
+        ? WORKSPACE_VIEW_LIBRARY
+        : view === WORKSPACE_VIEW_CAPABILITIES
+            ? WORKSPACE_VIEW_CAPABILITIES
+            : WORKSPACE_VIEW_PLAYGROUND;
     const previousView = activeWorkspaceView;
-    if (nextView === WORKSPACE_VIEW_LIBRARY && activeChatHasContent()) {
+    if (nextView !== WORKSPACE_VIEW_PLAYGROUND && activeChatHasContent()) {
         saveCurrentSession({ render: false, updateUrl });
     }
     activeWorkspaceView = nextView;
     document.body?.classList.toggle("library-view-active", activeWorkspaceView === WORKSPACE_VIEW_LIBRARY);
+    document.body?.classList.toggle("capabilities-view-active", activeWorkspaceView === WORKSPACE_VIEW_CAPABILITIES);
+    updateProjectAgentDockState();
     setWorkspaceNavState(activeWorkspaceView);
 
     if (activeWorkspaceView === WORKSPACE_VIEW_LIBRARY) {
@@ -515,6 +532,10 @@ function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, up
             libraryView.hidden = false;
             libraryView.setAttribute("aria-hidden", "false");
         }
+        if (capabilitiesView) {
+            capabilitiesView.hidden = true;
+            capabilitiesView.setAttribute("aria-hidden", "true");
+        }
         if (welcome) welcome.style.display = "none";
         if (chat) chat.style.display = "none";
         if (inputWrapper) inputWrapper.hidden = true;
@@ -522,11 +543,34 @@ function setWorkspaceView(view, { focusComposer = false, closeSidebar = true, up
         if (chatTitleEditBtn) chatTitleEditBtn.hidden = true;
         updateActiveChatTitle();
         renderLibraryView();
+    } else if (activeWorkspaceView === WORKSPACE_VIEW_CAPABILITIES) {
+        closeCodeWorkbench();
+        closeChatSessionMenus();
+        setChatTitleEditing(false);
+        if (libraryView) {
+            libraryView.hidden = true;
+            libraryView.setAttribute("aria-hidden", "true");
+        }
+        if (capabilitiesView) {
+            capabilitiesView.hidden = false;
+            capabilitiesView.setAttribute("aria-hidden", "false");
+        }
+        if (welcome) welcome.style.display = "none";
+        if (chat) chat.style.display = "none";
+        if (inputWrapper) inputWrapper.hidden = true;
+        if (chatTitle) chatTitle.textContent = "Capabilities";
+        if (chatTitleEditBtn) chatTitleEditBtn.hidden = true;
+        updateActiveChatTitle();
+        refreshCapabilitiesViewIfActive();
     } else {
         let restoredActiveSessionFromViewSwitch = false;
         if (libraryView) {
             libraryView.hidden = true;
             libraryView.setAttribute("aria-hidden", "true");
+        }
+        if (capabilitiesView) {
+            capabilitiesView.hidden = true;
+            capabilitiesView.setAttribute("aria-hidden", "true");
         }
         if (inputWrapper) inputWrapper.hidden = false;
         if (previousView !== WORKSPACE_VIEW_PLAYGROUND && activeSessionId) {

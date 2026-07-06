@@ -1,4 +1,6 @@
 // Original script.js lines 7163-8910.
+const projectPageChatSlashCommandPalette = document.getElementById("projectPageChatSlashCommandPalette");
+
 function executeMemoryToolCall(toolCall) {
     if (!isMemoryEnabled) {
         throw new Error("Memory beta is not enabled.");
@@ -1711,13 +1713,17 @@ function setProjectAgentWidth(width, { persist = true } = {}) {
     }
 }
 
+function canShowProjectWorkspacePanel() {
+    return activeWorkspaceView === WORKSPACE_VIEW_PLAYGROUND;
+}
+
 function updateProjectAgentDockState(root = getSessionProjectRoot()) {
-    const hasProject = Boolean(root);
-    const isOpen = !isProjectAgentCollapsed;
+    const canShow = canShowProjectWorkspacePanel();
+    const isOpen = canShow && !isProjectAgentCollapsed;
     applyProjectAgentWidth();
     if (projectAgentPanel) projectAgentPanel.hidden = !isOpen;
     if (projectAgentExpandBtn) {
-        projectAgentExpandBtn.hidden = isOpen;
+        projectAgentExpandBtn.hidden = !canShow || isOpen;
         projectAgentExpandBtn.setAttribute("aria-expanded", String(isOpen));
     }
     projectAgentCollapseBtn?.setAttribute("aria-expanded", String(isOpen));
@@ -1733,7 +1739,7 @@ function updateProjectAgentDockState(root = getSessionProjectRoot()) {
         windowWorkspacePanelMaximizeBtn.dataset.tooltip = isProjectAgentMaximized ? "Restore workspace panel" : "Maximize workspace panel";
     }
     document.body?.classList.toggle("project-agent-open", isOpen);
-    document.body?.classList.toggle("project-agent-collapsed", !isOpen);
+    document.body?.classList.toggle("project-agent-collapsed", canShow && !isOpen);
     document.body?.classList.toggle("project-agent-maximized", isOpen && isProjectAgentMaximized);
 }
 
@@ -1757,6 +1763,9 @@ function setProjectAgentMaximized(maximized, { persist = true } = {}) {
 }
 
 function openProjectWorkspacePanel(tab = "menu", { refresh = false, forceNew = false } = {}) {
+    if (!canShowProjectWorkspacePanel()) {
+        setWorkspaceView(WORKSPACE_VIEW_PLAYGROUND, { closeSidebar: false, updateUrl: true, urlMode: "replace" });
+    }
     setProjectAgentTab(tab, { forceNew });
     const tabType = normalizeProjectAgentTab(activeProjectAgentTab);
     setProjectAgentCollapsed(false, { refresh: refresh || tabType === "files" });
@@ -3226,6 +3235,8 @@ function appendProjectPageChatMessage(role, content = "") {
     body.className = "project-page-chat-body";
     if (role === "assistant" && typeof renderMarkdown === "function") {
         body.innerHTML = renderMarkdown(content || "");
+    } else if (typeof renderPlainTextWithSkillMentionChips === "function") {
+        body.innerHTML = renderPlainTextWithSkillMentionChips(content || "");
     } else {
         body.textContent = content || "";
     }
@@ -3462,6 +3473,7 @@ async function sendProjectPageChatMessage() {
     });
 
     try {
+        await createPromptWorkspaceCheckpoint(prompt, controller.signal);
         const data = await sendOllamaChatWithLocalTools(
             projectPageChatHistory,
             {
@@ -4940,15 +4952,32 @@ projectPageChatSendBtn?.addEventListener("click", () => {
 projectPageChatInput?.addEventListener("input", () => {
     projectPageChatInput.style.height = "auto";
     projectPageChatInput.style.height = `${projectPageChatInput.scrollHeight}px`;
+    if (typeof renderSkillMentionPaletteForInput === "function") {
+        renderSkillMentionPaletteForInput(projectPageChatInput, projectPageChatSlashCommandPalette);
+    }
 });
 projectPageChatInput?.addEventListener("keydown", event => {
+    if (typeof handleSkillMentionPaletteKeydown === "function" && handleSkillMentionPaletteKeydown(event, projectPageChatInput, projectPageChatSlashCommandPalette)) return;
     if (!isKeyboardShortcutEvent(event, "sendPrompt")) return;
     event.preventDefault();
     void sendProjectPageChatMessage();
 });
+projectPageChatInput?.addEventListener("focus", () => {
+    if (typeof renderSkillMentionPaletteForInput === "function") {
+        renderSkillMentionPaletteForInput(projectPageChatInput, projectPageChatSlashCommandPalette);
+    }
+});
+projectPageChatInput?.addEventListener("click", () => {
+    if (typeof renderSkillMentionPaletteForInput === "function") {
+        renderSkillMentionPaletteForInput(projectPageChatInput, projectPageChatSlashCommandPalette);
+    }
+});
 document.addEventListener("click", event => {
     if (!event.target?.closest?.("#projectPageChatToolsBtn") && !event.target?.closest?.("#projectPageChatToolsDropdown")) projectPageChatToolsDropdown?.classList.remove("open");
     if (!event.target?.closest?.("#projectPageChatAttachmentMenu") && !event.target?.closest?.("#projectPageChatUploadButton")) closeProjectPageChatAttachmentMenu();
+    if (!event.target?.closest?.("#projectPageChatSlashCommandPalette") && !event.target?.closest?.("#projectPageChatInput") && typeof hideSkillMentionPalette === "function") {
+        hideSkillMentionPalette(projectPageChatSlashCommandPalette, projectPageChatInput);
+    }
     if (!event.target?.closest?.(".agent-task-mode-wrap")) closeAgentTaskModeMenu();
     if (!event.target?.closest?.(".composer-project-wrap")) closeComposerProjectMenu();
     if (!event.target?.closest?.(".composer-branch-menu") && !event.target?.closest?.("#composerBranchBtn")) closeComposerBranchMenu();
@@ -6345,6 +6374,18 @@ function updateActiveChatTitle() {
         if (chatTitle) chatTitle.textContent = "Library";
         if (chatTitleInput && !isChatTitleEditing) chatTitleInput.value = "Library";
         document.title = "Library - Fauna";
+        updateWindowBarLocation();
+        return;
+    }
+    if (activeWorkspaceView === WORKSPACE_VIEW_CAPABILITIES) {
+        if (chatTitle) chatTitle.textContent = "Capabilities";
+        if (chatTitleInput && !isChatTitleEditing) chatTitleInput.value = "Capabilities";
+        if (tokenCounter) {
+            tokenCounter.textContent = "MCPs, APIs, Skills";
+            tokenCounter.dataset.tooltip = "Agent extension catalog.";
+            tokenCounter.setAttribute("aria-label", "MCPs, APIs, Skills");
+        }
+        document.title = "Capabilities - Fauna";
         updateWindowBarLocation();
         return;
     }

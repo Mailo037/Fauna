@@ -110,7 +110,11 @@ function addRenderNode(text, type, fileArray = [], options = {}) {
         if (type === "output") {
             bubble.classList.add("plain-output");
         }
-        bubble.textContent = text;
+        if (typeof renderPlainTextWithSkillMentionChips === "function") {
+            bubble.innerHTML = renderPlainTextWithSkillMentionChips(text);
+        } else {
+            bubble.textContent = text;
+        }
     }
 
     let attachContainer = null;

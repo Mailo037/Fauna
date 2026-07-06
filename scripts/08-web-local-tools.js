@@ -1032,6 +1032,100 @@ async function makeWorkspaceDirectory(path, signal = null, bridgeOptions = {}) {
     });
 }
 
+function getWorkspaceCheckpointBridgeOptions(signal = null) {
+    return getWorkspaceToolBridgeOptions(signal);
+}
+
+async function listWorkspaceCheckpoints(signal = null, bridgeOptions = getWorkspaceCheckpointBridgeOptions(signal)) {
+    const params = new URLSearchParams();
+    if (bridgeOptions?.scope) params.set("scope", bridgeOptions.scope);
+    const query = params.toString();
+    return requestWorkspaceBridge(`/checkpoints${query ? `?${query}` : ""}`, { signal });
+}
+
+async function createWorkspaceCheckpoint({ label = "Prompt checkpoint", prompt = "" } = {}, signal = null, bridgeOptions = getWorkspaceCheckpointBridgeOptions(signal)) {
+    return requestWorkspaceBridge("/checkpoints", {
+        method: "POST",
+        body: {
+            action: "create",
+            label: String(label || "Prompt checkpoint").trim() || "Prompt checkpoint",
+            prompt: String(prompt || "").trim(),
+            ...(bridgeOptions || {})
+        },
+        signal
+    });
+}
+
+async function restoreWorkspaceCheckpoint(id, signal = null, bridgeOptions = getWorkspaceCheckpointBridgeOptions(signal)) {
+    return requestWorkspaceBridge("/checkpoints", {
+        method: "POST",
+        body: {
+            action: "restore",
+            id,
+            deleteExtra: true,
+            ...(bridgeOptions || {})
+        },
+        signal
+    });
+}
+
+async function deleteWorkspaceCheckpoint(id, signal = null, bridgeOptions = getWorkspaceCheckpointBridgeOptions(signal)) {
+    return requestWorkspaceBridge("/checkpoints", {
+        method: "POST",
+        body: {
+            action: "delete",
+            id,
+            ...(bridgeOptions || {})
+        },
+        signal
+    });
+}
+
+function getPromptCheckpointLabel(text = "") {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return "Prompt checkpoint";
+    return clean.length > 68 ? `${clean.slice(0, 65)}...` : clean;
+}
+
+async function createPromptWorkspaceCheckpoint(text = "", signal = null, { notify = false, retryStarted = false } = {}) {
+    if (!areWorkspaceCheckpointsEnabled) return null;
+    if (!hasWorkspaceBridgeAccess()) {
+        if (isFaunaDesktopApp() && typeof ensureDesktopWorkspaceBridgeForCheckpoints === "function") {
+            const ready = await ensureDesktopWorkspaceBridgeForCheckpoints({ silent: !notify, refresh: false });
+            if (ready) {
+                return createPromptWorkspaceCheckpoint(text, signal, { notify, retryStarted });
+            }
+        }
+        if (notify) showToast("Enable Local Workspace Bridge before creating checkpoints.", "warning");
+        return null;
+    }
+
+    try {
+        const checkpoint = await createWorkspaceCheckpoint({
+            label: getPromptCheckpointLabel(text),
+            prompt: text
+        }, signal);
+        if (notify) {
+            showToast(`Checkpoint created: ${Number(checkpoint.fileCount || 0).toLocaleString()} files.`, "success");
+        }
+        if (typeof refreshWorkspaceCheckpointList === "function") {
+            void refreshWorkspaceCheckpointList({ silent: true });
+        }
+        return checkpoint;
+    } catch (err) {
+        if (err.name === "AbortError") throw err;
+        const canRetryDesktop = !retryStarted
+            && isFaunaDesktopApp()
+            && typeof ensureDesktopWorkspaceBridgeForCheckpoints === "function"
+            && (isWorkspaceBridgeUnavailableError(err) || /Unknown endpoint|checkpoints/i.test(err.message || ""));
+        if (canRetryDesktop && await ensureDesktopWorkspaceBridgeForCheckpoints({ silent: !notify, refresh: false, force: true })) {
+            return createPromptWorkspaceCheckpoint(text, signal, { notify, retryStarted: true });
+        }
+        if (notify) showToast(`Checkpoint failed: ${err.message}`, "warning");
+        return null;
+    }
+}
+
 function normalizeWorkspaceToolLimit(value, fallback, min, max) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return fallback;
@@ -1242,6 +1336,8 @@ function normalizeFaunaToolName(toolName) {
     if (TIME_TOOL_NAMES.has(name)) return name;
     if (WORKSPACE_TOOL_NAME_ALIASES[name]) return WORKSPACE_TOOL_NAME_ALIASES[name];
     if (WORKSPACE_TOOL_NAMES.has(name)) return name;
+    if (CAPABILITY_TOOL_NAME_ALIASES[name]) return CAPABILITY_TOOL_NAME_ALIASES[name];
+    if (CAPABILITY_TOOL_NAMES.has(name)) return name;
     return MEMORY_TOOL_NAME_ALIASES[name] || "";
 }
 
@@ -1470,6 +1566,10 @@ function getFaunaNativeToolDefinitions({
         );
     }
 
+    if (typeof getCapabilitiesNativeToolDefinitions === "function") {
+        tools.push(...getCapabilitiesNativeToolDefinitions());
+    }
+
     return tools;
 }
 
@@ -1649,6 +1749,7 @@ function getAssistantToolPlaceholder(toolCall) {
     if (isLocationToolName(toolCall.tool)) return "Fauna requested location or weather.";
     if (isTimeToolName(toolCall.tool)) return "Fauna requested a timer or stopwatch.";
     if (isMemoryToolName(toolCall.tool)) return "Fauna requested memory access.";
+    if (isCapabilityToolName(toolCall.tool)) return "Fauna requested a capability.";
     return "Fauna requested a local workspace tool.";
 }
 
@@ -1800,6 +1901,55 @@ function getFaunaToolCallSignature(toolCall = {}) {
             target: String(toolCall.target || toolCall.id || toolCall.index || toolCall.text || "").trim()
         });
     }
+    if (tool === "use_skill") {
+        return JSON.stringify({
+            tool,
+            name: String(toolCall.name || toolCall.skill || toolCall.skillName || toolCall.id || "").trim()
+        });
+    }
+    if (tool === "install_skill") {
+        return JSON.stringify({
+            tool,
+            name: String(toolCall.name || toolCall.skillName || "").trim(),
+            description: String(toolCall.description || "").trim(),
+            content: String(toolCall.content || toolCall.markdown || toolCall.instructions || "").slice(0, CAPABILITY_MCP_ARGUMENT_MAX_CHARS)
+        });
+    }
+    if (tool === "save_server") {
+        return JSON.stringify({
+            tool,
+            name: String(toolCall.server || toolCall.serverName || toolCall.name || "").trim(),
+            transport: String(toolCall.transport || "").trim(),
+            command: String(toolCall.command || toolCall.cmd || "").trim(),
+            url: String(toolCall.url || toolCall.endpoint || "").trim()
+        });
+    }
+    if (tool === "save_api_connector") {
+        return JSON.stringify({
+            tool,
+            name: String(toolCall.api || toolCall.connector || toolCall.name || "").trim(),
+            baseUrl: String(toolCall.baseUrl || toolCall.base_url || toolCall.url || "").trim(),
+            method: String(toolCall.method || "").trim().toUpperCase(),
+            path: String(toolCall.path || "").trim()
+        });
+    }
+    if (tool === "mcp_call") {
+        return JSON.stringify({
+            tool,
+            server: String(toolCall.server || toolCall.serverName || toolCall.mcp || toolCall.name || "").trim(),
+            toolName: String(toolCall.toolName || toolCall.mcpTool || toolCall.function || toolCall.action || "").trim(),
+            arguments: JSON.stringify(toolCall.arguments || toolCall.input || {}).slice(0, CAPABILITY_MCP_ARGUMENT_MAX_CHARS)
+        });
+    }
+    if (tool === "api_call") {
+        return JSON.stringify({
+            tool,
+            api: String(toolCall.api || toolCall.connector || toolCall.name || "").trim(),
+            method: String(toolCall.method || "").trim().toUpperCase(),
+            path: String(toolCall.path || "").trim(),
+            query: JSON.stringify(toolCall.query || {})
+        });
+    }
     if (tool === "thinking") {
         return JSON.stringify({
             tool,
@@ -1857,6 +2007,12 @@ function getFaunaToolProgressLabel(toolCall) {
     if (toolCall?.tool === "read_memories") return "Reading saved memories...";
     if (toolCall?.tool === "save_memory") return "Saving memory...";
     if (toolCall?.tool === "delete_memory") return "Updating memories...";
+    if (toolCall?.tool === "use_skill") return "Loading skill...";
+    if (toolCall?.tool === "install_skill") return "Installing skill...";
+    if (toolCall?.tool === "save_server") return "Saving server...";
+    if (toolCall?.tool === "save_api_connector") return "Saving api connector...";
+    if (toolCall?.tool === "mcp_call") return "Calling server tool...";
+    if (toolCall?.tool === "api_call") return "Calling api connector...";
     if (toolCall?.tool === "run_command") return "Running local terminal command...";
     if (toolCall?.tool === "read_file") return "Reading local file...";
     if (toolCall?.tool === "read_files") return "Reading local files...";
@@ -1875,6 +2031,7 @@ function getFaunaToolActivityKind(toolCall) {
     if (isLocationToolName(toolCall?.tool)) return "location";
     if (isTimeToolName(toolCall?.tool)) return "timer";
     if (isMemoryToolName(toolCall?.tool)) return "memory";
+    if (isCapabilityToolName(toolCall?.tool)) return "capability";
     if (toolCall?.tool === "run_command") return "terminal";
     if (toolCall?.tool === "read_file" || toolCall?.tool === "read_files") return "file";
     if (toolCall?.tool === "write_file" || toolCall?.tool === "append_file" || toolCall?.tool === "make_directory") return "file";
@@ -1889,6 +2046,12 @@ function getFaunaToolActivityLabel(toolCall) {
     if (isLocationToolName(toolCall?.tool)) return "Location";
     if (isTimeToolName(toolCall?.tool)) return "Timer";
     if (isMemoryToolName(toolCall?.tool)) return "Memory";
+    if (toolCall?.tool === "use_skill") return "Skill";
+    if (toolCall?.tool === "install_skill") return "Skill";
+    if (toolCall?.tool === "save_server") return "Server";
+    if (toolCall?.tool === "save_api_connector") return "Api";
+    if (toolCall?.tool === "mcp_call") return "Server";
+    if (toolCall?.tool === "api_call") return "Api";
     return "Local workspace";
 }
 
@@ -1913,6 +2076,12 @@ function getFaunaToolActivityDetail(toolCall) {
     if (toolCall?.tool === "read_memories") return toolCall.query ? `Search: ${toolCall.query}` : "Saved memories";
     if (toolCall?.tool === "save_memory") return getToolDetailSnippet(toolCall.text || toolCall.memory || toolCall.content || toolCall.value || "New memory");
     if (toolCall?.tool === "delete_memory") return getToolDetailSnippet(toolCall.target || toolCall.id || toolCall.index || toolCall.text || "Memory");
+    if (toolCall?.tool === "use_skill") return getToolDetailSnippet(toolCall.name || toolCall.skill || toolCall.skillName || "Skill");
+    if (toolCall?.tool === "install_skill") return getToolDetailSnippet(toolCall.name || toolCall.skillName || "Skill");
+    if (toolCall?.tool === "save_server") return getToolDetailSnippet(toolCall.server || toolCall.serverName || toolCall.name || "Server");
+    if (toolCall?.tool === "save_api_connector") return getToolDetailSnippet(toolCall.api || toolCall.connector || toolCall.name || "Api");
+    if (toolCall?.tool === "mcp_call") return getToolDetailSnippet(`${toolCall.server || toolCall.serverName || "Server"}.${toolCall.toolName || toolCall.mcpTool || toolCall.function || "tool"}`);
+    if (toolCall?.tool === "api_call") return getToolDetailSnippet(`${toolCall.api || toolCall.connector || "Api"} ${toolCall.path || ""}`.trim());
     if (toolCall?.tool === "run_command") return toolCall.command || "Local command";
     if (toolCall?.tool === "workspace_tree") {
         const path = String(toolCall.path || ".").trim();
@@ -1951,6 +2120,12 @@ function getFaunaToolActivityInput(toolCall) {
     if (toolCall?.tool === "read_memories") return String(toolCall.query || toolCall.text || "").trim();
     if (toolCall?.tool === "save_memory") return normalizeMemoryText(toolCall.text || toolCall.memory || toolCall.content || toolCall.value);
     if (toolCall?.tool === "delete_memory") return String(toolCall.target || toolCall.id || toolCall.index || toolCall.text || "").trim();
+    if (toolCall?.tool === "use_skill") return String(toolCall.name || toolCall.skill || toolCall.skillName || "").trim();
+    if (toolCall?.tool === "install_skill") return String(toolCall.name || toolCall.skillName || "").trim();
+    if (toolCall?.tool === "save_server") return String(toolCall.server || toolCall.serverName || toolCall.name || "").trim();
+    if (toolCall?.tool === "save_api_connector") return `${toolCall.api || toolCall.connector || toolCall.name || ""} ${toolCall.baseUrl || toolCall.base_url || toolCall.url || ""}`.trim();
+    if (toolCall?.tool === "mcp_call") return `${toolCall.server || toolCall.serverName || ""}.${toolCall.toolName || toolCall.mcpTool || toolCall.function || ""}`.replace(/^\./, "").replace(/\.$/, "");
+    if (toolCall?.tool === "api_call") return `${toolCall.api || toolCall.connector || ""} ${toolCall.method || ""} ${toolCall.path || ""}`.trim();
     if (toolCall?.tool === "run_command") return String(toolCall.command || "").trim();
     if (toolCall?.tool === "read_file") return String(toolCall.path || "").trim();
     if (toolCall?.tool === "read_files") return (Array.isArray(toolCall.paths) ? toolCall.paths : String(toolCall.paths || "").split(",")).filter(Boolean).join(", ");
@@ -1977,6 +2152,10 @@ async function executeFaunaToolCall(toolCall, signal = null) {
 
     if (isMemoryToolName(toolCall?.tool)) {
         return executeMemoryToolCall(toolCall);
+    }
+
+    if (isCapabilityToolName(toolCall?.tool)) {
+        return executeCapabilityToolCall(toolCall, signal);
     }
 
     if (isWebToolName(toolCall?.tool)) {
@@ -2237,10 +2416,13 @@ function formatFaunaToolResultForModel(toolCall, resultText) {
     const isWebTool = isWebToolName(toolCall?.tool);
     const isLocationTool = isLocationToolName(toolCall?.tool);
     const isTimeTool = isTimeToolName(toolCall?.tool);
+    const isCapabilityTool = isCapabilityToolName(toolCall?.tool);
     const label = isThinkingTool
         ? "Thinking tool result"
         : isMemoryTool
             ? "Memory tool result"
+            : isCapabilityTool
+            ? "Capability tool result"
             : isWebTool
             ? "Web tool result"
             : isLocationTool
@@ -2252,6 +2434,8 @@ function formatFaunaToolResultForModel(toolCall, resultText) {
         ? "The consecutive tool-step counter has reset. Continue with the next useful tool call or answer the user without repeating unnecessary work."
         : isMemoryTool
             ? "Use this result to answer the user's original memory request. If memory changed, acknowledge it briefly."
+            : isCapabilityTool
+            ? "Use this capability result to answer the user's original request. If a skill was loaded, follow its returned instructions before answering."
             : isWebTool
             ? "Use this web result to answer the user's original request. Cite the URLs used, and say if search or inspection was insufficient."
             : isLocationTool
@@ -2299,6 +2483,7 @@ function buildAssistantSystemPrompt(allowLocalTools = false, requireChatTitle = 
         buildUserLocaleSystemPrompt(),
         buildPersonalizationSystemPrompt(),
         allowToolCalls ? buildMemorySystemPrompt() : "",
+        allowToolCalls ? buildCapabilitiesSystemPrompt() : "",
         allowToolCalls && allowLocalTools ? buildLocalToolSystemPrompt(workspaceAccessPolicy, sessionId) : ""
     ].filter(Boolean).join("\n\n");
 }

@@ -127,14 +127,17 @@ const windowWorkspacePanelToggleBtn = document.getElementById("windowSidebarTogg
 const windowWorkspacePanelMaximizeBtn = document.getElementById("windowSidebarMaximizeBtn");
 const playgroundNavButton = document.getElementById("playgroundNavButton");
 const libraryNavButton = document.getElementById("libraryNavButton");
+const capabilitiesNavButton = document.getElementById("capabilitiesNavButton");
 const workspaceNavButtons = document.querySelectorAll("[data-workspace-view]");
 const libraryView = document.getElementById("libraryView");
+const capabilitiesView = document.getElementById("capabilitiesView");
 const libraryGrid = document.getElementById("libraryGrid");
 const libraryEmpty = document.getElementById("libraryEmpty");
 const librarySummary = document.getElementById("librarySummary");
 const libraryStats = document.getElementById("libraryStats");
 const libraryFilterGroup = document.querySelector(".library-filter-group");
 const libraryFilterButtons = document.querySelectorAll("[data-library-filter]");
+const capabilitiesTabGroup = document.querySelector(".capabilities-tabs");
 const libraryLayoutGroup = document.querySelector(".library-layout-group");
 const libraryLayoutButtons = document.querySelectorAll("[data-library-layout]");
 const librarySelectionCount = document.getElementById("librarySelectionCount");
@@ -276,6 +279,14 @@ const workspaceBridgeStatus = document.getElementById("workspaceBridgeStatus");
 const workspaceBridgeSaveBtn = document.getElementById("workspaceBridgeSaveBtn");
 const workspaceBridgeTestBtn = document.getElementById("workspaceBridgeTestBtn");
 const workspaceBridgeClearBtn = document.getElementById("workspaceBridgeClearBtn");
+const workspaceBridgeDesktopCard = document.getElementById("workspaceBridgeDesktopCard");
+const workspaceBridgeDesktopStatus = document.getElementById("workspaceBridgeDesktopStatus");
+const workspaceBridgeDesktopStartBtn = document.getElementById("workspaceBridgeDesktopStartBtn");
+const workspaceCheckpointToggle = document.getElementById("workspaceCheckpointToggle");
+const workspaceCheckpointStatus = document.getElementById("workspaceCheckpointStatus");
+const workspaceCheckpointRefreshBtn = document.getElementById("workspaceCheckpointRefreshBtn");
+const workspaceCheckpointCreateBtn = document.getElementById("workspaceCheckpointCreateBtn");
+const workspaceCheckpointList = document.getElementById("workspaceCheckpointList");
 const workspaceAccessPolicySection = document.getElementById("workspaceAccessPolicySection");
 const workspaceAccessPolicyStatus = document.getElementById("workspaceAccessPolicyStatus");
 const workspaceAccessPolicyButtons = document.querySelectorAll("[data-workspace-access-policy]");
@@ -285,6 +296,10 @@ const mobileSettingsOpenBtn = document.getElementById("mobileSettingsOpenBtn");
 const settingsModal = document.getElementById("settingsModal");
 const settingsCloseBtn = document.getElementById("settingsCloseBtn");
 const settingsTitle = document.getElementById("settingsTitle");
+const settingsSearchInput = document.getElementById("settingsSearchInput");
+const settingsSearchClearBtn = document.getElementById("settingsSearchClearBtn");
+const settingsSearchStatus = document.getElementById("settingsSearchStatus");
+const settingsSearchEmpty = document.getElementById("settingsSearchEmpty");
 const settingsNavButtons = document.querySelectorAll("[data-settings-pane]");
 const settingsPanes = document.querySelectorAll("[data-settings-pane-panel]");
 const keyboardShortcutList = document.getElementById("keyboardShortcutList");
@@ -422,6 +437,7 @@ let activeAgentMaxStepsPerRun = 16;
 let activeContextCompactionThresholdPercent = 70;
 let isContextCompactionReviewEnabled = false;
 let activeContextCompactionRotationLimit = 2;
+let areWorkspaceCheckpointsEnabled = false;
 let isAiCachingEnabled = false;
 let isPotatoModeEnabled = false;
 let isPotatoParallelChatsEnabled = true;
@@ -519,12 +535,24 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.1.12";
-const FAUNA_APP_BUILD_ID = "20260705-chat-tool-ui";
+const FAUNA_APP_VERSION = "0.2.0";
+const FAUNA_APP_BUILD_ID = "20260706-capabilities-skills";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.2.0",
+        date: "2026-07-06",
+        commit: "v0.2.0",
+        title: "Connectors and skills",
+        changes: [
+            "Added the Capabilities area for installing assistant skills, model context servers, and api connectors.",
+            "Added desktop-backed skill storage with starter skills for creating skills and connecting servers or apis.",
+            "Added tool support for installed skills, MCP calls, and focused api connector calls during chat.",
+            "Added Codex-style skill suggestions in the composer and inline skill chips in messages."
+        ]
+    },
     {
         version: "0.1.12",
         date: "2026-07-05",
@@ -658,8 +686,10 @@ const CHAT_STORAGE_PROFILE_HISTORY_ONLY = "history-only";
 const CHAT_STORAGE_PROFILE_MINIMAL = "minimal";
 const WORKSPACE_VIEW_PLAYGROUND = "playground";
 const WORKSPACE_VIEW_LIBRARY = "library";
+const WORKSPACE_VIEW_CAPABILITIES = "capabilities";
 const WORKSPACE_URL_FRAGMENT_CHAT = "chat";
 const WORKSPACE_URL_FRAGMENT_LIBRARY = "library";
+const WORKSPACE_URL_FRAGMENT_CAPABILITIES = "capabilities";
 const LIBRARY_FILTER_ALL = "all";
 const LIBRARY_LAYOUT_GRID = "grid";
 const LIBRARY_LAYOUT_LIST = "list";
@@ -687,6 +717,7 @@ const AGENT_MAX_STEPS_PER_RUN_STORAGE_KEY = "faunaAgentMaxStepsPerRun";
 const CONTEXT_COMPACTION_THRESHOLD_STORAGE_KEY = "faunaContextCompactionThresholdPercent";
 const CONTEXT_COMPACTION_REVIEW_STORAGE_KEY = "faunaContextCompactionReviewEnabled";
 const CONTEXT_COMPACTION_ROTATION_LIMIT_STORAGE_KEY = "faunaContextCompactionRotationLimit";
+const WORKSPACE_CHECKPOINTS_ENABLED_STORAGE_KEY = "faunaWorkspaceCheckpointsEnabled";
 const POTATO_MODE_ENABLED_STORAGE_KEY = "faunaPotatoModeEnabled";
 const POTATO_PARALLEL_CHATS_STORAGE_KEY = "faunaPotatoParallelChatsEnabled";
 const POTATO_AUTO_WEB_CONTEXT_STORAGE_KEY = "faunaPotatoAutoWebContextEnabled";
@@ -871,6 +902,7 @@ function isManifestNewer(manifest = {}) {
 
 function getWindowLocationText() {
     if (activeWorkspaceView === WORKSPACE_VIEW_LIBRARY) return "Library";
+    if (activeWorkspaceView === WORKSPACE_VIEW_CAPABILITIES) return "Connectors and skills";
     const title = String(chatTitle?.textContent || getActiveSession?.()?.title || "").trim();
     return title || "Current Session";
 }
@@ -1631,6 +1663,7 @@ function setAnimatedSegmentIndicator(group, activeElement) {
 
 function updateAnimatedSegmentIndicators() {
     setAnimatedSegmentIndicator(libraryFilterGroup, libraryFilterGroup?.querySelector(".library-filter.active"));
+    setAnimatedSegmentIndicator(capabilitiesTabGroup, capabilitiesTabGroup?.querySelector(".library-filter.active"));
     setAnimatedSegmentIndicator(libraryLayoutGroup, libraryLayoutGroup?.querySelector(".library-layout-toggle.active"));
     setAnimatedSegmentIndicator(libraryPickerTypeGroup, libraryPickerTypeGroup?.querySelector(".library-picker-chip.active"));
     setAnimatedSegmentIndicator(libraryPickerSortGroup, libraryPickerSortGroup?.querySelector(".library-picker-chip.active"));
@@ -1648,7 +1681,7 @@ function scheduleAnimatedSegmentIndicators() {
 
 if ("ResizeObserver" in window) {
     const segmentResizeObserver = new ResizeObserver(() => scheduleAnimatedSegmentIndicators());
-    [libraryFilterGroup, libraryLayoutGroup, libraryPickerTypeGroup, libraryPickerSortGroup, openAiCatalogSortGroup, providerSegment].forEach(group => {
+    [libraryFilterGroup, capabilitiesTabGroup, libraryLayoutGroup, libraryPickerTypeGroup, libraryPickerSortGroup, openAiCatalogSortGroup, providerSegment].forEach(group => {
         if (group) segmentResizeObserver.observe(group);
     });
 }

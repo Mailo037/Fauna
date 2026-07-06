@@ -5,8 +5,7 @@
     inset: 0;
     z-index: 999;
     display: grid;
-    place-content: center;
-    gap: 14px;
+    place-items: center;
     background: var(--bg);
     color: var(--text);
 }
@@ -15,43 +14,18 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 46px;
-    height: 46px;
-    justify-self: center;
-    border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
-    border-radius: 50%;
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
     color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    animation: bootMarkPulse 1.2s var(--ease) infinite;
+    animation: bootMarkPulse 1.35s var(--ease) infinite;
+    will-change: transform, opacity;
 }
 
 .app-boot-loader-mark .fauna-mark {
-    width: 19px;
-    height: 19px;
-    animation: bootMarkSpin 1.8s linear infinite;
-}
-
-.app-boot-loader-text {
-    color: var(--text-muted);
-    font-size: 12px;
-    font-weight: 800;
-}
-
-.app-boot-loader-bar {
-    width: 168px;
-    height: 3px;
-    overflow: hidden;
-    border-radius: 999px;
-    background: var(--surface-2);
-}
-
-.app-boot-loader-bar span {
+    width: 42px;
+    height: 42px;
     display: block;
-    width: 42%;
-    height: 100%;
-    border-radius: inherit;
-    background: var(--accent);
-    animation: bootBarSlide 1s var(--ease) infinite;
 }
 
 .app-boot-loader.leaving {
@@ -1109,24 +1083,14 @@ body.app-ready .input-wrapper {
 }
 
 @keyframes bootMarkPulse {
+    0%,
+    100% {
+        opacity: 0.78;
+        transform: scale(0.98);
+    }
     50% {
-        transform: scale(1.06);
-        box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 9%, transparent);
-    }
-}
-
-@keyframes bootMarkSpin {
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-@keyframes bootBarSlide {
-    from {
-        transform: translateX(-110%);
-    }
-    to {
-        transform: translateX(250%);
+        opacity: 1;
+        transform: scale(1.04);
     }
 }
 

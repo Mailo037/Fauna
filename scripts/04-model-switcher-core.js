@@ -17,6 +17,9 @@ const WEB_URL_RE = /\bhttps?:\/\/[^\s`<>"']+/gi;
 const IMAGE_GEN_BASE_URL = "https://image.pollinations.ai/prompt/";
 const OPENAI_BRIDGE_PATH = "/openai";
 const LOCAL_AI_BRIDGE_PATH = "/local-ai";
+const MCP_DISCOVER_BRIDGE_PATH = "/mcp/discover";
+const MCP_CALL_BRIDGE_PATH = "/mcp/call";
+const API_CALL_BRIDGE_PATH = "/api-call";
 const WORKSPACE_BRIDGE_TOKEN_HEADER = "X-Fauna-Bridge-Token";
 const LEGACY_WORKSPACE_BRIDGE_TOKEN_HEADER = ["X", "Flo" + "ra", "Bridge", "Token"].join("-");
 const OPENAI_BRIDGE_REQUIRED_MESSAGE = "OpenAI requests need the Local Workspace Bridge. Start local-bridge.py, save the bridge token, and enable Local Workspace in Tools.";
@@ -135,6 +138,10 @@ const WAN_VIDEO_WORKFLOW_STORAGE_KEY = "faunaWanWorkflow";
 const WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY = "faunaWorkspaceBridgeEndpoint";
 const WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY = "faunaWorkspaceBridgeToken";
 const WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY = "faunaWorkspaceBridgeEnabled";
+const SKILL_LIBRARY_STORAGE_KEY = "faunaSkills";
+const CAPABILITY_BASIC_SKILLS_SEEDED_STORAGE_KEY = "faunaCapabilitiesBasicSkillsSeeded";
+const MCP_SERVERS_STORAGE_KEY = "faunaMcpServers";
+const API_CONNECTORS_STORAGE_KEY = "faunaApiConnectors";
 const WORKSPACE_PROJECTS_STORAGE_KEY = "faunaWorkspaceProjects";
 const WORKSPACE_PROJECT_SORT_STORAGE_KEY = "faunaWorkspaceProjectSort";
 const AGENT_TASK_MODE_STORAGE_KEY = "faunaAgentTaskMode";
@@ -234,6 +241,33 @@ const MEMORY_TOOL_NAME_ALIASES = {
     memory_delete: "delete_memory"
 };
 const MEMORY_TOOL_NAMES = new Set(Object.values(MEMORY_TOOL_NAME_ALIASES));
+const CAPABILITY_TOOL_NAME_ALIASES = {
+    use_skill: "use_skill",
+    load_skill: "use_skill",
+    skill: "use_skill",
+    skill_run: "use_skill",
+    install_skill: "install_skill",
+    create_skill: "install_skill",
+    save_skill: "install_skill",
+    save_server: "save_server",
+    connect_server: "save_server",
+    add_mcp_server: "save_server",
+    save_mcp_server: "save_server",
+    mcp_add: "save_server",
+    mcp_call: "mcp_call",
+    call_mcp: "mcp_call",
+    mcp_tool: "mcp_call",
+    run_mcp_tool: "mcp_call",
+    save_api_connector: "save_api_connector",
+    connect_api: "save_api_connector",
+    add_api_connector: "save_api_connector",
+    save_api: "save_api_connector",
+    api_call: "api_call",
+    call_api: "api_call",
+    http_api_call: "api_call",
+    connector_call: "api_call"
+};
+const CAPABILITY_TOOL_NAMES = new Set(Object.values(CAPABILITY_TOOL_NAME_ALIASES));
 const THINKING_TOOL_NAME_ALIASES = {
     thinking: "thinking",
     think: "thinking",
@@ -280,6 +314,12 @@ const KEYBOARD_SHORTCUT_ACTIONS = [
         title: "Open Library",
         description: "Switch to Library.",
         defaultShortcut: "Ctrl+Shift+L"
+    },
+    {
+        id: "openCapabilities",
+        title: "Open capabilities",
+        description: "Switch to MCPs, APIs, Skills.",
+        defaultShortcut: "Ctrl+Shift+M"
     },
     {
         id: "openChat",
