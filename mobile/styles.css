@@ -40,6 +40,55 @@ button {
     -webkit-tap-highlight-color: transparent;
 }
 
+.mobile-loading-view {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+}
+
+.mobile-loading-view[hidden] {
+    display: none !important;
+}
+
+.mobile-loading-panel {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+}
+
+.mobile-boot-loader-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+    color: var(--accent);
+    animation: bootMarkPulse 1.35s var(--ease) infinite;
+    will-change: transform, opacity;
+}
+
+.mobile-boot-loader-mark img {
+    width: 42px;
+    height: 42px;
+    display: block;
+    border-radius: 12px;
+}
+
+.mobile-loading-panel strong {
+    font-size: 17px;
+    line-height: 1.2;
+}
+
+.mobile-loading-panel span:not(.mobile-boot-loader-mark) {
+    color: var(--mobile-muted);
+    font-size: 13px;
+}
+
 .pairing-view {
     min-height: 100vh;
     min-height: 100dvh;

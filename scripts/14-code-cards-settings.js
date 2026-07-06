@@ -489,6 +489,7 @@ const SETTINGS_SEARCH_CANDIDATE_SELECTOR = [
     ".usage-stat-item",
     ".usage-insight-card",
     ".shortcut-settings-row",
+    ".phone-device-row",
     "code",
     "input[aria-label]",
     "input[placeholder]",
@@ -510,6 +511,7 @@ const SETTINGS_SEARCH_HIGHLIGHT_TARGET_SELECTOR = [
     ".usage-stat-item",
     ".usage-insight-card",
     ".shortcut-settings-row",
+    ".phone-device-row",
     ".local-task-missing-card",
     ".provider-btn",
     ".settings-inline-btn"
@@ -827,6 +829,9 @@ function setSettingsPane(paneName = "general") {
     }
     if (normalized === "info") {
         void updateAppInfoPane();
+    }
+    if (normalized === "phone") {
+        void updatePhoneSyncPane();
     }
     if (normalized === "shortcuts") {
         renderKeyboardShortcutSettings();
@@ -1937,6 +1942,163 @@ function renderAppInfoRemoteAccess(remote = {}, isDesktop = false) {
     if (appInfoRemoteRotateBtn) appInfoRemoteRotateBtn.disabled = !isDesktop;
 }
 
+function getPhoneDeviceStateLabel(state = "") {
+    switch (state) {
+        case "syncing":
+            return "Syncing";
+        case "online":
+            return "Online";
+        case "blocked":
+            return "Blocked";
+        case "idle":
+            return "Idle";
+        default:
+            return "Paired";
+    }
+}
+
+function formatPhoneDeviceTime(value = "") {
+    const time = Date.parse(value || "");
+    if (!Number.isFinite(time)) return "Never";
+    const diff = Math.max(0, Date.now() - time);
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+}
+
+function renderPhoneDeviceList(devices = []) {
+    if (!appPhoneDeviceList) return;
+    const normalized = Array.isArray(devices) ? devices : [];
+    const onlineCount = normalized.filter(device => ["syncing", "online"].includes(device.state)).length;
+    const blockedCount = normalized.filter(device => device.blocked).length;
+    const syncingCount = normalized.filter(device => device.state === "syncing").length;
+
+    if (appPhoneDeviceSummary) {
+        appPhoneDeviceSummary.textContent = normalized.length === 0
+            ? "No devices"
+            : `${onlineCount}/${normalized.length} online`;
+        appPhoneDeviceSummary.dataset.state = onlineCount > 0 ? "configured" : blockedCount > 0 ? "missing" : "missing";
+    }
+    if (appPhoneDeviceSyncStatus) {
+        appPhoneDeviceSyncStatus.textContent = syncingCount > 0
+            ? `${syncingCount} syncing`
+            : blockedCount > 0
+                ? `${blockedCount} blocked`
+                : "Idle";
+        appPhoneDeviceSyncStatus.dataset.state = syncingCount > 0 ? "configured" : "missing";
+    }
+
+    appPhoneDeviceList.replaceChildren();
+    if (normalized.length === 0) {
+        const empty = appPhoneDeviceEmpty || document.createElement("p");
+        empty.id = "appPhoneDeviceEmpty";
+        empty.className = "phone-device-empty";
+        empty.textContent = "No paired phones yet.";
+        appPhoneDeviceList.appendChild(empty);
+        return;
+    }
+
+    normalized.forEach(device => {
+        const row = document.createElement("article");
+        row.className = "phone-device-row";
+        row.dataset.deviceState = device.state || "paired";
+        row.dataset.deviceBlocked = String(Boolean(device.blocked));
+        row.innerHTML = `
+            <div class="phone-device-main">
+                <span class="phone-device-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2.5" width="10" height="19" rx="2.5"></rect><path d="M11 18h2"></path></svg>
+                </span>
+                <div class="phone-device-copy">
+                    <strong>${escapeHtml(device.name || "Unknown phone")}</strong>
+                    <span>${escapeHtml(device.platform || "mobile")} · Last seen ${escapeHtml(formatPhoneDeviceTime(device.lastSeenAt))}</span>
+                    <code>${escapeHtml(device.id || "")}</code>
+                </div>
+            </div>
+            <div class="phone-device-controls">
+                <span class="phone-device-badge" data-state="${escapeHtml(device.state || "paired")}">${escapeHtml(getPhoneDeviceStateLabel(device.state))}</span>
+                <button class="provider-btn provider-btn-secondary settings-inline-btn" type="button" data-phone-device-block="${escapeHtml(device.id || "")}" data-blocked="${device.blocked ? "true" : "false"}">${device.blocked ? "Unblock" : "Block"}</button>
+                <button class="provider-btn provider-btn-secondary settings-inline-btn" type="button" data-phone-device-forget="${escapeHtml(device.id || "")}">Forget</button>
+            </div>
+        `;
+        appPhoneDeviceList.appendChild(row);
+    });
+}
+
+async function refreshPhoneDevices({ silent = false } = {}) {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.remote?.listDevices) {
+        renderPhoneDeviceList([]);
+        if (!silent && appPhoneDeviceSyncStatus) appPhoneDeviceSyncStatus.textContent = "Desktop only";
+        return [];
+    }
+    if (appPhoneDeviceSyncStatus) {
+        appPhoneDeviceSyncStatus.textContent = "Checking";
+        appPhoneDeviceSyncStatus.dataset.state = "missing";
+    }
+    try {
+        const result = await desktopApi.remote.listDevices();
+        const devices = Array.isArray(result?.devices) ? result.devices : [];
+        renderPhoneDeviceList(devices);
+        return devices;
+    } catch (err) {
+        if (!silent) showToast(`Could not load phone devices: ${err.message}`, "error");
+        if (appPhoneDeviceSyncStatus) {
+            appPhoneDeviceSyncStatus.textContent = "Unavailable";
+            appPhoneDeviceSyncStatus.dataset.state = "missing";
+        }
+        return [];
+    }
+}
+
+async function updatePhoneSyncPane() {
+    const desktopApi = getFaunaDesktopApi();
+    let info = null;
+    if (desktopApi?.getInfo) {
+        try {
+            info = await desktopApi.getInfo();
+        } catch (err) {
+            console.warn("Could not read phone sync info:", err);
+        }
+    }
+    renderAppInfoRemoteAccess(info?.remoteAccess || {}, Boolean(desktopApi && info));
+    renderPhoneDeviceList(info?.remoteAccess?.devices || []);
+    await refreshPhoneDevices({ silent: true });
+}
+
+async function setPhoneDeviceBlockedFromSettings(deviceId = "", blocked = false) {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.remote?.setDeviceBlocked) {
+        showToast("Phone device controls are available in the desktop app.", "warning");
+        return;
+    }
+    try {
+        const result = await desktopApi.remote.setDeviceBlocked(deviceId, blocked);
+        renderPhoneDeviceList(result?.devices || []);
+        showToast(blocked ? "Phone access blocked." : "Phone access restored.", blocked ? "warning" : "success");
+    } catch (err) {
+        showToast(`Device update failed: ${err.message}`, "error");
+    }
+}
+
+async function forgetPhoneDeviceFromSettings(deviceId = "") {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.remote?.forgetDevice) {
+        showToast("Phone device controls are available in the desktop app.", "warning");
+        return;
+    }
+    try {
+        const result = await desktopApi.remote.forgetDevice(deviceId);
+        renderPhoneDeviceList(result?.devices || []);
+        showToast("Phone forgotten.", "info");
+    } catch (err) {
+        showToast(`Could not forget phone: ${err.message}`, "error");
+    }
+}
+
 function getUpdateBadgeState(status = "") {
     return ["current", "idle", "downloaded"].includes(status) ? "configured" : "missing";
 }
@@ -1981,6 +2143,7 @@ async function updateAppInfoPane() {
     setAppInfoText(appInfoOutputPath, info?.outputPath, isDesktop ? "chats/<chatId>/output" : "Browser localStorage");
     setAppInfoText(appInfoSkillsPath, info?.skillsPath, isDesktop ? "skills" : "Browser localStorage");
     renderAppInfoRemoteAccess(info?.remoteAccess || {}, isDesktop);
+    renderPhoneDeviceList(info?.remoteAccess?.devices || []);
 
     if (appInfoUpdateStatus) {
         const status = String(updateStateInfo?.status || "").trim();
@@ -2052,7 +2215,19 @@ async function copyRemoteAccessPairingFromSettings() {
             return;
         }
         const pairingLink = createRemotePairingDeepLink(url, token);
-        await writeTextToClipboard(`Fauna phone sync\nURL: ${url}\nToken: ${token}\nQR link: ${pairingLink}`);
+        const alternateUrls = Array.isArray(remote?.lanUrls)
+            ? remote.lanUrls.map(item => String(item || "").trim()).filter(item => item && item !== url)
+            : [];
+        const lines = [
+            "Fauna phone sync",
+            `URL: ${url}`,
+            `Token: ${token}`,
+            `QR link: ${pairingLink}`
+        ];
+        if (alternateUrls.length > 0) {
+            lines.push("Other URLs:", ...alternateUrls.map(item => `- ${item}`));
+        }
+        await writeTextToClipboard(lines.join("\n"));
         showToast("Phone pairing copied.", "success");
     } catch (err) {
         showToast(`Copy failed: ${err.message}`, "error");
@@ -2880,6 +3055,23 @@ settingsModal?.addEventListener("click", event => {
 });
 
 settingsModal?.addEventListener("click", event => {
+    const blockButton = event.target.closest("[data-phone-device-block]");
+    if (blockButton) {
+        event.preventDefault();
+        const deviceId = blockButton.dataset.phoneDeviceBlock || "";
+        const isBlocked = blockButton.dataset.blocked === "true";
+        void setPhoneDeviceBlockedFromSettings(deviceId, !isBlocked);
+        return;
+    }
+
+    const forgetButton = event.target.closest("[data-phone-device-forget]");
+    if (forgetButton) {
+        event.preventDefault();
+        void forgetPhoneDeviceFromSettings(forgetButton.dataset.phoneDeviceForget || "");
+    }
+});
+
+settingsModal?.addEventListener("click", event => {
     if (event.target.closest("[data-settings-close]")) {
         closeSettingsModal();
     }
@@ -2912,6 +3104,14 @@ appInfoRemoteCopyBtn?.addEventListener("click", () => {
 
 appInfoRemoteRotateBtn?.addEventListener("click", () => {
     void rotateRemoteAccessTokenFromSettings();
+});
+
+appPhoneDevicesRefreshBtn?.addEventListener("click", () => {
+    void refreshPhoneDevices();
+});
+
+getFaunaDesktopApi()?.remote?.onDevicesChanged?.(payload => {
+    renderPhoneDeviceList(payload?.devices || []);
 });
 
 localModelsAutoStartToggle?.addEventListener("change", event => {

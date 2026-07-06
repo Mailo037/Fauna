@@ -25,6 +25,7 @@ const WORKSPACE_ACCESS_POLICY_FULL_MACHINE = "full-machine";
 const REMOTE_ACCESS_ENABLED_STORAGE_KEY = "faunaRemoteAccessEnabled";
 const REMOTE_ACCESS_TOKEN_STORAGE_KEY = "faunaRemoteAccessToken";
 const REMOTE_ACCESS_PORT_STORAGE_KEY = "faunaRemoteAccessPort";
+const REMOTE_ACCESS_DEVICES_STORAGE_KEY = "faunaRemoteDevices";
 const AUTO_INSTALL_UPDATES_STORAGE_KEY = "faunaAutoInstallUpdates";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
@@ -1966,10 +1967,11 @@ function cancelOllamaPull(payload = {}) {
   };
 }
 
-function getDesktopInfo() {
+function getDesktopInfo(options = {}) {
   const settings = readSettingsSync();
   const sessions = readChatSessionsSync();
   const workspaceAccessPolicy = getWorkspaceAccessPolicySync();
+  const includeRemoteDevices = options.includeRemoteDevices !== false;
   return {
     appDataPath: getUserDataRoot(),
     settingsPath: getSettingsPath(),
@@ -1988,7 +1990,7 @@ function getDesktopInfo() {
     chatCount: sessions.length,
     projects: readWorkspaceProjectsSync(),
     activeChatId: getActiveChatIdSync(),
-    remoteAccess: getRemoteAccessInfoSync(),
+    remoteAccess: getRemoteAccessInfoSync({ includeDevices: includeRemoteDevices }),
     updateState: getDesktopUpdateState()
   };
 }
@@ -2011,16 +2013,36 @@ function getRemoteAccessPreferredPortSync() {
   return DEFAULT_REMOTE_ACCESS_PORT;
 }
 
+function getRemoteAddressScore(address = "", interfaceName = "") {
+  const octets = String(address || "").split(".").map(part => Number(part));
+  if (octets.length !== 4 || octets.some(part => !Number.isInteger(part))) return 100;
+  let score = 30;
+  if (octets[0] === 192 && octets[1] === 168) score = 0;
+  else if (octets[0] === 10) score = 6;
+  else if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) score = 12;
+  else if (octets[0] === 169 && octets[1] === 254) score = 80;
+
+  const name = String(interfaceName || "");
+  if (/wi-?fi|wlan|ethernet|lan/i.test(name)) score -= 2;
+  if (/virtual|vethernet|vmware|vbox|docker|wsl|hyper-v|tailscale|zerotier|wireguard|vpn|bluetooth|npcap/i.test(name)) score += 35;
+  return score;
+}
+
 function getLanIpv4Addresses() {
   const interfaces = os.networkInterfaces();
-  const addresses = [];
-  for (const entries of Object.values(interfaces)) {
+  const addresses = new Map();
+  for (const [name, entries] of Object.entries(interfaces)) {
     for (const entry of entries || []) {
       if (entry?.family !== "IPv4" || entry.internal || !entry.address) continue;
-      addresses.push(entry.address);
+      const address = String(entry.address || "");
+      const candidate = { address, score: getRemoteAddressScore(address, name), name };
+      const existing = addresses.get(address);
+      if (!existing || candidate.score < existing.score) addresses.set(address, candidate);
     }
   }
-  return Array.from(new Set(addresses)).sort();
+  return Array.from(addresses.values())
+    .sort((a, b) => a.score - b.score || a.address.localeCompare(b.address, undefined, { numeric: true }))
+    .map(item => item.address);
 }
 
 function getRemoteAccessUrls(port = remoteAccessPort || getRemoteAccessPreferredPortSync()) {
@@ -2028,11 +2050,180 @@ function getRemoteAccessUrls(port = remoteAccessPort || getRemoteAccessPreferred
   return getLanIpv4Addresses().map(address => `http://${address}:${cleanPort}`);
 }
 
-function getRemoteAccessInfoSync() {
+function readRemoteDevicesSync() {
+  try {
+    const parsed = JSON.parse(storageGetSync(REMOTE_ACCESS_DEVICES_STORAGE_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(device => {
+        if (!device || typeof device !== "object") return null;
+        const id = sanitizeId(device.id, "");
+        if (!id) return null;
+        return {
+          id,
+          name: String(device.name || "Unknown phone").trim().slice(0, 80) || "Unknown phone",
+          platform: String(device.platform || "mobile").trim().slice(0, 40) || "mobile",
+          userAgent: String(device.userAgent || "").slice(0, 240),
+          address: String(device.address || "").slice(0, 80),
+          firstSeenAt: String(device.firstSeenAt || ""),
+          lastSeenAt: String(device.lastSeenAt || ""),
+          lastPath: String(device.lastPath || "").slice(0, 160),
+          requestCount: Math.max(0, Number(device.requestCount) || 0),
+          blocked: Boolean(device.blocked)
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => Date.parse(b.lastSeenAt || "") - Date.parse(a.lastSeenAt || ""));
+  } catch {
+    return [];
+  }
+}
+
+function writeRemoteDevicesSync(devices = []) {
+  const normalized = (Array.isArray(devices) ? devices : [])
+    .map(device => {
+      if (!device || typeof device !== "object") return null;
+      const id = sanitizeId(device.id, "");
+      if (!id) return null;
+      return {
+        id,
+        name: String(device.name || "Unknown phone").trim().slice(0, 80) || "Unknown phone",
+        platform: String(device.platform || "mobile").trim().slice(0, 40) || "mobile",
+        userAgent: String(device.userAgent || "").slice(0, 240),
+        address: String(device.address || "").slice(0, 80),
+        firstSeenAt: String(device.firstSeenAt || ""),
+        lastSeenAt: String(device.lastSeenAt || ""),
+        lastPath: String(device.lastPath || "").slice(0, 160),
+        requestCount: Math.max(0, Number(device.requestCount) || 0),
+        blocked: Boolean(device.blocked)
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 80);
+  storageSetSync(REMOTE_ACCESS_DEVICES_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+function getRemoteDeviceState(device = {}, now = Date.now()) {
+  if (device.blocked) return "blocked";
+  const lastSeen = Date.parse(device.lastSeenAt || "");
+  if (!Number.isFinite(lastSeen)) return "paired";
+  const age = Math.max(0, now - lastSeen);
+  if (age < 10000) return "syncing";
+  if (age < 60000) return "online";
+  return "idle";
+}
+
+function getRemoteDeviceIdFromRequest(req) {
+  const supplied = String(req.headers["x-fauna-device-id"] || "").trim();
+  if (supplied) return sanitizeId(supplied, "phone").slice(0, 96);
+  const address = String(req.socket?.remoteAddress || "remote");
+  const userAgent = String(req.headers["user-agent"] || "mobile");
+  return `legacy-${crypto.createHash("sha256").update(`${address}:${userAgent}`).digest("hex").slice(0, 16)}`;
+}
+
+function getRemoteDeviceNameFromRequest(req, deviceId = "") {
+  const supplied = String(req.headers["x-fauna-device-name"] || "").trim();
+  if (supplied) return supplied.slice(0, 80);
+  return deviceId.startsWith("legacy-") ? "Legacy phone" : "Fauna Phone";
+}
+
+function getRemoteDevicePlatformFromRequest(req) {
+  const supplied = String(req.headers["x-fauna-device-platform"] || "").trim();
+  if (supplied) return supplied.slice(0, 40);
+  const userAgent = String(req.headers["user-agent"] || "").toLowerCase();
+  if (userAgent.includes("android")) return "android";
+  if (userAgent.includes("iphone") || userAgent.includes("ipad")) return "ios";
+  return "mobile";
+}
+
+function serializeRemoteDevice(device = {}, now = Date.now()) {
+  const state = getRemoteDeviceState(device, now);
+  return {
+    ...device,
+    state,
+    online: ["syncing", "online"].includes(state)
+  };
+}
+
+function getRemoteDevicesSync() {
+  const now = Date.now();
+  return readRemoteDevicesSync().map(device => serializeRemoteDevice(device, now));
+}
+
+function getRemoteDeviceSummarySync(devices = getRemoteDevicesSync()) {
+  return {
+    total: devices.length,
+    syncing: devices.filter(device => device.state === "syncing").length,
+    online: devices.filter(device => device.state === "online" || device.state === "syncing").length,
+    blocked: devices.filter(device => device.blocked).length
+  };
+}
+
+function touchRemoteDeviceFromRequest(req, requestUrl) {
+  const id = getRemoteDeviceIdFromRequest(req);
+  const now = new Date().toISOString();
+  const devices = readRemoteDevicesSync();
+  const existing = devices.find(device => device.id === id);
+  const nextDevice = {
+    ...(existing || {}),
+    id,
+    name: getRemoteDeviceNameFromRequest(req, id),
+    platform: getRemoteDevicePlatformFromRequest(req),
+    userAgent: String(req.headers["user-agent"] || "").slice(0, 240),
+    address: String(req.socket?.remoteAddress || "").slice(0, 80),
+    firstSeenAt: existing?.firstSeenAt || now,
+    lastSeenAt: now,
+    lastPath: String(requestUrl?.pathname || "").slice(0, 160),
+    requestCount: Math.max(0, Number(existing?.requestCount) || 0) + 1,
+    blocked: Boolean(existing?.blocked)
+  };
+  const next = [nextDevice, ...devices.filter(device => device.id !== id)];
+  writeRemoteDevicesSync(next);
+  const serialized = serializeRemoteDevice(nextDevice);
+  sendToRenderer("fauna:remote-devices-changed", {
+    devices: getRemoteDevicesSync(),
+    summary: getRemoteDeviceSummarySync()
+  });
+  return serialized;
+}
+
+function setRemoteDeviceBlocked(deviceId = "", blocked = false) {
+  const id = sanitizeId(deviceId, "");
+  if (!id) throw new Error("Missing phone device id.");
+  const devices = readRemoteDevicesSync();
+  const device = devices.find(item => item.id === id);
+  if (!device) throw new Error("Phone device was not found.");
+  device.blocked = Boolean(blocked);
+  writeRemoteDevicesSync(devices);
+  sendToRenderer("fauna:remote-devices-changed", {
+    devices: getRemoteDevicesSync(),
+    summary: getRemoteDeviceSummarySync()
+  });
+  return serializeRemoteDevice(device);
+}
+
+function forgetRemoteDevice(deviceId = "") {
+  const id = sanitizeId(deviceId, "");
+  if (!id) throw new Error("Missing phone device id.");
+  const devices = readRemoteDevicesSync();
+  const next = devices.filter(device => device.id !== id);
+  if (next.length === devices.length) throw new Error("Phone device was not found.");
+  writeRemoteDevicesSync(next);
+  sendToRenderer("fauna:remote-devices-changed", {
+    devices: getRemoteDevicesSync(),
+    summary: getRemoteDeviceSummarySync()
+  });
+  return { ok: true, devices: getRemoteDevicesSync(), summary: getRemoteDeviceSummarySync() };
+}
+
+function getRemoteAccessInfoSync(options = {}) {
+  const includeDevices = options.includeDevices !== false;
   const enabled = getRemoteAccessEnabledSync();
   const running = Boolean(remoteAccessServer);
   const port = remoteAccessPort || getRemoteAccessPreferredPortSync();
   const lanUrls = running ? getRemoteAccessUrls(port) : [];
+  const devices = includeDevices ? getRemoteDevicesSync() : [];
   return {
     enabled,
     running,
@@ -2040,7 +2231,9 @@ function getRemoteAccessInfoSync() {
     endpoint: running ? `http://127.0.0.1:${port}` : "",
     lanUrls,
     primaryUrl: lanUrls[0] || (running ? `http://127.0.0.1:${port}` : ""),
-    token: getRemoteAccessTokenSync()
+    token: getRemoteAccessTokenSync(),
+    ...(includeDevices ? { devices } : {}),
+    deviceSummary: includeDevices ? getRemoteDeviceSummarySync(devices) : getRemoteDeviceSummarySync()
   };
 }
 
@@ -2088,7 +2281,7 @@ function isRemoteRequestAuthorized(req) {
 function setRemoteCorsHeaders(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "authorization, content-type, x-fauna-remote-token");
+  res.setHeader("Access-Control-Allow-Headers", "authorization, content-type, x-fauna-device-id, x-fauna-device-name, x-fauna-device-platform, x-fauna-remote-token");
 }
 
 function sendRemoteJson(res, statusCode, payload = {}) {
@@ -2186,9 +2379,10 @@ async function serveRemoteStaticFile(reqPath, res) {
   const target = path.resolve(staticRoot, relative);
   if (!isPathInside(target, staticRoot) || !fs.existsSync(target) || !fs.statSync(target).isFile()) return false;
 
+  const noCache = target.endsWith(".html") || pathname.startsWith("/mobile/");
   res.writeHead(200, {
     "Content-Type": getRemoteStaticMimeType(target),
-    "Cache-Control": target.endsWith(".html") ? "no-cache" : "public, max-age=600"
+    "Cache-Control": noCache ? "no-cache" : "public, max-age=600"
   });
   fs.createReadStream(target).pipe(res);
   return true;
@@ -2330,7 +2524,7 @@ function getRemoteSettingsPayload() {
     desktop: {
       app: "Fauna",
       version: app.getVersion(),
-      remoteAccess: getRemoteAccessInfoSync()
+      remoteAccess: getRemoteAccessInfoSync({ includeDevices: false })
     }
   };
 }
@@ -2385,16 +2579,22 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
     return;
   }
 
+  const remoteDevice = touchRemoteDeviceFromRequest(req, requestUrl);
+  if (remoteDevice.blocked) {
+    sendRemoteJson(res, 403, { ok: false, error: "This phone is blocked in Fauna Desktop settings.", device: remoteDevice });
+    return;
+  }
+
   const parts = requestUrl.pathname.split("/").filter(Boolean);
   const method = String(req.method || "GET").toUpperCase();
 
   if (method === "GET" && requestUrl.pathname === "/api/health") {
-    sendRemoteJson(res, 200, { ok: true, info: getRemoteAccessInfoSync(), app: "Fauna" });
+    sendRemoteJson(res, 200, { ok: true, info: getRemoteAccessInfoSync({ includeDevices: false }), app: "Fauna", device: remoteDevice });
     return;
   }
 
   if (method === "GET" && requestUrl.pathname === "/api/info") {
-    sendRemoteJson(res, 200, { ok: true, info: getDesktopInfo() });
+    sendRemoteJson(res, 200, { ok: true, info: getDesktopInfo({ includeRemoteDevices: false }) });
     return;
   }
 
@@ -3733,6 +3933,16 @@ function registerIpc() {
     rotateRemoteAccessToken();
     return getDesktopInfo();
   });
+  ipcMain.handle("fauna:remote-devices-list", () => ({
+    ok: true,
+    devices: getRemoteDevicesSync(),
+    summary: getRemoteDeviceSummarySync()
+  }));
+  ipcMain.handle("fauna:remote-device-set-blocked", (_event, payload = {}) => {
+    const device = setRemoteDeviceBlocked(payload.deviceId, payload.blocked);
+    return { ok: true, device, devices: getRemoteDevicesSync(), summary: getRemoteDeviceSummarySync() };
+  });
+  ipcMain.handle("fauna:remote-device-forget", (_event, deviceId) => forgetRemoteDevice(deviceId));
   ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
   ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));
   ipcMain.handle("fauna:window-minimize", () => {

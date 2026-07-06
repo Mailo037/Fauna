@@ -1,4 +1,7 @@
 const TOKEN_KEY = "faunaRemoteToken";
+const DEVICE_ID_KEY = "faunaRemoteDeviceId";
+const DEVICE_NAME_KEY = "faunaRemoteDeviceName";
+const DEVICE_PLATFORM_KEY = "faunaRemoteDevicePlatform";
 const POLL_MS = 2600;
 const AUTO_INSTALL_SETTING_KEY = "faunaAutoInstallUpdates";
 
@@ -11,9 +14,15 @@ const state = {
     sending: false,
     settings: [],
     update: null,
-    savingSettingKey: ""
+    savingSettingKey: "",
+    deviceId: "",
+    deviceName: "",
+    devicePlatform: "mobile",
+    composerLoaded: false
 };
 
+const loadingView = document.getElementById("loadingView");
+const loadingStatus = document.getElementById("loadingStatus");
 const pairingView = document.getElementById("pairingView");
 const appView = document.getElementById("appView");
 const tokenInput = document.getElementById("tokenInput");
@@ -42,11 +51,34 @@ const remoteSettingsList = document.getElementById("remoteSettingsList");
 let messageInput = null;
 let sendButton = null;
 
-function tokenFromHash() {
+function getHashParams() {
     const raw = window.location.hash.replace(/^#/, "");
-    if (!raw) return "";
-    const params = new URLSearchParams(raw);
-    return params.get("token") || "";
+    return raw ? new URLSearchParams(raw) : new URLSearchParams();
+}
+
+function tokenFromHash() {
+    return getHashParams().get("token") || "";
+}
+
+function createDeviceId() {
+    return `phone-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeDeviceLabel(value, fallback = "Fauna Phone") {
+    return String(value || fallback).replace(/\s+/g, " ").trim().slice(0, 80) || fallback;
+}
+
+function loadDeviceIdentity() {
+    const params = getHashParams();
+    const hashDeviceId = params.get("deviceId") || params.get("id") || "";
+    const hashName = params.get("deviceName") || params.get("name") || "";
+    const hashPlatform = params.get("platform") || "";
+    state.deviceId = normalizeDeviceLabel(hashDeviceId || localStorage.getItem(DEVICE_ID_KEY), createDeviceId());
+    state.deviceName = normalizeDeviceLabel(hashName || localStorage.getItem(DEVICE_NAME_KEY), "Fauna Phone");
+    state.devicePlatform = normalizeDeviceLabel(hashPlatform || localStorage.getItem(DEVICE_PLATFORM_KEY), "mobile").toLowerCase();
+    localStorage.setItem(DEVICE_ID_KEY, state.deviceId);
+    localStorage.setItem(DEVICE_NAME_KEY, state.deviceName);
+    localStorage.setItem(DEVICE_PLATFORM_KEY, state.devicePlatform);
 }
 
 function setStatus(text, kind = "normal") {
@@ -59,15 +91,24 @@ function setPairingStatus(text) {
     if (pairingStatus) pairingStatus.textContent = text || "";
 }
 
+function showLoading(text = "Loading phone sync") {
+    if (loadingStatus) loadingStatus.textContent = text;
+    if (loadingView) loadingView.hidden = false;
+    if (pairingView) pairingView.hidden = true;
+    if (appView) appView.hidden = true;
+}
+
 function showPairing() {
     window.clearInterval(state.polling);
     state.polling = 0;
+    if (loadingView) loadingView.hidden = true;
     pairingView.hidden = false;
     appView.hidden = true;
     if (tokenInput) tokenInput.value = state.token || "";
 }
 
 function showApp() {
+    if (loadingView) loadingView.hidden = true;
     pairingView.hidden = true;
     appView.hidden = false;
 }
@@ -82,6 +123,7 @@ function storeToken(token) {
 }
 
 async function loadDesktopComposer() {
+    if (state.composerLoaded) return;
     if (!desktopComposerMount) throw new Error("Composer mount is missing.");
     const [templatesResponse, composerResponse] = await Promise.all([
         fetch("/components/templates.html", { cache: "no-store" }),
@@ -91,6 +133,7 @@ async function loadDesktopComposer() {
     if (!composerResponse.ok) throw new Error(`Could not load desktop composer (${composerResponse.status}).`);
     desktopComposerMount.innerHTML = `${await templatesResponse.text()}\n${await composerResponse.text()}`;
     await hydrateDesktopComposer();
+    state.composerLoaded = true;
 }
 
 function setComposerStatus(message) {
@@ -190,18 +233,28 @@ async function hydrateDesktopComposer() {
 
 async function api(path, options = {}) {
     if (!state.token) throw new Error("Missing token.");
-    const response = await fetch(path, {
-        ...options,
-        cache: "no-store",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${state.token}`,
-            ...(options.headers || {})
-        }
-    });
+    let response;
+    try {
+        response = await fetch(path, {
+            ...options,
+            cache: "no-store",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${state.token}`,
+                "X-Fauna-Device-Id": state.deviceId,
+                "X-Fauna-Device-Name": state.deviceName,
+                "X-Fauna-Device-Platform": state.devicePlatform,
+                ...(options.headers || {})
+            }
+        });
+    } catch {
+        throw new Error("Could not reach the PC. Make sure both devices are on the same Wi-Fi and Phone Sync is enabled.");
+    }
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok === false) {
-        const message = data.error || `HTTP ${response.status}`;
+        const message = response.status === 401
+            ? "Token was rejected. Copy the current token from Phone Sync again."
+            : data.error || `HTTP ${response.status}`;
         if (response.status === 401) {
             storeToken("");
             showPairing();
@@ -675,12 +728,16 @@ async function connectWithToken() {
     saveTokenButton.disabled = true;
     setPairingStatus("Checking token...");
     try {
+        showLoading("Connecting to your PC");
         await api("/api/health");
+        showLoading("Loading desktop composer");
+        await loadDesktopComposer();
         showApp();
         await refresh();
         startPolling();
         setPairingStatus("");
     } catch (error) {
+        showPairing();
         setPairingStatus(error.message);
     } finally {
         saveTokenButton.disabled = false;
@@ -705,14 +762,7 @@ function startNewChat() {
 }
 
 async function boot() {
-    try {
-        await loadDesktopComposer();
-    } catch (error) {
-        setStatus(error.message || "Composer could not load", "error");
-        showPairing();
-        return;
-    }
-
+    loadDeviceIdentity();
     const hashToken = tokenFromHash();
     if (hashToken) {
         storeToken(hashToken);
@@ -739,14 +789,24 @@ async function boot() {
     newChatButton.addEventListener("click", startNewChat);
     pinButton.addEventListener("click", () => void togglePin());
 
-    updateComposerState();
     if (!state.token) {
         showPairing();
         return;
     }
-    showApp();
-    void refresh();
-    startPolling();
+
+    try {
+        showLoading("Connecting to your PC");
+        await api("/api/health");
+        showLoading("Loading desktop composer");
+        await loadDesktopComposer();
+        updateComposerState();
+        showApp();
+        await refresh();
+        startPolling();
+    } catch (error) {
+        showPairing();
+        setPairingStatus(error.message || "Could not load phone sync.");
+    }
 }
 
 void boot();

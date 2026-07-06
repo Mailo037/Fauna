@@ -385,6 +385,11 @@ const appInfoRemoteQrCode = document.getElementById("appInfoRemoteQrCode");
 const appInfoRemoteQrHint = document.getElementById("appInfoRemoteQrHint");
 const appInfoRemoteCopyBtn = document.getElementById("appInfoRemoteCopyBtn");
 const appInfoRemoteRotateBtn = document.getElementById("appInfoRemoteRotateBtn");
+const appPhoneDevicesRefreshBtn = document.getElementById("appPhoneDevicesRefreshBtn");
+const appPhoneDeviceSummary = document.getElementById("appPhoneDeviceSummary");
+const appPhoneDeviceSyncStatus = document.getElementById("appPhoneDeviceSyncStatus");
+const appPhoneDeviceList = document.getElementById("appPhoneDeviceList");
+const appPhoneDeviceEmpty = document.getElementById("appPhoneDeviceEmpty");
 const appInfoChatCount = document.getElementById("appInfoChatCount");
 const appInfoStoredKeys = document.getElementById("appInfoStoredKeys");
 const appInfoOnboardingBtn = document.getElementById("appInfoOnboardingBtn");
@@ -545,12 +550,25 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.3.1";
-const FAUNA_APP_BUILD_ID = "20260706-phone-settings";
+const FAUNA_APP_VERSION = "0.3.2";
+const FAUNA_APP_BUILD_ID = "20260706-phone-sync-fix";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.3.2",
+        date: "2026-07-06",
+        commit: "v0.3.2",
+        title: "Phone sync connection fixes",
+        changes: [
+            "Prefer reachable Wi-Fi and Ethernet addresses for phone QR pairing instead of virtual network adapters.",
+            "Added desktop Settings > Phone Sync with paired-device status, syncing indicators, blocking, unblocking, and forgetting.",
+            "Added a Fauna loading screen on Android while the PC connection and desktop composer load.",
+            "Improved Android pairing so copied pairing text, QR links, and mobile URLs are parsed reliably before loading the WebView.",
+            "Added clearer mobile connection errors for unreachable PCs, rejected tokens, and blocked devices."
+        ]
+    },
     {
         version: "0.3.1",
         date: "2026-07-06",

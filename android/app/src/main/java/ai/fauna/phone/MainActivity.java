@@ -10,6 +10,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.net.http.SslError;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -27,12 +28,19 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.UUID;
 import java.net.URLEncoder;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
     private static final String PREFS_NAME = "fauna_phone";
     private static final String SERVER_URL_KEY = "server_url";
     private static final String TOKEN_KEY = "token";
+    private static final String DEVICE_ID_KEY = "device_id";
 
     private SharedPreferences prefs;
     private WebView webView;
@@ -190,17 +198,17 @@ public class MainActivity extends Activity {
         addWithTopMargin(panel, statusText, 12);
 
         connectButton.setOnClickListener(view -> {
-            String serverUrl = normalizeServerUrl(serverInput.getText().toString());
-            String token = tokenInput.getText().toString().trim();
-            if (serverUrl.isEmpty() || token.isEmpty()) {
+            PairingDetails pairing = extractPairingDetails(
+                serverInput.getText().toString(),
+                tokenInput.getText().toString()
+            );
+            if (pairing.serverUrl.isEmpty() || pairing.token.isEmpty()) {
                 statusText.setText("URL and token are required.");
                 return;
             }
-            prefs.edit()
-                .putString(SERVER_URL_KEY, serverUrl)
-                .putString(TOKEN_KEY, token)
-                .apply();
-            loadRemoteUi(serverUrl, token);
+            serverInput.setText(pairing.serverUrl);
+            tokenInput.setText(pairing.token);
+            checkAndConnect(pairing.serverUrl, pairing.token, connectButton);
         });
 
         setContentView(scroll);
@@ -217,17 +225,18 @@ public class MainActivity extends Activity {
         if (data == null) return false;
         if (!"fauna".equalsIgnoreCase(data.getScheme()) || !"pair".equalsIgnoreCase(data.getHost())) return false;
 
-        String serverUrl = normalizeServerUrl(firstNonEmpty(data.getQueryParameter("u"), data.getQueryParameter("url")));
-        String token = firstNonEmpty(data.getQueryParameter("t"), data.getQueryParameter("token"));
-        if (serverUrl.isEmpty() || token.isEmpty()) {
+        PairingDetails pairing = extractPairingDetails(
+            firstNonEmpty(data.getQueryParameter("u"), data.getQueryParameter("url")),
+            firstNonEmpty(data.getQueryParameter("t"), data.getQueryParameter("token"))
+        );
+        if (pairing.serverUrl.isEmpty() || pairing.token.isEmpty()) {
             showConnectionForm("The QR code did not include a complete Fauna pairing.");
             return true;
         }
-        prefs.edit()
-            .putString(SERVER_URL_KEY, serverUrl)
-            .putString(TOKEN_KEY, token)
-            .apply();
-        loadRemoteUi(serverUrl, token);
+        showConnectionForm("Checking pairing...");
+        if (serverInput != null) serverInput.setText(pairing.serverUrl);
+        if (tokenInput != null) tokenInput.setText(pairing.token);
+        checkAndConnect(pairing.serverUrl, pairing.token, null);
         return true;
     }
 
@@ -236,6 +245,14 @@ public class MainActivity extends Activity {
         if (value.isEmpty()) return "";
         if (!value.startsWith("http://") && !value.startsWith("https://")) {
             value = "http://" + value;
+        }
+        int hashIndex = value.indexOf('#');
+        if (hashIndex >= 0) {
+            value = value.substring(0, hashIndex);
+        }
+        int queryIndex = value.indexOf('?');
+        if (queryIndex >= 0) {
+            value = value.substring(0, queryIndex);
         }
         while (value.endsWith("/")) {
             value = value.substring(0, value.length() - 1);
@@ -246,9 +263,165 @@ public class MainActivity extends Activity {
         return value;
     }
 
+    private String firstRegexGroup(String text, String expression) {
+        Matcher matcher = Pattern.compile(expression, Pattern.CASE_INSENSITIVE | Pattern.MULTILINE).matcher(text == null ? "" : text);
+        return matcher.find() ? matcher.group(1).trim() : "";
+    }
+
+    private String trimPastedValue(String value) {
+        return (value == null ? "" : value.trim())
+            .replaceAll("[\\s<>\"']+$", "")
+            .replaceAll("^[\\s<>\"']+", "");
+    }
+
+    private PairingDetails parsePairingUri(String value) {
+        String clean = trimPastedValue(value);
+        if (clean.isEmpty()) return null;
+        try {
+            Uri uri = Uri.parse(clean);
+            if ("fauna".equalsIgnoreCase(uri.getScheme()) && "pair".equalsIgnoreCase(uri.getHost())) {
+                return new PairingDetails(
+                    normalizeServerUrl(firstNonEmpty(uri.getQueryParameter("u"), uri.getQueryParameter("url"))),
+                    firstNonEmpty(uri.getQueryParameter("t"), uri.getQueryParameter("token"))
+                );
+            }
+            String fragment = uri.getFragment();
+            String fragmentToken = getParamFromQueryLikeString(fragment, "token");
+            if (fragmentToken.isEmpty()) fragmentToken = getParamFromQueryLikeString(fragment, "t");
+            if (!fragmentToken.isEmpty()) {
+                return new PairingDetails(normalizeServerUrl(clean), fragmentToken);
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return null;
+    }
+
+    private String getParamFromQueryLikeString(String value, String key) {
+        if (value == null || value.isEmpty()) return "";
+        for (String part : value.split("&")) {
+            int equals = part.indexOf('=');
+            if (equals <= 0) continue;
+            String partKey = Uri.decode(part.substring(0, equals)).trim();
+            if (key.equalsIgnoreCase(partKey)) return Uri.decode(part.substring(equals + 1)).trim();
+        }
+        return "";
+    }
+
+    private PairingDetails extractPairingDetails(String urlText, String tokenText) {
+        String combined = (urlText == null ? "" : urlText) + "\n" + (tokenText == null ? "" : tokenText);
+        String deepLink = firstRegexGroup(combined, "(fauna://pair\\?\\S+)");
+        PairingDetails fromDeepLink = parsePairingUri(deepLink);
+        if (fromDeepLink != null && !fromDeepLink.serverUrl.isEmpty() && !fromDeepLink.token.isEmpty()) return fromDeepLink;
+
+        PairingDetails fromUrl = parsePairingUri(urlText);
+        if (fromUrl != null && (!fromUrl.serverUrl.isEmpty() || !fromUrl.token.isEmpty())) {
+            return new PairingDetails(
+                firstNonEmpty(fromUrl.serverUrl, normalizeServerUrl(urlText)),
+                firstNonEmpty(fromUrl.token, tokenText)
+            );
+        }
+
+        String pastedUrl = firstRegexGroup(combined, "^\\s*(?:phone\\s+url|url)\\s*:\\s*(\\S+)");
+        if (pastedUrl.isEmpty()) pastedUrl = firstRegexGroup(combined, "(https?://\\S+)");
+        String pastedToken = firstRegexGroup(combined, "^\\s*token\\s*:\\s*(\\S+)");
+
+        return new PairingDetails(
+            normalizeServerUrl(firstNonEmpty(pastedUrl, urlText)),
+            trimPastedValue(firstNonEmpty(pastedToken, tokenText))
+        );
+    }
+
     private String encodeUrlPart(String value) {
         try {
             return URLEncoder.encode(value, "UTF-8");
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String getDeviceName() {
+        String manufacturer = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim();
+        String model = Build.MODEL == null ? "" : Build.MODEL.trim();
+        String combined = (manufacturer + " " + model).trim().replaceAll("\\s+", " ");
+        return combined.isEmpty() ? "Android phone" : combined;
+    }
+
+    private String getFaunaDeviceId() {
+        String existing = prefs.getString(DEVICE_ID_KEY, "");
+        if (existing != null && !existing.trim().isEmpty()) return existing.trim();
+        String created = "android-" + UUID.randomUUID().toString();
+        prefs.edit().putString(DEVICE_ID_KEY, created).apply();
+        return created;
+    }
+
+    private void savePairing(String serverUrl, String token) {
+        prefs.edit()
+            .putString(SERVER_URL_KEY, serverUrl)
+            .putString(TOKEN_KEY, token)
+            .apply();
+    }
+
+    private void checkAndConnect(String serverUrl, String token, Button connectButton) {
+        if (statusText != null) statusText.setText("Checking connection...");
+        if (connectButton != null) connectButton.setEnabled(false);
+
+        new Thread(() -> {
+            ConnectionResult result = checkRemoteHealth(serverUrl, token);
+            runOnUiThread(() -> {
+                if (connectButton != null) connectButton.setEnabled(true);
+                if (!result.ok) {
+                    if (statusText != null) statusText.setText(result.message);
+                    return;
+                }
+                savePairing(serverUrl, token);
+                loadRemoteUi(serverUrl, token);
+            });
+        }).start();
+    }
+
+    private ConnectionResult checkRemoteHealth(String serverUrl, String token) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(normalizeServerUrl(serverUrl) + "/api/health");
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(6500);
+            connection.setReadTimeout(6500);
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Authorization", "Bearer " + token);
+            connection.setRequestProperty("X-Fauna-Device-Id", getFaunaDeviceId());
+            connection.setRequestProperty("X-Fauna-Device-Name", getDeviceName());
+            connection.setRequestProperty("X-Fauna-Device-Platform", "android");
+
+            int code = connection.getResponseCode();
+            if (code >= 200 && code < 300) return new ConnectionResult(true, "");
+            if (code == 401) return new ConnectionResult(false, "Token was rejected. Copy the current token from Phone Sync again.");
+            if (code == 403) return new ConnectionResult(false, "This phone is blocked in Fauna Desktop settings.");
+            String body = readResponseSnippet(connection);
+            return new ConnectionResult(false, body.isEmpty() ? "PC answered with HTTP " + code + "." : body);
+        } catch (Exception error) {
+            return new ConnectionResult(false, "Could not reach the PC. Make sure both devices are on the same Wi-Fi and Phone Sync is enabled.");
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private String readResponseSnippet(HttpURLConnection connection) {
+        try {
+            InputStream stream = connection.getErrorStream();
+            if (stream == null) stream = connection.getInputStream();
+            if (stream == null) return "";
+            byte[] buffer = new byte[240];
+            int length = stream.read(buffer);
+            stream.close();
+            if (length <= 0) return "";
+            String text = new String(buffer, 0, length).replaceAll("\\s+", " ").trim();
+            if (text.contains("\"error\"")) {
+                String message = text.replaceAll("^.*\"error\"\\s*:\\s*\"([^\"]+)\".*$", "$1");
+                if (!message.equals(text)) return message;
+            }
+            return text;
         } catch (Exception ignored) {
             return "";
         }
@@ -284,7 +457,9 @@ public class MainActivity extends Activity {
 
         setContentView(webView);
         String encodedToken = encodeUrlPart(token);
-        webView.loadUrl(normalizeServerUrl(serverUrl) + "/mobile/#token=" + encodedToken);
+        String encodedDeviceId = encodeUrlPart(getFaunaDeviceId());
+        String encodedDeviceName = encodeUrlPart(getDeviceName());
+        webView.loadUrl(normalizeServerUrl(serverUrl) + "/mobile/#token=" + encodedToken + "&deviceId=" + encodedDeviceId + "&deviceName=" + encodedDeviceName + "&platform=android");
     }
 
     @Override
@@ -298,5 +473,25 @@ public class MainActivity extends Activity {
             return;
         }
         super.onBackPressed();
+    }
+
+    private static class PairingDetails {
+        final String serverUrl;
+        final String token;
+
+        PairingDetails(String serverUrl, String token) {
+            this.serverUrl = serverUrl == null ? "" : serverUrl.trim();
+            this.token = token == null ? "" : token.trim();
+        }
+    }
+
+    private static class ConnectionResult {
+        final boolean ok;
+        final String message;
+
+        ConnectionResult(boolean ok, String message) {
+            this.ok = ok;
+            this.message = message == null ? "" : message;
+        }
     }
 }

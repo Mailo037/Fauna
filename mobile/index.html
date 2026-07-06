@@ -10,6 +10,16 @@
     <link rel="stylesheet" href="/mobile/styles.css">
 </head>
 <body>
+    <main id="loadingView" class="mobile-loading-view" aria-live="polite">
+        <section class="mobile-loading-panel">
+            <span class="mobile-boot-loader-mark" aria-hidden="true">
+                <img src="/favicon.png" alt="" decoding="async">
+            </span>
+            <strong>Fauna</strong>
+            <span id="loadingStatus">Loading phone sync</span>
+        </section>
+    </main>
+
     <main id="pairingView" class="pairing-view" hidden>
         <section class="pairing-panel" aria-labelledby="pairingTitle">
             <img class="pairing-mark" src="/favicon.png" alt="" decoding="async">

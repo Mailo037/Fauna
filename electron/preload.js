@@ -95,6 +95,18 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
     },
     rotateToken() {
       return ipcRenderer.invoke("fauna:remote-access-rotate-token");
+    },
+    listDevices() {
+      return ipcRenderer.invoke("fauna:remote-devices-list");
+    },
+    setDeviceBlocked(deviceId, blocked) {
+      return ipcRenderer.invoke("fauna:remote-device-set-blocked", { deviceId, blocked: Boolean(blocked) });
+    },
+    forgetDevice(deviceId) {
+      return ipcRenderer.invoke("fauna:remote-device-forget", deviceId);
+    },
+    onDevicesChanged(handler) {
+      return onRendererEvent("fauna:remote-devices-changed", handler);
     }
   },
   skills: {

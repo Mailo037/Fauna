@@ -121,6 +121,10 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path><circle cx="8" cy="6" r="1"></circle><circle cx="16" cy="12" r="1"></circle><circle cx="10" cy="18" r="1"></circle></svg>
                     <span>Local Services</span>
                 </button>
+                <button class="settings-nav-item" type="button" data-settings-pane="phone" aria-selected="false">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"></rect><path d="M11 18h2"></path><path d="M12 7v3"></path><path d="M10.5 8.5h3"></path></svg>
+                    <span>Phone Sync</span>
+                </button>
                 <button class="settings-nav-item" type="button" data-settings-pane="info" aria-selected="false">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path></svg>
                     <span>Info</span>
@@ -978,45 +982,16 @@
                 </div>
             </div>
 
-            <div class="settings-pane" data-settings-pane-panel="info" hidden>
+            <div class="settings-pane" data-settings-pane-panel="phone" hidden>
                 <div class="provider-model-section settings-panel-section settings-panel-section-first">
                     <div class="settings-section-heading">
-                        <p class="provider-section-label">App</p>
-                        <span id="appInfoUpdateStatus" class="settings-status-badge">Checking</span>
+                        <div>
+                            <p class="provider-section-label">Phone Sync</p>
+                            <p class="settings-section-desc">Pair Android devices, watch their sync state, and block access per phone.</p>
+                        </div>
+                        <span id="appPhoneDeviceSummary" class="settings-status-badge">No devices</span>
                     </div>
-                    <div class="app-info-grid" aria-label="App information">
-                        <div class="app-info-row">
-                            <span>Version</span>
-                            <strong id="appInfoVersion">Unknown</strong>
-                        </div>
-                        <div class="app-info-row">
-                            <span>Storage</span>
-                            <strong id="appInfoStorageBackend">Browser</strong>
-                        </div>
-                        <div class="app-info-row">
-                            <span>Chats</span>
-                            <strong id="appInfoChatCount">0</strong>
-                        </div>
-                        <div class="app-info-row">
-                            <span>Bridge</span>
-                            <strong id="appInfoBridgeEndpoint">Not set</strong>
-                        </div>
-                        <div class="app-info-row">
-                            <span>Agent access</span>
-                            <strong id="appInfoWorkspaceAccessPolicy">Output only</strong>
-                        </div>
-                    </div>
-                    <div class="provider-actions app-info-actions">
-                        <button id="appInfoOnboardingBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Run onboarding</button>
-                    </div>
-                </div>
-
-                <div class="provider-model-section settings-panel-section app-info-collapsible" data-app-info-section>
-                    <button class="app-info-section-toggle" type="button" data-app-info-toggle aria-expanded="true" aria-controls="appInfoRemoteSection">
-                        <span class="provider-section-label">Phone sync</span>
-                        <svg class="app-info-section-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
-                    </button>
-                    <div id="appInfoRemoteSection" class="app-info-section-body settings-control-stack">
+                    <div class="settings-control-stack">
                         <div class="settings-control-card">
                             <div class="setting-info">
                                 <span class="setting-title">Android remote access</span>
@@ -1047,7 +1022,55 @@
                         <div class="provider-actions app-info-actions">
                             <button id="appInfoRemoteCopyBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Copy pairing</button>
                             <button id="appInfoRemoteRotateBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">New token</button>
+                            <button id="appPhoneDevicesRefreshBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Refresh devices</button>
                         </div>
+                    </div>
+                </div>
+
+                <div class="provider-model-section settings-panel-section">
+                    <div class="settings-section-heading">
+                        <div>
+                            <p class="provider-section-label">Paired devices</p>
+                            <p class="settings-section-desc">Devices appear here after they connect with the current pairing token.</p>
+                        </div>
+                        <span id="appPhoneDeviceSyncStatus" class="settings-status-badge">Idle</span>
+                    </div>
+                    <div id="appPhoneDeviceList" class="phone-device-list" aria-live="polite">
+                        <p id="appPhoneDeviceEmpty" class="phone-device-empty">No paired phones yet.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-pane" data-settings-pane-panel="info" hidden>
+                <div class="provider-model-section settings-panel-section settings-panel-section-first">
+                    <div class="settings-section-heading">
+                        <p class="provider-section-label">App</p>
+                        <span id="appInfoUpdateStatus" class="settings-status-badge">Checking</span>
+                    </div>
+                    <div class="app-info-grid" aria-label="App information">
+                        <div class="app-info-row">
+                            <span>Version</span>
+                            <strong id="appInfoVersion">Unknown</strong>
+                        </div>
+                        <div class="app-info-row">
+                            <span>Storage</span>
+                            <strong id="appInfoStorageBackend">Browser</strong>
+                        </div>
+                        <div class="app-info-row">
+                            <span>Chats</span>
+                            <strong id="appInfoChatCount">0</strong>
+                        </div>
+                        <div class="app-info-row">
+                            <span>Bridge</span>
+                            <strong id="appInfoBridgeEndpoint">Not set</strong>
+                        </div>
+                        <div class="app-info-row">
+                            <span>Agent access</span>
+                            <strong id="appInfoWorkspaceAccessPolicy">Output only</strong>
+                        </div>
+                    </div>
+                    <div class="provider-actions app-info-actions">
+                        <button id="appInfoOnboardingBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Run onboarding</button>
                     </div>
                 </div>
 
