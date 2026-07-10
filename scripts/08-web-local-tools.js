@@ -359,6 +359,34 @@ function commandResultMatchesWaitCondition(result, {
         : output.toLowerCase().includes(needle.toLowerCase());
 }
 
+async function requireLocalCommandToolApproval({
+    title = "Run local command?",
+    message = "Fauna is requesting permission to run a command on this machine.",
+    command = "",
+    cwd = ".",
+    timeoutSeconds = 20,
+    details = [],
+    signal = null
+} = {}) {
+    const approved = await showApprovalDialog({
+        title,
+        message,
+        details: [
+            `Command: ${String(command)}`,
+            `Working directory: ${String(cwd || ".")}`,
+            `Timeout: ${Number(timeoutSeconds)} seconds`,
+            ...details
+        ],
+        confirmLabel: "Run command",
+        cancelLabel: "Cancel",
+        signal
+    });
+    if (!approved) {
+        throwIfAborted(signal);
+        throw new Error("Local command cancelled because it was not approved.");
+    }
+}
+
 async function executeWaitForCommandToolCall(toolCall, signal = null) {
     const command = String(toolCall.command || toolCall.cmd || toolCall.shell || "").trim();
     if (!command) {
@@ -377,6 +405,19 @@ async function executeWaitForCommandToolCall(toolCall, signal = null) {
     const expectedExitCode = normalizeExpectedExitCode(toolCall.expectedExitCode ?? toolCall.exitCode ?? 0);
     const contains = String(toolCall.contains || toolCall.match || toolCall.stdoutContains || "").trim();
     const commandTimeout = Math.max(1, Math.min(60, Number(toolCall.commandTimeout || toolCall.commandTimeoutSeconds || toolCall.timeout || 10) || 10));
+    throwIfAborted(signal);
+    await requireLocalCommandToolApproval({
+        title: "Run command until a condition matches?",
+        message: "Fauna will repeatedly run this local command until the condition matches or the maximum wait expires.",
+        command,
+        cwd: toolCall.cwd || ".",
+        timeoutSeconds: commandTimeout,
+        signal,
+        details: [
+            `Maximum wait: ${maxMs}ms (${formatDuration(maxMs)})`,
+            `Polling interval: ${intervalMs}ms (${formatDuration(intervalMs)})`
+        ]
+    });
     const startedAt = Date.now();
     let attempts = 0;
     let lastResult = null;
@@ -468,9 +509,19 @@ async function executeStopwatchCommandToolCall(toolCall, signal = null) {
         throw new Error("stopwatch command timing requires the Local Workspace Bridge.");
     }
 
+    const timeout = Math.max(1, Math.min(60, Number(toolCall.timeout || toolCall.commandTimeout || toolCall.commandTimeoutSeconds || 20) || 20));
+    throwIfAborted(signal);
+    await requireLocalCommandToolApproval({
+        title: "Run timed local command?",
+        message: "Fauna will run this local command once and measure how long it takes.",
+        command,
+        cwd: toolCall.cwd || ".",
+        timeoutSeconds: timeout,
+        signal
+    });
+    throwIfAborted(signal);
     const startedAtEpochMs = Date.now();
     const startedAt = performance.now();
-    const timeout = Math.max(1, Math.min(60, Number(toolCall.timeout || toolCall.commandTimeout || toolCall.commandTimeoutSeconds || 20) || 20));
     const result = await runWorkspaceCommand(command, toolCall.cwd || ".", timeout, signal, getWorkspaceToolBridgeOptions(signal));
     const elapsedMs = performance.now() - startedAt;
     const bridgeDuration = Number.isFinite(Number(result.durationMs))
@@ -765,7 +816,7 @@ function getWorkspaceToolScope(signal = null) {
         : "";
     if (projectScope) return projectScope;
     if (getEffectiveWorkspaceAccessPolicy() !== WORKSPACE_ACCESS_POLICY_CHAT_OUTPUT) return "";
-    return `chats/${sanitizeWorkspacePolicySegment(getWorkspaceToolSessionId(signal), "unassigned-chat")}/output`;
+    return `${sanitizeWorkspacePolicySegment(getWorkspaceToolSessionId(signal), "unassigned-chat")}/output`;
 }
 
 function getWorkspaceToolBridgeOptions(signal = null) {
@@ -2239,7 +2290,16 @@ async function executeFaunaToolCall(toolCall, signal = null) {
     }
     if (toolCall.tool === "run_command") {
         if (!toolCall.command) throw new Error("run_command requires a command.");
-        return formatWorkspaceCommandResult(await runWorkspaceCommand(toolCall.command, toolCall.cwd || ".", toolCall.timeout || 20, signal, bridgeOptions));
+        const timeout = Math.max(1, Math.min(60, Number(toolCall.timeout) || 20));
+        throwIfAborted(signal);
+        await requireLocalCommandToolApproval({
+            command: toolCall.command,
+            cwd: toolCall.cwd || ".",
+            timeoutSeconds: timeout,
+            signal
+        });
+        throwIfAborted(signal);
+        return formatWorkspaceCommandResult(await runWorkspaceCommand(toolCall.command, toolCall.cwd || ".", timeout, signal, bridgeOptions));
     }
     throw new Error("Unknown local tool.");
 }

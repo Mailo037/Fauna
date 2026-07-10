@@ -38,13 +38,14 @@
             <button id="chatSidebarButton" class="icon-button sidebar-toggle" type="button" aria-label="Open chats" aria-expanded="false">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h16"></path></svg>
             </button>
-            <div class="brand-lockup">
+            <button id="pcSwitcherButton" class="brand-lockup pc-switcher" type="button" aria-label="Manage connected PCs">
                 <img class="brand-mark" src="/favicon.png" alt="" decoding="async">
                 <div>
-                    <strong>Fauna</strong>
+                    <strong id="activePcName">Fauna PC</strong>
                     <span id="connectionStatus">Connecting</span>
                 </div>
-            </div>
+                <svg class="pc-switcher-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"></path></svg>
+            </button>
             <div class="topbar-actions">
                 <button id="settingsButton" class="icon-button" type="button" aria-label="Open settings">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2a2 2 0 0 1-4 0V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 0 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H2.8a2 2 0 0 1 0-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7A2 2 0 0 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.2a2 2 0 0 1 4 0V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 0 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2a2 2 0 0 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg>
@@ -213,6 +214,16 @@
 
                     <div class="settings-pane" data-mobile-settings-panel="phone" hidden>
                         <div class="provider-model-section settings-panel-section settings-panel-section-first">
+                            <p class="provider-section-label">Connected PC</p>
+                            <section class="settings-control-card settings-control-card-stacked mobile-active-pc-card">
+                                <div class="setting-info">
+                                    <span class="setting-title" id="phoneActivePcName">Fauna PC</span>
+                                    <span class="setting-desc" id="phoneActivePcUrl">Current Phone URL</span>
+                                </div>
+                                <button id="managePcConnectionsButton" class="small-button" type="button">Manage PCs</button>
+                            </section>
+                        </div>
+                        <div class="provider-model-section settings-panel-section settings-panel-section-first">
                             <p class="provider-section-label">This device</p>
                             <section class="settings-control-card settings-control-card-stacked">
                                 <div class="setting-info">
@@ -241,6 +252,20 @@
                                     <button id="checkUpdateButton" class="small-button" type="button">Check</button>
                                     <button id="installUpdateButton" class="small-button" type="button" disabled>Install</button>
                                 </div>
+                            </section>
+                        </div>
+                        <div class="provider-model-section settings-panel-section">
+                            <p class="provider-section-label">Settings transfer</p>
+                            <section class="settings-control-card settings-control-card-stacked mobile-settings-transfer-card">
+                                <div class="setting-info">
+                                    <span class="setting-title">Portable PC settings</span>
+                                    <span class="setting-desc">Export or import desktop preferences. Chats, API keys, tokens, paths, and local endpoints stay excluded.</span>
+                                </div>
+                                <div class="mobile-settings-actions">
+                                    <button id="mobileSettingsExportButton" class="small-button" type="button">Export</button>
+                                    <button id="mobileSettingsImportButton" class="small-button" type="button">Import</button>
+                                </div>
+                                <input id="mobileSettingsImportInput" type="file" accept="application/json,.json" hidden>
                             </section>
                         </div>
                         <div class="mobile-settings-list" data-mobile-settings-list="info" aria-live="polite"></div>

@@ -944,36 +944,65 @@ function createTenSecondClip(sourceImage, prompt, signal = null) {
     const durationMs = 10000;
     const startedAt = performance.now();
     let failed = false;
+    let settled = false;
     const motionProfile = getVideoMotionProfile(prompt);
     const particles = createVideoParticles(prompt, 90, canvas.width, canvas.height);
 
     return new Promise((resolve, reject) => {
+        const stopCapture = () => {
+            stream.getTracks().forEach(track => track.stop());
+            signal?.removeEventListener("abort", onAbort);
+        };
+        const fail = error => {
+            if (settled) return;
+            settled = true;
+            failed = true;
+            stopCapture();
+            reject(error);
+        };
+        const onAbort = () => {
+            failed = true;
+            try {
+                if (recorder.state !== "inactive") recorder.stop();
+            } catch (err) {
+                fail(err);
+                return;
+            }
+            fail(new DOMException("Generation stopped", "AbortError"));
+        };
+
         if (signal?.aborted) {
-            reject(new DOMException("Generation stopped", "AbortError"));
+            fail(new DOMException("Generation stopped", "AbortError"));
             return;
         }
         recorder.ondataavailable = event => {
             if (event.data.size > 0) chunks.push(event.data);
         };
 
-        recorder.onerror = event => reject(event.error || new Error("Recording failed"));
+        recorder.onerror = event => {
+            failed = true;
+            try {
+                if (recorder.state !== "inactive") recorder.stop();
+            } catch {
+                // The original recorder error is more useful than a secondary stop failure.
+            }
+            fail(event.error || new Error("Recording failed"));
+        };
         recorder.onstop = () => {
+            if (settled || failed) {
+                stopCapture();
+                return;
+            }
             const blob = new Blob(chunks, { type: mimeType });
+            settled = true;
+            stopCapture();
             resolve({
                 url: URL.createObjectURL(blob),
                 extension: "mp4"
             });
         };
 
-        signal?.addEventListener("abort", () => {
-            failed = true;
-            try {
-                if (recorder.state !== "inactive") recorder.stop();
-            } catch (err) {
-                reject(err);
-            }
-            reject(new DOMException("Generation stopped", "AbortError"));
-        }, { once: true });
+        signal?.addEventListener("abort", onAbort, { once: true });
 
         function drawFrame(now) {
             const progress = Math.min((now - startedAt) / durationMs, 1);
@@ -988,8 +1017,12 @@ function createTenSecondClip(sourceImage, prompt, signal = null) {
                 drawImageLayer(ctx, sourceImage, canvas, camera.mainScale, camera.mainX, camera.mainY, 1);
             } catch (e) {
                 failed = true;
-                if (recorder.state === "recording") recorder.stop();
-                reject(new Error("The generated image could not be recorded by this browser"));
+                try {
+                    if (recorder.state === "recording") recorder.stop();
+                } catch {
+                    // Cleanup below still stops the capture stream.
+                }
+                fail(new Error("The generated image could not be recorded by this browser"));
                 return;
             }
 
@@ -1002,8 +1035,12 @@ function createTenSecondClip(sourceImage, prompt, signal = null) {
             }
         }
 
-        recorder.start();
-        requestAnimationFrame(drawFrame);
+        try {
+            recorder.start();
+            requestAnimationFrame(drawFrame);
+        } catch (error) {
+            fail(error);
+        }
     });
 }
 

@@ -871,6 +871,7 @@ function getRequiredOllamaModels() {
     ].map(normalizeModelId).filter(Boolean)));
 }
 let installedOllamaModels = [];
+let installedOllamaModelRecords = new Map();
 let localModelOptions = [...LOCAL_MODEL_OPTIONS];
 let ollamaModelCapabilities = new Map();
 let availableOpenAiModelIds = null;
@@ -1094,6 +1095,71 @@ function ollamaModelMatches(installedModel, requestedModel) {
     return installed === requested
         || installed === `${requested}:latest`
         || `${installed}:latest` === requested;
+}
+
+function getOllamaModelSource(modelId = "") {
+    return /^hf\.co\//i.test(normalizeModelId(modelId)) ? "huggingface" : "ollama";
+}
+
+function getOllamaModelSourceLabel(modelId = "") {
+    return getOllamaModelSource(modelId) === "huggingface" ? "Hugging Face" : "Ollama";
+}
+
+function getHuggingFaceRepoIdFromOllamaModel(modelId = "") {
+    const match = normalizeModelId(modelId).match(/^hf\.co\/([^/]+\/[^:]+)(?::[^:]+)?$/i);
+    return match ? match[1] : "";
+}
+
+function normalizeInstalledOllamaModelRecord(raw = {}) {
+    const value = typeof raw === "string" ? { name: raw } : raw;
+    if (!value || typeof value !== "object") return null;
+    const id = normalizeModelId(value.name || value.model || value.id);
+    if (!id) return null;
+    const details = value.details && typeof value.details === "object" ? value.details : {};
+    return {
+        id,
+        source: getOllamaModelSource(id),
+        sourceLabel: getOllamaModelSourceLabel(id),
+        repoId: getHuggingFaceRepoIdFromOllamaModel(id),
+        size: Math.max(0, Number(value.size) || 0),
+        digest: String(value.digest || "").trim(),
+        modifiedAt: String(value.modified_at || value.modifiedAt || ""),
+        format: String(value.format || details.format || "").trim(),
+        family: String(value.family || details.family || "").trim(),
+        parameterSize: String(value.parameterSize || details.parameter_size || details.parameterSize || "").trim(),
+        quantization: String(value.quantization || details.quantization_level || details.quantization || "").trim()
+    };
+}
+
+function setInstalledOllamaModelRecords(rawModels = []) {
+    const records = (Array.isArray(rawModels) ? rawModels : [])
+        .map(normalizeInstalledOllamaModelRecord)
+        .filter(Boolean);
+    installedOllamaModels = records.map(record => record.id);
+    installedOllamaModelRecords = new Map(records.map(record => [record.id, record]));
+    return records;
+}
+
+function getInstalledOllamaModelRecord(modelId = "") {
+    const requested = normalizeModelId(modelId);
+    if (!requested) return null;
+    for (const [id, record] of installedOllamaModelRecords) {
+        if (ollamaModelMatches(id, requested)) return record;
+    }
+    return null;
+}
+
+function formatInstalledOllamaModelSize(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let amount = bytes;
+    let unit = 0;
+    while (amount >= 1024 && unit < units.length - 1) {
+        amount /= 1024;
+        unit += 1;
+    }
+    return `${amount >= 10 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
 }
 
 function isOllamaModelInstalled(modelId) {
@@ -1738,8 +1804,14 @@ function getOllamaCapabilityMetaParts(capability = {}) {
 
 function getLocalModelMeta(option, installed, capability) {
     const parts = [];
+    const modelId = normalizeModelId(option?.id);
+    const record = installed ? getInstalledOllamaModelRecord(modelId) : null;
     appendUniqueMetaPart(parts, option?.meta);
+    if (getOllamaModelSource(modelId) === "huggingface") appendUniqueMetaPart(parts, "Hugging Face");
     appendUniqueMetaPart(parts, installed ? "Installed" : "Missing");
+    appendUniqueMetaPart(parts, record?.parameterSize);
+    appendUniqueMetaPart(parts, record?.quantization);
+    appendUniqueMetaPart(parts, formatInstalledOllamaModelSize(record?.size));
     getOllamaCapabilityMetaParts(capability).forEach(part => appendUniqueMetaPart(parts, part));
     return parts.join(" · ");
 }

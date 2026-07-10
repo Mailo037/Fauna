@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, protocol, screen, session, shell, Notification } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const crypto = require("node:crypto");
+const dns = require("node:dns/promises");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const http = require("node:http");
@@ -15,6 +16,8 @@ const APP_PROTOCOL = "fauna-app";
 const FILE_PROTOCOL = "fauna-file";
 const DEFAULT_BRIDGE_PORT = 8765;
 const MAX_BRIDGE_PORT = 8795;
+const MAX_GENERATED_MEDIA_BYTES = 100 * 1024 * 1024;
+const MAX_GENERATED_MEDIA_REDIRECTS = 3;
 const WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY = "faunaWorkspaceBridgeEndpoint";
 const WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY = "faunaWorkspaceBridgeToken";
 const WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY = "faunaWorkspaceBridgeEnabled";
@@ -26,6 +29,11 @@ const REMOTE_ACCESS_ENABLED_STORAGE_KEY = "faunaRemoteAccessEnabled";
 const REMOTE_ACCESS_TOKEN_STORAGE_KEY = "faunaRemoteAccessToken";
 const REMOTE_ACCESS_PORT_STORAGE_KEY = "faunaRemoteAccessPort";
 const REMOTE_ACCESS_DEVICES_STORAGE_KEY = "faunaRemoteDevices";
+const REMOTE_INTERNET_MODE_STORAGE_KEY = "faunaRemoteInternetMode";
+const REMOTE_CUSTOM_HTTPS_URL_STORAGE_KEY = "faunaRemoteCustomHttpsUrl";
+const REMOTE_INTERNET_MODE_OFF = "off";
+const REMOTE_INTERNET_MODE_QUICK = "quick";
+const REMOTE_INTERNET_MODE_CUSTOM = "custom";
 const AUTO_INSTALL_UPDATES_STORAGE_KEY = "faunaAutoInstallUpdates";
 const CHAT_SESSIONS_STORAGE_KEY = "faunaChatSessions";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "faunaActiveChatSession";
@@ -76,6 +84,9 @@ const POTATO_SHORT_OUTPUTS_STORAGE_KEY = "faunaPotatoShortOutputsEnabled";
 const POTATO_TRIM_HISTORY_STORAGE_KEY = "faunaPotatoTrimHistoryEnabled";
 const POTATO_REDUCE_MOTION_STORAGE_KEY = "faunaPotatoReduceMotionEnabled";
 const PERSONA_DISPLAY_NAME_STORAGE_KEY = "faunaPersonaDisplayName";
+const PORTABLE_SETTINGS_SCHEMA = "fauna-portable-settings";
+const PORTABLE_SETTINGS_VERSION = 1;
+const MAX_PORTABLE_SETTINGS_FILE_BYTES = 1024 * 1024;
 const WORKSPACE_URL_FRAGMENT_CHAT = "chat";
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 const OLLAMA_BASE_URL_CANDIDATES = Array.from(new Set([
@@ -84,6 +95,7 @@ const OLLAMA_BASE_URL_CANDIDATES = Array.from(new Set([
 ]));
 const OLLAMA_TAGS_PATH = "/api/tags";
 const OLLAMA_TAGS_URL = `${OLLAMA_BASE_URL}${OLLAMA_TAGS_PATH}`;
+const MAX_OLLAMA_MODEL_REFERENCE_LENGTH = 240;
 const DEFAULT_LOCAL_CHAT_MODEL = "qwen3:8b";
 const DEFAULT_OPENAI_CHAT_MODEL = "gpt-5.4-mini";
 const DEFAULT_REMOTE_ACCESS_PORT = 8899;
@@ -141,8 +153,18 @@ let mainWindow = null;
 let quickWindow = null;
 let tray = null;
 let bridgeProcess = null;
+let bridgeRuntimeInfo = null;
+let bridgeLifecycleQueue = Promise.resolve();
 let remoteAccessServer = null;
 let remoteAccessPort = 0;
+let remoteTunnelProcess = null;
+let remoteTunnelUrl = "";
+let remoteTunnelStatus = "off";
+let remoteTunnelError = "";
+let remoteTunnelStartPromise = null;
+let remoteTunnelCancelStart = null;
+let remoteTunnelGeneration = 0;
+let remoteCloudflaredAvailable = null;
 let mainRendererReady = false;
 let pendingOpenChatId = "";
 let pendingQuickPrompt = "";
@@ -281,7 +303,7 @@ function findWorkspaceProjectRoot(projects, rootId) {
 
 async function restartBridgeAfterProjectChange() {
   if (!app.isReady?.()) return null;
-  return startWorkspaceBridge();
+  return restartWorkspaceBridgeIfEnabled();
 }
 
 async function chooseWorkspaceProjectFolders() {
@@ -961,7 +983,7 @@ function getWorkspaceAccessPolicySync() {
 function getBridgeRootForPolicy(policy = getWorkspaceAccessPolicySync()) {
   return policy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE
     ? path.parse(getUserDataRoot()).root || getUserDataRoot()
-    : getUserDataRoot();
+    : getChatsRoot();
 }
 
 function getActiveChatIdSync() {
@@ -1047,7 +1069,7 @@ const REMOTE_EDITABLE_SETTINGS = [
     description: "Set the local chat model id.",
     type: "text",
     defaultValue: DEFAULT_LOCAL_CHAT_MODEL,
-    maxLength: 120
+    maxLength: MAX_OLLAMA_MODEL_REFERENCE_LENGTH
   },
   {
     key: OPENAI_CHAT_MODEL_STORAGE_KEY,
@@ -1575,10 +1597,174 @@ function getRemoteEditableSettings() {
   return REMOTE_EDITABLE_SETTINGS.map(serializeRemoteSetting);
 }
 
-function normalizeOllamaTagModel(model) {
-  if (typeof model === "string") return model.trim();
-  if (!model || typeof model !== "object") return "";
-  return String(model.name || model.model || model.id || "").trim();
+const PORTABLE_SETTING_EXCLUDED_KEYS = new Set([
+  WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY,
+  WORKSPACE_ACCESS_POLICY_STORAGE_KEY,
+  WORKSPACE_CHECKPOINTS_ENABLED_STORAGE_KEY,
+  LOCAL_VOICE_TRANSCRIPTION_ENDPOINT_STORAGE_KEY,
+  LOCAL_VOICE_REPLY_ENDPOINT_STORAGE_KEY,
+  WAN_VIDEO_ENDPOINT_STORAGE_KEY
+]);
+
+function getPortableSettingDefinitions() {
+  return REMOTE_EDITABLE_SETTINGS.filter(definition => !PORTABLE_SETTING_EXCLUDED_KEYS.has(definition.key));
+}
+
+function createPortableSettingsBackup() {
+  const settings = {};
+  for (const definition of getPortableSettingDefinitions()) {
+    settings[definition.key] = serializeRemoteSetting(definition).storageValue;
+  }
+  return {
+    schema: PORTABLE_SETTINGS_SCHEMA,
+    version: PORTABLE_SETTINGS_VERSION,
+    exportedAt: new Date().toISOString(),
+    app: {
+      name: "Fauna",
+      version: app.getVersion()
+    },
+    privacy: {
+      includesSecrets: false,
+      excludes: ["chats", "API keys", "tokens", "workspace paths", "local service endpoints"]
+    },
+    settings
+  };
+}
+
+function normalizePortableSettingsBackup(value) {
+  let backup = value;
+  if (typeof backup === "string") {
+    try {
+      backup = JSON.parse(backup);
+    } catch {
+      throw new Error("The selected file is not valid JSON.");
+    }
+  }
+  if (!backup || typeof backup !== "object" || Array.isArray(backup)) {
+    throw new Error("The selected file is not a Fauna settings backup.");
+  }
+  if (backup.schema !== PORTABLE_SETTINGS_SCHEMA || Number(backup.version) !== PORTABLE_SETTINGS_VERSION) {
+    throw new Error("This settings backup format is not supported.");
+  }
+  if (!backup.settings || typeof backup.settings !== "object" || Array.isArray(backup.settings)) {
+    throw new Error("The settings backup is missing its settings map.");
+  }
+
+  const allowed = new Map(getPortableSettingDefinitions().map(definition => [definition.key, definition]));
+  const settings = {};
+  for (const [key, value] of Object.entries(backup.settings)) {
+    const definition = allowed.get(String(key || ""));
+    if (!definition) continue;
+    settings[definition.key] = normalizeRemoteSettingStorageValue(definition, value);
+  }
+  if (Object.keys(settings).length === 0) throw new Error("The backup does not contain compatible portable settings.");
+  return {
+    schema: PORTABLE_SETTINGS_SCHEMA,
+    version: PORTABLE_SETTINGS_VERSION,
+    exportedAt: String(backup.exportedAt || ""),
+    settings
+  };
+}
+
+function getOllamaModelSource(modelId = "") {
+  return /^hf\.co\//i.test(String(modelId || "").trim()) ? "huggingface" : "ollama";
+}
+
+function getHuggingFaceRepoIdFromOllamaModel(modelId = "") {
+  const match = String(modelId || "").trim().match(/^hf\.co\/([^/]+\/[^:]+)(?::[^:]+)?$/i);
+  return match ? match[1] : "";
+}
+
+function normalizeOllamaTagModelRecord(model) {
+  const raw = typeof model === "string" ? { name: model } : model;
+  if (!raw || typeof raw !== "object") return null;
+  const id = String(raw.name || raw.model || raw.id || "").trim().slice(0, MAX_OLLAMA_MODEL_REFERENCE_LENGTH);
+  if (!id) return null;
+  const details = raw.details && typeof raw.details === "object" ? raw.details : {};
+  const source = getOllamaModelSource(id);
+  return {
+    id,
+    name: id,
+    source,
+    sourceLabel: source === "huggingface" ? "Hugging Face" : "Ollama",
+    repoId: source === "huggingface" ? getHuggingFaceRepoIdFromOllamaModel(id) : "",
+    size: Math.max(0, Number(raw.size) || 0),
+    digest: String(raw.digest || "").trim().slice(0, 160),
+    modifiedAt: String(raw.modified_at || raw.modifiedAt || ""),
+    format: String(details.format || "").trim().slice(0, 40),
+    family: String(details.family || "").trim().slice(0, 80),
+    parameterSize: String(details.parameter_size || details.parameterSize || "").trim().slice(0, 40),
+    quantization: String(details.quantization_level || details.quantization || "").trim().slice(0, 40)
+  };
+}
+
+function normalizeHuggingFaceRepoId(value = "") {
+  let clean = String(value || "").trim();
+  if (!clean) throw new Error("Enter a Hugging Face repository id.");
+  if (/^https?:\/\//i.test(clean)) {
+    let parsed;
+    try {
+      parsed = new URL(clean);
+    } catch {
+      throw new Error("Enter a valid Hugging Face repository URL.");
+    }
+    if (parsed.protocol !== "https:" || !["huggingface.co", "www.huggingface.co", "hf.co"].includes(parsed.hostname.toLowerCase())) {
+      throw new Error("Only HTTPS links from huggingface.co or hf.co are accepted.");
+    }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new Error("The Hugging Face repository URL cannot contain credentials, a query, or a fragment.");
+    }
+    clean = parsed.pathname.replace(/^\/+|\/+$/g, "");
+  }
+  clean = clean.replace(/^hf\.co\//i, "").replace(/^huggingface\.co\//i, "").replace(/^\/+|\/+$/g, "");
+  const segments = clean.split("/");
+  if (segments.length !== 2 || segments.some(segment => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(segment))) {
+    throw new Error("Use a repository id in owner/model-GGUF format.");
+  }
+  return segments.join("/");
+}
+
+function normalizeHuggingFaceQuantization(value = "") {
+  const clean = String(value || "").trim().replace(/^:/, "");
+  if (!clean) return "";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(clean)) {
+    throw new Error("Quantization may contain letters, numbers, dots, underscores, and hyphens only.");
+  }
+  return clean;
+}
+
+function normalizeOllamaPullSpec(payload = {}) {
+  const sourceHint = String(payload.source || "").trim().toLowerCase();
+  let raw = String(payload.modelId || payload.name || payload.repoId || "").trim();
+  const looksLikeHuggingFace = sourceHint === "huggingface"
+    || /^https:\/\/(?:www\.)?huggingface\.co\//i.test(raw)
+    || /^https:\/\/hf\.co\//i.test(raw)
+    || /^hf\.co\//i.test(raw);
+
+  if (looksLikeHuggingFace) {
+    let quantization = normalizeHuggingFaceQuantization(payload.quantization || payload.quant || "");
+    if (!/^https?:\/\//i.test(raw)) {
+      raw = raw.replace(/^hf\.co\//i, "");
+      const slash = raw.indexOf("/");
+      const tag = slash >= 0 ? raw.lastIndexOf(":") : -1;
+      if (tag > slash) {
+        if (!quantization) quantization = normalizeHuggingFaceQuantization(raw.slice(tag + 1));
+        raw = raw.slice(0, tag);
+      }
+    }
+    const repoId = normalizeHuggingFaceRepoId(payload.repoId || raw);
+    const modelId = `hf.co/${repoId}${quantization ? `:${quantization}` : ""}`;
+    return { modelId, source: "huggingface", repoId, quantization };
+  }
+
+  if (!raw) throw new Error("Missing Ollama model id.");
+  if (raw.length > MAX_OLLAMA_MODEL_REFERENCE_LENGTH
+      || !/^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?$/.test(raw)
+      || raw.includes("..")
+      || raw.includes("//")) {
+    throw new Error("Enter a valid Ollama model id.");
+  }
+  return { modelId: raw, source: "ollama", repoId: "", quantization: "" };
 }
 
 function createTimeoutSignal(timeoutMs = 0) {
@@ -1602,10 +1788,10 @@ async function fetchInstalledOllamaModelsFromBase(baseUrl, timeoutMs = 2500) {
     const response = await fetch(`${baseUrl}${OLLAMA_TAGS_PATH}`, { method: "GET", signal: timeout.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json().catch(() => ({}));
-    const models = Array.isArray(data.models)
-      ? data.models.map(normalizeOllamaTagModel).filter(Boolean)
+    const modelRecords = Array.isArray(data.models)
+      ? data.models.map(normalizeOllamaTagModelRecord).filter(Boolean)
       : [];
-    return { baseUrl, models };
+    return { baseUrl, models: modelRecords.map(model => model.id), modelRecords };
   } finally {
     timeout.clear();
   }
@@ -1636,13 +1822,15 @@ async function getQuickModelState() {
       ...state,
       ollamaReachable: true,
       ollamaBaseUrl: ollamaState.baseUrl,
-      installedOllamaModels: ollamaState.models
+      installedOllamaModels: ollamaState.models,
+      installedOllamaModelRecords: ollamaState.modelRecords
     };
   } catch {
     return {
       ...state,
       ollamaReachable: false,
-      installedOllamaModels: []
+      installedOllamaModels: [],
+      installedOllamaModelRecords: []
     };
   }
 }
@@ -1692,6 +1880,7 @@ async function getOllamaStatus() {
       processRunning: true,
       baseUrl: state.baseUrl,
       installedOllamaModels: state.models,
+      installedOllamaModelRecords: state.modelRecords,
       message: `Ollama HTTP is reachable at ${state.baseUrl}.`
     };
   } catch (error) {
@@ -1703,6 +1892,7 @@ async function getOllamaStatus() {
       processRunning,
       baseUrl: "",
       installedOllamaModels: [],
+      installedOllamaModelRecords: [],
       message: processRunning
         ? "Ollama is running, but the HTTP API is not reachable at 127.0.0.1:11434 or localhost:11434."
         : (error?.message || "Ollama is not reachable.")
@@ -1917,8 +2107,8 @@ async function readOllamaPullStream(response, onLine) {
 }
 
 async function pullOllamaModelWithProgress(event, payload = {}) {
-  const modelId = String(payload.modelId || payload.name || "").trim();
-  if (!modelId) throw new Error("Missing Ollama model id.");
+  const pullSpec = normalizeOllamaPullSpec(payload);
+  const { modelId, source, repoId, quantization } = pullSpec;
   const requestId = String(payload.requestId || crypto.randomUUID());
   let lastError = null;
 
@@ -1926,6 +2116,9 @@ async function pullOllamaModelWithProgress(event, payload = {}) {
     event.sender.send("fauna:ollama-pull-progress", {
       requestId,
       modelId,
+      source,
+      repoId,
+      quantization,
       ...data
     });
   };
@@ -1935,6 +2128,8 @@ async function pullOllamaModelWithProgress(event, payload = {}) {
     activeOllamaPulls.set(requestId, {
       controller: timeout.controller,
       modelId,
+      source,
+      repoId,
       baseUrl,
       startedAt: Date.now()
     });
@@ -1956,6 +2151,9 @@ async function pullOllamaModelWithProgress(event, payload = {}) {
         ok: true,
         requestId,
         modelId,
+        source,
+        repoId,
+        quantization,
         baseUrl,
         ...finalData
       };
@@ -1987,6 +2185,8 @@ function cancelOllamaPull(payload = {}) {
     ok: true,
     requestId,
     modelId: active.modelId || "",
+    source: active.source || "ollama",
+    repoId: active.repoId || "",
     message: "Ollama pull cancelled."
   };
 }
@@ -2006,6 +2206,8 @@ function getDesktopInfo(options = {}) {
     fileRefsPath: getFileRefsPath(),
     bridgeEndpoint: storageGetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY),
     bridgeRoot: getBridgeRootForPolicy(workspaceAccessPolicy),
+    bridgeEnabled: storageGetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) === "true",
+    bridgeRunning: isWorkspaceBridgeRunning(),
     workspaceAccessPolicy,
     version: app.getVersion(),
     isPackaged: app.isPackaged,
@@ -2072,6 +2274,196 @@ function getLanIpv4Addresses() {
 function getRemoteAccessUrls(port = remoteAccessPort || getRemoteAccessPreferredPortSync()) {
   const cleanPort = Number(port) || DEFAULT_REMOTE_ACCESS_PORT;
   return getLanIpv4Addresses().map(address => `http://${address}:${cleanPort}`);
+}
+
+function normalizeRemoteInternetMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === REMOTE_INTERNET_MODE_QUICK || mode === REMOTE_INTERNET_MODE_CUSTOM) return mode;
+  return REMOTE_INTERNET_MODE_OFF;
+}
+
+function getRemoteInternetModeSync() {
+  return normalizeRemoteInternetMode(storageGetSync(REMOTE_INTERNET_MODE_STORAGE_KEY));
+}
+
+function normalizeRemoteCustomHttpsUrl(value, { allowEmpty = true } = {}) {
+  const clean = String(value || "").trim();
+  if (!clean && allowEmpty) return "";
+  let parsed;
+  try {
+    parsed = new URL(clean);
+  } catch {
+    throw new Error("Enter a valid public HTTPS URL.");
+  }
+  if (parsed.protocol !== "https:") throw new Error("Internet access requires HTTPS.");
+  if (parsed.username || parsed.password) throw new Error("The public URL cannot contain credentials.");
+  if (parsed.search || parsed.hash) throw new Error("The custom HTTPS URL cannot contain a query or fragment.");
+  const hostname = String(parsed.hostname || "").toLowerCase();
+  if (!hostname || isLoopbackHostname(hostname) || hostname.endsWith(".local")) {
+    throw new Error("The custom URL must be a public HTTPS address.");
+  }
+  if (net.isIP(stripIpv6Brackets(hostname)) && isNonPublicIpAddress(hostname)) {
+    throw new Error("Use the LAN Phone URL for private addresses.");
+  }
+  if (parsed.pathname !== "/" && parsed.pathname !== "") {
+    throw new Error("The custom HTTPS URL cannot contain a path.");
+  }
+  parsed.pathname = "/";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function getRemoteCustomHttpsUrlSync() {
+  try {
+    return normalizeRemoteCustomHttpsUrl(storageGetSync(REMOTE_CUSTOM_HTTPS_URL_STORAGE_KEY));
+  } catch {
+    return "";
+  }
+}
+
+function isLikelyEmbeddingOnlyOllamaModel(modelId = "") {
+  return /(?:^|[/_.:-])(?:embed|embedding)(?:$|[/_.:-])|(?:^|[/])bge[-_.:]|all[-_.]?minilm/i.test(String(modelId || ""));
+}
+
+async function fetchOllamaModelRuntimeRecord(baseUrl, record, timeoutMs = 1800) {
+  const timeout = createTimeoutSignal(timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/api/show`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: record.id }),
+      signal: timeout.signal
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json().catch(() => ({}));
+    const capabilities = Array.isArray(data.capabilities)
+      ? data.capabilities.map(value => String(value || "").trim().toLowerCase()).filter(Boolean)
+      : [];
+    const chatCapable = capabilities.length > 0
+      ? capabilities.includes("completion")
+      : !isLikelyEmbeddingOnlyOllamaModel(record.id);
+    return {
+      ...record,
+      capabilities,
+      chatCapable,
+      supportsTools: capabilities.includes("tools"),
+      supportsVision: capabilities.includes("vision"),
+      supportsThinking: capabilities.includes("thinking")
+    };
+  } finally {
+    timeout.clear();
+  }
+}
+
+async function getRemoteModelState() {
+  const state = await getQuickModelState();
+  if (!state.ollamaReachable || !state.ollamaBaseUrl) return state;
+  const records = await Promise.all(state.installedOllamaModelRecords.map(async record => {
+    try {
+      return await fetchOllamaModelRuntimeRecord(state.ollamaBaseUrl, record);
+    } catch {
+      return {
+        ...record,
+        capabilities: [],
+        chatCapable: !isLikelyEmbeddingOnlyOllamaModel(record.id),
+        supportsTools: false,
+        supportsVision: false,
+        supportsThinking: false
+      };
+    }
+  }));
+  return {
+    ...state,
+    installedOllamaModelRecords: records
+  };
+}
+
+function ollamaModelIdsMatch(left = "", right = "") {
+  const normalize = value => String(value || "").trim().replace(/:latest$/i, "");
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+async function getRemotePromptModelReadiness() {
+  const quickState = getQuickModelStateBase();
+  if (quickState.provider !== "local") {
+    return { ok: true, ...quickState };
+  }
+
+  try {
+    const ollamaState = await fetchInstalledOllamaModelState(1800);
+    const installedRecord = ollamaState.modelRecords.find(model => ollamaModelIdsMatch(model.id, quickState.localModel));
+    if (!installedRecord) {
+      return {
+        ok: false,
+        code: "model_missing",
+        ...quickState,
+        error: `${quickState.localModel} is not installed on the connected PC. Pull it in Fauna Desktop, then send again.`
+      };
+    }
+    let runtimeRecord;
+    try {
+      runtimeRecord = await fetchOllamaModelRuntimeRecord(ollamaState.baseUrl, installedRecord, 1400);
+    } catch {
+      runtimeRecord = {
+        ...installedRecord,
+        chatCapable: !isLikelyEmbeddingOnlyOllamaModel(installedRecord.id)
+      };
+    }
+    if (runtimeRecord.chatCapable === false) {
+      return {
+        ok: false,
+        code: "model_not_chat_capable",
+        ...quickState,
+        error: `${quickState.localModel} is installed, but it is not a chat model. Select an installed completion model and send again.`
+      };
+    }
+    return {
+      ok: true,
+      ...quickState,
+      ollamaReachable: true,
+      ollamaBaseUrl: ollamaState.baseUrl
+    };
+  } catch {
+    return {
+      ok: false,
+      code: "ollama_offline",
+      ...quickState,
+      error: "Ollama is offline on the connected PC. Start it in Fauna Desktop, then send again."
+    };
+  }
+}
+
+function getCloudflaredAvailableSync({ refresh = false } = {}) {
+  if (refresh || remoteCloudflaredAvailable === null) {
+    remoteCloudflaredAvailable = canLaunchExecutable("cloudflared");
+  }
+  return remoteCloudflaredAvailable;
+}
+
+function getRemoteInternetInfoSync({ serverRunning = Boolean(remoteAccessServer) } = {}) {
+  const mode = getRemoteInternetModeSync();
+  const customUrl = getRemoteCustomHttpsUrlSync();
+  const quickUrl = mode === REMOTE_INTERNET_MODE_QUICK && serverRunning ? remoteTunnelUrl : "";
+  const externalUrl = mode === REMOTE_INTERNET_MODE_CUSTOM && serverRunning
+    ? customUrl
+    : quickUrl;
+  let status = "off";
+  if (mode === REMOTE_INTERNET_MODE_CUSTOM) status = customUrl ? (serverRunning ? "ready" : "stopped") : "error";
+  if (mode === REMOTE_INTERNET_MODE_QUICK) status = serverRunning ? remoteTunnelStatus : "stopped";
+  return {
+    mode,
+    enabled: mode !== REMOTE_INTERNET_MODE_OFF,
+    running: Boolean(externalUrl),
+    status,
+    externalUrl,
+    customUrl,
+    quickUrl,
+    cloudflaredAvailable: getCloudflaredAvailableSync(),
+    error: remoteTunnelError
+  };
 }
 
 function readRemoteDevicesSync() {
@@ -2247,6 +2639,7 @@ function getRemoteAccessInfoSync(options = {}) {
   const running = Boolean(remoteAccessServer);
   const port = remoteAccessPort || getRemoteAccessPreferredPortSync();
   const lanUrls = running ? getRemoteAccessUrls(port) : [];
+  const internet = getRemoteInternetInfoSync({ serverRunning: running });
   const devices = includeDevices ? getRemoteDevicesSync() : [];
   return {
     enabled,
@@ -2254,7 +2647,10 @@ function getRemoteAccessInfoSync(options = {}) {
     port,
     endpoint: running ? `http://127.0.0.1:${port}` : "",
     lanUrls,
-    primaryUrl: lanUrls[0] || (running ? `http://127.0.0.1:${port}` : ""),
+    externalUrl: internet.externalUrl,
+    primaryUrl: internet.externalUrl || lanUrls[0] || (running ? `http://127.0.0.1:${port}` : ""),
+    computerName: String(os.hostname() || "Fauna PC").replace(/\s+/g, " ").trim().slice(0, 80) || "Fauna PC",
+    internet,
     token: getRemoteAccessTokenSync(),
     ...(includeDevices ? { devices } : {}),
     deviceSummary: includeDevices ? getRemoteDeviceSummarySync(devices) : getRemoteDeviceSummarySync()
@@ -2986,17 +3382,10 @@ async function applyRemoteEditableSetting(key, value) {
   if (definition.key === AUTO_INSTALL_UPDATES_STORAGE_KEY) {
     await setAutoInstallUpdatesEnabled(storageValue === "true");
   } else if (definition.key === WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) {
-    storageSetSync(definition.key, storageValue);
-    if (storageValue === "true") {
-      await startWorkspaceBridge();
-    } else {
-      await stopWorkspaceBridge();
-    }
+    await setWorkspaceBridgeEnabled(storageValue === "true");
   } else if (definition.key === WORKSPACE_ACCESS_POLICY_STORAGE_KEY) {
     storageSetSync(definition.key, storageValue);
-    if (bridgeProcess && !bridgeProcess.killed) {
-      await startWorkspaceBridge();
-    }
+    await restartWorkspaceBridgeIfEnabled();
   } else {
     storageSetSync(definition.key, storageValue);
   }
@@ -3020,6 +3409,61 @@ async function applyRemoteSettingsPayload(body = {}) {
     return changed;
   }
   return [await applyRemoteEditableSetting(body.key, body.value)];
+}
+
+async function applyPortableSettingsBackup(value) {
+  const backup = normalizePortableSettingsBackup(value);
+  const changed = [];
+  for (const [key, settingValue] of Object.entries(backup.settings)) {
+    changed.push(await applyRemoteEditableSetting(key, settingValue));
+  }
+  return {
+    ok: true,
+    imported: changed.length,
+    changed,
+    backup: createPortableSettingsBackup()
+  };
+}
+
+async function exportPortableSettingsToFile() {
+  const result = await dialog.showSaveDialog(mainWindow || undefined, {
+    title: "Export Fauna settings",
+    defaultPath: path.join(app.getPath("documents"), `Fauna-settings-${new Date().toISOString().slice(0, 10)}.json`),
+    buttonLabel: "Export",
+    filters: [{ name: "Fauna settings backup", extensions: ["json"] }]
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  const backup = createPortableSettingsBackup();
+  await fsp.writeFile(result.filePath, `${JSON.stringify(backup, null, 2)}\n`, "utf8");
+  return {
+    ok: true,
+    canceled: false,
+    filePath: result.filePath,
+    settingCount: Object.keys(backup.settings).length
+  };
+}
+
+async function choosePortableSettingsImportFile() {
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: "Import Fauna settings",
+    buttonLabel: "Choose backup",
+    properties: ["openFile"],
+    filters: [{ name: "Fauna settings backup", extensions: ["json"] }]
+  });
+  if (result.canceled || !result.filePaths?.[0]) return { ok: false, canceled: true };
+  const filePath = result.filePaths[0];
+  const stat = await fsp.stat(filePath);
+  if (!stat.isFile() || stat.size > MAX_PORTABLE_SETTINGS_FILE_BYTES) {
+    throw new Error("The settings backup must be a JSON file smaller than 1 MB.");
+  }
+  const backup = normalizePortableSettingsBackup(await fsp.readFile(filePath, "utf8"));
+  return {
+    ok: true,
+    canceled: false,
+    sourceName: path.basename(filePath),
+    settingCount: Object.keys(backup.settings).length,
+    backup
+  };
 }
 
 async function handleRemoteApiRequest(req, res, requestUrl) {
@@ -3052,6 +3496,16 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
     return;
   }
 
+  if (method === "GET" && requestUrl.pathname === "/api/models") {
+    sendRemoteJson(res, 200, { ok: true, ...(await getRemoteModelState()) });
+    return;
+  }
+
+  if (method === "GET" && requestUrl.pathname === "/api/settings/portable") {
+    sendRemoteJson(res, 200, { ok: true, backup: createPortableSettingsBackup() });
+    return;
+  }
+
   if (method === "GET" && requestUrl.pathname === "/api/library") {
     const items = await getRemoteLibraryItemsFromRenderer(requestUrl.searchParams.get("limit"));
     sendRemoteJson(res, 200, { ok: true, items });
@@ -3062,6 +3516,13 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
     const body = await readRemoteJsonBody(req);
     const changed = await applyRemoteSettingsPayload(body);
     sendRemoteJson(res, 200, { ...getRemoteSettingsPayload(), changed });
+    return;
+  }
+
+  if (method === "POST" && requestUrl.pathname === "/api/settings/portable") {
+    const body = await readRemoteJsonBody(req);
+    const result = await applyPortableSettingsBackup(body.backup || body);
+    sendRemoteJson(res, 200, result);
     return;
   }
 
@@ -3093,6 +3554,11 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
 
   if (method === "POST" && requestUrl.pathname === "/api/messages") {
     const body = await readRemoteJsonBody(req);
+    const readiness = await getRemotePromptModelReadiness();
+    if (!readiness.ok) {
+      sendRemoteJson(res, 409, readiness);
+      return;
+    }
     const attachments = saveRemoteAttachments(body.attachments);
     const result = dispatchRemotePrompt({
       chatId: body.chatId,
@@ -3137,6 +3603,11 @@ async function handleRemoteApiRequest(req, res, requestUrl) {
         return;
       }
       const body = await readRemoteJsonBody(req);
+      const readiness = await getRemotePromptModelReadiness();
+      if (!readiness.ok) {
+        sendRemoteJson(res, 409, readiness);
+        return;
+      }
       const attachments = saveRemoteAttachments(body.attachments);
       const result = dispatchRemotePrompt({
         chatId,
@@ -3189,8 +3660,8 @@ async function handleRemoteAccessRequest(req, res) {
     return;
   }
 
-  const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   try {
+    const requestUrl = new URL(req.url || "/", "http://localhost");
     if (requestUrl.pathname.startsWith("/api/")) {
       await handleRemoteApiRequest(req, res, requestUrl);
       return;
@@ -3204,6 +3675,161 @@ async function handleRemoteAccessRequest(req, res) {
       res.end();
     }
   }
+}
+
+function publishRemoteAccessChanged() {
+  sendToRenderer("fauna:remote-access-changed", getRemoteAccessInfoSync());
+}
+
+function stopRemoteInternetTunnel() {
+  const cancelStart = remoteTunnelCancelStart;
+  remoteTunnelGeneration += 1;
+  const child = remoteTunnelProcess;
+  remoteTunnelProcess = null;
+  remoteTunnelStartPromise = null;
+  remoteTunnelCancelStart = null;
+  remoteTunnelUrl = "";
+  remoteTunnelError = "";
+  remoteTunnelStatus = getRemoteInternetModeSync() === REMOTE_INTERNET_MODE_OFF ? "off" : "stopped";
+  if (child && child.exitCode === null) {
+    try {
+      child.kill();
+    } catch {
+      // Process shutdown is best-effort during mode changes and app exit.
+    }
+  }
+  if (cancelStart) cancelStart(new Error("Internet tunnel start was cancelled."));
+  publishRemoteAccessChanged();
+}
+
+async function startRemoteQuickTunnel() {
+  if (!remoteAccessServer || !remoteAccessPort) throw new Error("Enable Phone Sync before Internet access.");
+  if (remoteTunnelProcess && remoteTunnelUrl) return getRemoteAccessInfoSync();
+  if (remoteTunnelStartPromise) return remoteTunnelStartPromise;
+  if (!getCloudflaredAvailableSync({ refresh: true })) {
+    remoteTunnelStatus = "unavailable";
+    remoteTunnelError = "cloudflared is not installed or not available on PATH.";
+    publishRemoteAccessChanged();
+    throw new Error(`${remoteTunnelError} Install cloudflared or use a custom HTTPS tunnel URL.`);
+  }
+
+  const generation = ++remoteTunnelGeneration;
+  remoteTunnelStatus = "starting";
+  remoteTunnelError = "";
+  remoteTunnelUrl = "";
+  publishRemoteAccessChanged();
+
+  remoteTunnelStartPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    let output = "";
+    let timeoutId = null;
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      remoteTunnelStartPromise = null;
+      remoteTunnelCancelStart = null;
+      if (error) reject(error);
+      else resolve(getRemoteAccessInfoSync());
+    };
+    remoteTunnelCancelStart = error => finish(error || new Error("Internet tunnel start was cancelled."));
+    const inspectOutput = chunk => {
+      if (generation !== remoteTunnelGeneration) return;
+      output = `${output}${String(chunk || "")}`.slice(-12_000);
+      const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com\b/i);
+      if (!match) return;
+      remoteTunnelUrl = match[0].replace(/\/$/, "");
+      remoteTunnelStatus = "ready";
+      remoteTunnelError = "";
+      publishRemoteAccessChanged();
+      finish();
+    };
+
+    const child = spawn("cloudflared", [
+      "tunnel",
+      "--no-autoupdate",
+      "--url",
+      `http://127.0.0.1:${remoteAccessPort}`
+    ], {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    remoteTunnelProcess = child;
+    child.stdout?.on("data", inspectOutput);
+    child.stderr?.on("data", inspectOutput);
+    child.once("error", error => {
+      if (generation !== remoteTunnelGeneration) return;
+      remoteTunnelProcess = null;
+      remoteTunnelStatus = "error";
+      remoteTunnelError = error?.message || "Could not start cloudflared.";
+      publishRemoteAccessChanged();
+      finish(new Error(remoteTunnelError));
+    });
+    child.once("exit", code => {
+      if (generation !== remoteTunnelGeneration) return;
+      remoteTunnelProcess = null;
+      remoteTunnelUrl = "";
+      if (getRemoteInternetModeSync() === REMOTE_INTERNET_MODE_QUICK) {
+        remoteTunnelStatus = "error";
+        remoteTunnelError = `cloudflared stopped${Number.isInteger(code) ? ` with code ${code}` : ""}.`;
+      } else {
+        remoteTunnelStatus = "off";
+        remoteTunnelError = "";
+      }
+      publishRemoteAccessChanged();
+      finish(new Error(remoteTunnelError || "cloudflared stopped."));
+    });
+
+    timeoutId = setTimeout(() => {
+      if (generation !== remoteTunnelGeneration || remoteTunnelUrl) return;
+      remoteTunnelStatus = "error";
+      remoteTunnelError = "cloudflared did not provide a public URL within 20 seconds.";
+      try {
+        child.kill();
+      } catch {
+        // The process may already have exited.
+      }
+      publishRemoteAccessChanged();
+      finish(new Error(remoteTunnelError));
+    }, 20_000);
+  });
+
+  return remoteTunnelStartPromise;
+}
+
+async function startRemoteInternetAccessIfEnabled() {
+  const mode = getRemoteInternetModeSync();
+  if (mode === REMOTE_INTERNET_MODE_QUICK) return startRemoteQuickTunnel();
+  remoteTunnelStatus = mode === REMOTE_INTERNET_MODE_CUSTOM ? "ready" : "off";
+  remoteTunnelError = "";
+  return getRemoteAccessInfoSync();
+}
+
+async function setRemoteInternetMode(value) {
+  const mode = normalizeRemoteInternetMode(value);
+  if (mode !== REMOTE_INTERNET_MODE_OFF && !remoteAccessServer) {
+    throw new Error("Enable Phone Sync before Internet access.");
+  }
+  if (mode === REMOTE_INTERNET_MODE_CUSTOM && !getRemoteCustomHttpsUrlSync()) {
+    throw new Error("Save a public HTTPS tunnel URL first.");
+  }
+  stopRemoteInternetTunnel();
+  storageSetSync(REMOTE_INTERNET_MODE_STORAGE_KEY, mode);
+  if (mode === REMOTE_INTERNET_MODE_QUICK) return startRemoteQuickTunnel();
+  remoteTunnelStatus = mode === REMOTE_INTERNET_MODE_CUSTOM ? "ready" : "off";
+  remoteTunnelError = "";
+  publishRemoteAccessChanged();
+  return getRemoteAccessInfoSync();
+}
+
+async function setRemoteCustomHttpsUrl(value) {
+  const url = normalizeRemoteCustomHttpsUrl(value);
+  storageSetSync(REMOTE_CUSTOM_HTTPS_URL_STORAGE_KEY, url);
+  if (!url && getRemoteInternetModeSync() === REMOTE_INTERNET_MODE_CUSTOM) {
+    storageSetSync(REMOTE_INTERNET_MODE_STORAGE_KEY, REMOTE_INTERNET_MODE_OFF);
+  }
+  publishRemoteAccessChanged();
+  return getRemoteAccessInfoSync();
 }
 
 async function startRemoteAccessServer() {
@@ -3231,6 +3857,7 @@ function stopRemoteAccessServer() {
   const server = remoteAccessServer;
   remoteAccessServer = null;
   remoteAccessPort = 0;
+  stopRemoteInternetTunnel();
   if (!server) return Promise.resolve(getRemoteAccessInfoSync());
   return new Promise(resolve => {
     server.close(() => resolve(getRemoteAccessInfoSync()));
@@ -3239,12 +3866,24 @@ function stopRemoteAccessServer() {
 
 async function startRemoteAccessServerIfEnabled() {
   if (!getRemoteAccessEnabledSync()) return getRemoteAccessInfoSync();
-  return startRemoteAccessServer();
+  const info = await startRemoteAccessServer();
+  void startRemoteInternetAccessIfEnabled().catch(error => {
+    console.warn("Fauna desktop could not start Internet phone access:", error);
+  });
+  return info;
 }
 
 async function setRemoteAccessEnabled(enabled) {
   storageSetSync(REMOTE_ACCESS_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
-  if (enabled) return startRemoteAccessServer();
+  if (enabled) {
+    await startRemoteAccessServer();
+    try {
+      await startRemoteInternetAccessIfEnabled();
+    } catch (error) {
+      console.warn("Fauna Phone Sync started without Internet access:", error);
+    }
+    return getRemoteAccessInfoSync();
+  }
   return stopRemoteAccessServer();
 }
 
@@ -3402,6 +4041,9 @@ async function resetAppData(payload = {}) {
     throw new Error("Reset requires confirmation for files/artifacts and chats.");
   }
 
+  stopAllTerminalSessions();
+  await stopWorkspaceBridge();
+  await stopRemoteAccessServer();
   await clearAppCacheData();
   await removePathInsideUserData(getSettingsPath());
   await removePathInsideUserData(getFileRefsPath());
@@ -3456,6 +4098,13 @@ function appDataUrlForPath(filePath) {
   return `${FILE_PROTOCOL}://appdata/${relative.split(path.sep).map(encodeURIComponent).join("/")}`;
 }
 
+function isAllowedAppDataFilePath(filePath) {
+  const relative = path.relative(getChatsRoot(), filePath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return false;
+  const segments = relative.split(path.sep).filter(Boolean);
+  return segments.length >= 3 && (segments[1] === "media" || segments[1] === "output");
+}
+
 function selectedFileUrlForPath(filePath) {
   const rawPath = String(filePath || "").trim();
   if (!rawPath) return "";
@@ -3503,7 +4152,7 @@ async function handleFileProtocol(request) {
   if (url.host === "appdata") {
     const relativePath = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
     target = path.resolve(getUserDataRoot(), relativePath);
-    if (!isPathInside(target, getUserDataRoot())) {
+    if (!isPathInside(target, getUserDataRoot()) || !isAllowedAppDataFilePath(target)) {
       return new Response("Not found", { status: 404 });
     }
   } else if (url.host === "selected") {
@@ -3514,6 +4163,11 @@ async function handleFileProtocol(request) {
 
   if (!target) return new Response("Not found", { status: 404 });
   try {
+    const realTarget = await fsp.realpath(target);
+    if (url.host === "appdata" && !isAllowedAppDataFilePath(realTarget)) {
+      return new Response("Not found", { status: 404 });
+    }
+    target = realTarget;
     return await responseForFile(target);
   } catch {
     return new Response("Not found", { status: 404 });
@@ -3545,42 +4199,205 @@ function parseDataUrl(dataUrl) {
   if (!match) return null;
   return {
     mimeType: match[1] || "application/octet-stream",
-    buffer: Buffer.from(match[2], "base64")
+    dataBase64: match[2]
   };
+}
+
+const GENERATED_MEDIA_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "webp", "gif",
+  "mp4", "webm", "mp3", "wav", "m4a", "ogg"
+]);
+
+function estimateBase64Bytes(value) {
+  const clean = String(value || "").replace(/\s+/g, "");
+  const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor(clean.length * 3 / 4) - padding);
+}
+
+function decodeGeneratedMediaBase64(value) {
+  if (estimateBase64Bytes(value) > MAX_GENERATED_MEDIA_BYTES) {
+    throw new Error("Generated media exceeds the 100 MB save limit.");
+  }
+  const buffer = Buffer.from(String(value || ""), "base64");
+  if (buffer.length > MAX_GENERATED_MEDIA_BYTES) {
+    throw new Error("Generated media exceeds the 100 MB save limit.");
+  }
+  return buffer;
+}
+
+function normalizeGeneratedMediaExtension(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+function assertGeneratedMediaType(mimeType, requestedExtension = "") {
+  const cleanMime = String(mimeType || "").split(";")[0].trim().toLowerCase();
+  const extension = normalizeGeneratedMediaExtension(requestedExtension);
+  const mediaMime = /^(?:image|video|audio)\//.test(cleanMime);
+  const binaryWithMediaExtension = cleanMime === "application/octet-stream" && GENERATED_MEDIA_EXTENSIONS.has(extension);
+  if (!mediaMime && !binaryWithMediaExtension) {
+    throw new Error(`Refusing to save non-media response type ${cleanMime || "unknown"}.`);
+  }
+}
+
+function stripIpv6Brackets(hostname) {
+  return String(hostname || "").replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function isLoopbackHostname(hostname) {
+  const host = stripIpv6Brackets(hostname);
+  return host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+function isNonPublicIpAddress(address) {
+  const value = stripIpv6Brackets(address);
+  if (value.startsWith("::ffff:")) return isNonPublicIpAddress(value.slice(7));
+  if (net.isIP(value) === 4) {
+    const [a, b] = value.split(".").map(Number);
+    return a === 0
+      || a === 10
+      || a === 127
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19))
+      || a >= 224;
+  }
+  if (net.isIP(value) === 6) {
+    return value === "::"
+      || value === "::1"
+      || /^[fd][0-9a-f]/.test(value)
+      || /^fe[89ab]/.test(value)
+      || /^ff/.test(value);
+  }
+  return true;
+}
+
+async function assertGeneratedMediaUrlAllowed(value) {
+  const parsed = new URL(String(value || ""));
+  if (!/^https?:$/.test(parsed.protocol)) throw new Error("Generated media URL must use HTTP or HTTPS.");
+  if (isLoopbackHostname(parsed.hostname)) return parsed;
+  if (parsed.protocol !== "https:") throw new Error("Remote generated media must use HTTPS.");
+
+  const host = stripIpv6Brackets(parsed.hostname);
+  const addresses = net.isIP(host)
+    ? [{ address: host }]
+    : await dns.lookup(host, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(item => isNonPublicIpAddress(item.address))) {
+    throw new Error("Generated media URL resolves to a private or reserved network address.");
+  }
+  return parsed;
+}
+
+async function fetchGeneratedMediaResponse(sourceUrl) {
+  let currentUrl = String(sourceUrl || "");
+  for (let redirectCount = 0; redirectCount <= MAX_GENERATED_MEDIA_REDIRECTS; redirectCount += 1) {
+    const parsed = await assertGeneratedMediaUrlAllowed(currentUrl);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const response = await fetch(parsed, { redirect: "manual", signal: controller.signal });
+      if (response.status >= 300 && response.status < 400) {
+        clearTimeout(timeout);
+        if (response.body) await response.body.cancel().catch(() => {});
+        const location = response.headers.get("location");
+        if (!location) throw new Error("Media redirect did not include a destination.");
+        if (redirectCount >= MAX_GENERATED_MEDIA_REDIRECTS) throw new Error("Media download redirected too many times.");
+        currentUrl = new URL(location, parsed).href;
+        continue;
+      }
+      return {
+        response,
+        cleanup: async () => {
+          clearTimeout(timeout);
+          if (!response.bodyUsed && response.body) await response.body.cancel().catch(() => {});
+          controller.abort();
+        }
+      };
+    } catch (error) {
+      clearTimeout(timeout);
+      if (error?.name === "AbortError") throw new Error("Media download timed out.");
+      throw error;
+    }
+  }
+  throw new Error("Media download redirected too many times.");
+}
+
+async function readLimitedGeneratedMediaBody(response) {
+  const declaredLength = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_GENERATED_MEDIA_BYTES) {
+    throw new Error("Generated media exceeds the 100 MB save limit.");
+  }
+  if (!response.body) return Buffer.alloc(0);
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > MAX_GENERATED_MEDIA_BYTES) {
+        await reader.cancel("Generated media exceeds the save limit.").catch(() => {});
+        throw new Error("Generated media exceeds the 100 MB save limit.");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return Buffer.concat(chunks, total);
 }
 
 async function readMediaPayload(payload) {
   if (payload?.dataBase64) {
+    assertGeneratedMediaType(payload.mimeType || "application/octet-stream", payload.extension);
     return {
-      buffer: Buffer.from(String(payload.dataBase64), "base64"),
+      buffer: decodeGeneratedMediaBase64(payload.dataBase64),
       mimeType: payload.mimeType || "application/octet-stream"
     };
   }
 
   const sourceUrl = String(payload?.sourceUrl || "").trim();
   const parsedData = parseDataUrl(sourceUrl);
-  if (parsedData) return parsedData;
+  if (parsedData) {
+    assertGeneratedMediaType(parsedData.mimeType, payload.extension);
+    return {
+      buffer: decodeGeneratedMediaBase64(parsedData.dataBase64),
+      mimeType: parsedData.mimeType
+    };
+  }
   if (!/^https?:\/\//i.test(sourceUrl)) {
     throw new Error("Only http, https, data, and renderer-supplied blob media can be saved.");
   }
 
-  const response = await fetch(sourceUrl);
-  if (!response.ok) {
-    throw new Error(`Media download failed with HTTP ${response.status}`);
+  const { response, cleanup } = await fetchGeneratedMediaResponse(sourceUrl);
+  try {
+    if (!response.ok) {
+      throw new Error(`Media download failed with HTTP ${response.status}`);
+    }
+    const mimeType = response.headers.get("content-type") || payload?.mimeType || "application/octet-stream";
+    assertGeneratedMediaType(mimeType, payload.extension);
+    return {
+      buffer: await readLimitedGeneratedMediaBody(response),
+      mimeType
+    };
+  } finally {
+    await cleanup();
   }
-  const arrayBuffer = await response.arrayBuffer();
-  return {
-    buffer: Buffer.from(arrayBuffer),
-    mimeType: response.headers.get("content-type") || payload?.mimeType || "application/octet-stream"
-  };
 }
 
 async function saveGeneratedMedia(payload = {}) {
   const chatId = sanitizeId(payload.chatId || "unassigned-chat", "unassigned-chat");
   const kind = sanitizeId(payload.kind || "media", "media");
   const { buffer, mimeType } = await readMediaPayload(payload);
-  const requestedExtension = String(payload.extension || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  const requestedExtension = normalizeGeneratedMediaExtension(payload.extension);
   const extension = requestedExtension || inferExtension(mimeType, kind === "image" ? "png" : "bin");
+  if (!GENERATED_MEDIA_EXTENSIONS.has(extension)) {
+    throw new Error(`Unsupported generated media extension: ${extension || "unknown"}.`);
+  }
   const mediaDir = path.join(getChatDirectory(chatId), "media");
   ensureDirSync(mediaDir);
   const fileName = `${kind}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.${extension}`;
@@ -3644,45 +4461,96 @@ async function ensureBridgeScriptCopy() {
   return target;
 }
 
-function stopWorkspaceBridge() {
+function isWorkspaceBridgeRunning() {
+  return Boolean(bridgeProcess && bridgeProcess.exitCode === null && !bridgeProcess.killed);
+}
+
+function queueWorkspaceBridgeLifecycle(operation) {
+  const queued = bridgeLifecycleQueue.then(operation, operation);
+  bridgeLifecycleQueue = queued.catch(() => {});
+  return queued;
+}
+
+function stopWorkspaceBridgeProcess() {
   const child = bridgeProcess;
   bridgeProcess = null;
-  if (!child || child.killed) return Promise.resolve();
+  bridgeRuntimeInfo = null;
+  if (!child || child.exitCode !== null) return Promise.resolve();
 
   return new Promise(resolve => {
-    const timeout = setTimeout(resolve, 2500);
-    child.once("exit", () => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timeout);
       resolve();
+    };
+    const timeout = setTimeout(finish, 2500);
+    child.once("exit", () => {
+      finish();
     });
-    child.kill();
+    try {
+      child.kill();
+    } catch {
+      finish();
+    }
   });
 }
 
-async function startWorkspaceBridge() {
-  if (bridgeProcess && !bridgeProcess.killed) {
-    await stopWorkspaceBridge();
+function stopWorkspaceBridge() {
+  return queueWorkspaceBridgeLifecycle(() => stopWorkspaceBridgeProcess());
+}
+
+function probeWorkspaceBridge(endpoint, token) {
+  return new Promise(resolve => {
+    const request = http.get(`${endpoint}/health`, {
+      headers: { "X-Fauna-Bridge-Token": token },
+      timeout: 600
+    }, response => {
+      response.resume();
+      resolve(response.statusCode === 200);
+    });
+    request.once("timeout", () => request.destroy(new Error("Bridge health check timed out.")));
+    request.once("error", () => resolve(false));
+  });
+}
+
+async function waitForWorkspaceBridge(endpoint, token, child, getSpawnError, timeoutMs = 6000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const spawnError = getSpawnError();
+    if (spawnError) throw spawnError;
+    if (child.exitCode !== null) {
+      throw new Error(`Workspace bridge exited before it became ready (code ${child.exitCode}).`);
+    }
+    if (await probeWorkspaceBridge(endpoint, token)) return;
+    await new Promise(resolve => setTimeout(resolve, 120));
+  }
+  throw new Error("Workspace bridge did not become ready in time.");
+}
+
+async function startWorkspaceBridgeProcess() {
+  if (isWorkspaceBridgeRunning()) {
+    await stopWorkspaceBridgeProcess();
   }
 
   const launcher = findPythonLauncher();
   if (!launcher) {
-    console.warn("Fauna desktop could not find Python, so the workspace bridge was not started.");
-    return null;
+    throw new Error("Fauna desktop could not find Python, so the workspace bridge was not started.");
   }
 
   const token = storageGetSync(WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY) || crypto.randomBytes(24).toString("base64url");
   const port = await findAvailablePort();
   const endpoint = `http://127.0.0.1:${port}`;
-  storageSetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY, endpoint);
-  storageSetSync(WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY, token);
-  storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
 
   const scriptPath = await ensureBridgeScriptCopy();
   const accessPolicy = getWorkspaceAccessPolicySync();
   const bridgeRoot = getBridgeRootForPolicy(accessPolicy);
+  ensureDirSync(bridgeRoot);
   const projectBridgeMap = getWorkspaceProjectBridgeMap();
   const bridgeArgs = [
     ...launcher.args,
+    "-u",
     scriptPath,
     "--root",
     bridgeRoot,
@@ -3690,8 +4558,7 @@ async function startWorkspaceBridge() {
     "127.0.0.1",
     "--port",
     String(port),
-    "--token",
-    token,
+    "--no-print-token",
     "--access-policy",
     accessPolicy === WORKSPACE_ACCESS_POLICY_FULL_MACHINE ? "machine" : "workspace",
     "--projects-json",
@@ -3704,20 +4571,103 @@ async function startWorkspaceBridge() {
   const child = spawn(launcher.command, bridgeArgs, {
     cwd: bridgeRoot,
     windowsHide: true,
+    env: { ...process.env, FAUNA_BRIDGE_TOKEN: token },
     stdio: ["ignore", "pipe", "pipe"]
   });
 
+  let spawnError = null;
   child.stdout?.on("data", chunk => console.log(`[fauna-bridge] ${String(chunk).trim()}`));
   child.stderr?.on("data", chunk => console.warn(`[fauna-bridge] ${String(chunk).trim()}`));
+  child.on("error", error => {
+    spawnError = error;
+    if (bridgeProcess === child) {
+      bridgeProcess = null;
+      bridgeRuntimeInfo = null;
+      storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "false");
+    }
+    console.warn("Fauna bridge process failed:", error);
+  });
   child.on("exit", code => {
-    if (!app.isQuitting && bridgeProcess === child) console.warn(`Fauna bridge exited with code ${code}`);
+    const wasActiveBridge = bridgeProcess === child;
+    if (wasActiveBridge) {
+      bridgeProcess = null;
+      bridgeRuntimeInfo = null;
+      if (!app.isQuitting) storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "false");
+    }
+    if (!app.isQuitting && wasActiveBridge && code !== 0) console.warn(`Fauna bridge exited with code ${code}`);
   });
   bridgeProcess = child;
-  return { endpoint, token, root: bridgeRoot, accessPolicy };
+
+  try {
+    await waitForWorkspaceBridge(endpoint, token, child, () => spawnError);
+  } catch (error) {
+    if (bridgeProcess === child) await stopWorkspaceBridgeProcess();
+    throw error;
+  }
+
+  storageSetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY, endpoint);
+  storageSetSync(WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY, token);
+  bridgeRuntimeInfo = { endpoint, token, root: bridgeRoot, accessPolicy };
+  return { ...bridgeRuntimeInfo };
+}
+
+function startWorkspaceBridge() {
+  return queueWorkspaceBridgeLifecycle(() => startWorkspaceBridgeProcess());
+}
+
+function bridgeRuntimeMatchesStoredConfiguration() {
+  if (!isWorkspaceBridgeRunning() || !bridgeRuntimeInfo) return false;
+  return bridgeRuntimeInfo.endpoint === storageGetSync(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY)
+    && bridgeRuntimeInfo.token === storageGetSync(WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY)
+    && bridgeRuntimeInfo.root === getBridgeRootForPolicy()
+    && bridgeRuntimeInfo.accessPolicy === getWorkspaceAccessPolicySync();
+}
+
+async function setWorkspaceBridgeEnabledProcess(enabled) {
+  if (!enabled) {
+    storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "false");
+    await stopWorkspaceBridgeProcess();
+    return null;
+  }
+
+  if (bridgeRuntimeMatchesStoredConfiguration()) {
+    storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
+    return { ...bridgeRuntimeInfo };
+  }
+
+  try {
+    const result = await startWorkspaceBridgeProcess();
+    storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
+    return result;
+  } catch (error) {
+    storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "false");
+    throw error;
+  }
+}
+
+function setWorkspaceBridgeEnabled(enabled) {
+  return queueWorkspaceBridgeLifecycle(() => setWorkspaceBridgeEnabledProcess(Boolean(enabled)));
+}
+
+function restartWorkspaceBridgeIfEnabled() {
+  return queueWorkspaceBridgeLifecycle(async () => {
+    if (storageGetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) !== "true" && !isWorkspaceBridgeRunning()) return null;
+    try {
+      return await startWorkspaceBridgeProcess();
+    } catch (error) {
+      storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "false");
+      throw error;
+    }
+  });
 }
 
 function isMainWindowWebContents(webContents) {
-  return Boolean(mainWindow && webContents && webContents.id === mainWindow.webContents.id);
+  return Boolean(
+    mainWindow
+    && webContents
+    && webContents.id === mainWindow.webContents.id
+    && isTrustedAppUrl(webContents.getURL())
+  );
 }
 
 function configureMediaPermissions() {
@@ -4127,6 +5077,38 @@ function positionQuickWindow() {
   quickWindow.setBounds({ x, y, width: size.width, height: size.height });
 }
 
+function isTrustedAppUrl(value) {
+  try {
+    const parsed = new URL(String(value || ""));
+    return parsed.protocol === `${APP_PROTOCOL}:` && parsed.hostname === "app";
+  } catch {
+    return false;
+  }
+}
+
+function openExternalHttpUrl(value) {
+  const url = String(value || "");
+  if (!/^https?:\/\//i.test(url)) return;
+  void shell.openExternal(url).catch(error => {
+    console.warn("Could not open external URL:", error);
+  });
+}
+
+function configureTrustedWindowNavigation(window) {
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalHttpUrl(url);
+    return { action: "deny" };
+  });
+
+  const preventUntrustedNavigation = (event, url) => {
+    if (isTrustedAppUrl(url)) return;
+    event.preventDefault();
+    openExternalHttpUrl(url);
+  };
+  window.webContents.on("will-navigate", preventUntrustedNavigation);
+  window.webContents.on("will-redirect", preventUntrustedNavigation);
+}
+
 function createQuickWindow() {
   if (quickWindow && !quickWindow.isDestroyed()) return quickWindow;
   quickWindow = new BrowserWindow({
@@ -4153,13 +5135,7 @@ function createQuickWindow() {
     }
   });
 
-  quickWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) {
-      shell.openExternal(url);
-      return { action: "deny" };
-    }
-    return { action: "allow" };
-  });
+  configureTrustedWindowNavigation(quickWindow);
   quickWindow.on("blur", () => {
     if (!quickWindow?.webContents.isDevToolsOpened()) quickWindow?.hide();
   });
@@ -4325,13 +5301,7 @@ function createWindow({ chatId = "" } = {}) {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.setAutoHideMenuBar(true);
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) {
-      shell.openExternal(url);
-      return { action: "deny" };
-    }
-    return { action: "allow" };
-  });
+  configureTrustedWindowNavigation(mainWindow);
 
   mainWindow.on("close", event => {
     if (app.isQuitting) return;
@@ -4416,12 +5386,16 @@ function registerIpc() {
   ipcMain.handle("fauna:ollama-pull-cancel", (_event, payload) => cancelOllamaPull(payload));
   ipcMain.handle("fauna:start-ollama", () => startOllamaHttpService());
   ipcMain.handle("fauna:workspace-bridge-ensure", async () => {
-    await startWorkspaceBridge();
+    await setWorkspaceBridgeEnabled(true);
+    return getDesktopInfo();
+  });
+  ipcMain.handle("fauna:workspace-bridge-set-enabled", async (_event, enabled) => {
+    await setWorkspaceBridgeEnabled(Boolean(enabled));
     return getDesktopInfo();
   });
   ipcMain.handle("fauna:set-workspace-access-policy", async (_event, policy) => {
     storageSetSync(WORKSPACE_ACCESS_POLICY_STORAGE_KEY, normalizeWorkspaceAccessPolicy(policy));
-    await startWorkspaceBridge();
+    await restartWorkspaceBridgeIfEnabled();
     return getDesktopInfo();
   });
   ipcMain.handle("fauna:remote-access-set-enabled", async (_event, enabled) => {
@@ -4430,6 +5404,14 @@ function registerIpc() {
   });
   ipcMain.handle("fauna:remote-access-rotate-token", () => {
     rotateRemoteAccessToken();
+    return getDesktopInfo();
+  });
+  ipcMain.handle("fauna:remote-internet-set-mode", async (_event, mode) => {
+    await setRemoteInternetMode(mode);
+    return getDesktopInfo();
+  });
+  ipcMain.handle("fauna:remote-internet-set-custom-url", async (_event, url) => {
+    await setRemoteCustomHttpsUrl(url);
     return getDesktopInfo();
   });
   ipcMain.handle("fauna:remote-devices-list", () => ({
@@ -4442,6 +5424,9 @@ function registerIpc() {
     return { ok: true, device, devices: getRemoteDevicesSync(), summary: getRemoteDeviceSummarySync() };
   });
   ipcMain.handle("fauna:remote-device-forget", (_event, deviceId) => forgetRemoteDevice(deviceId));
+  ipcMain.handle("fauna:settings-export-portable", () => exportPortableSettingsToFile());
+  ipcMain.handle("fauna:settings-import-choose", () => choosePortableSettingsImportFile());
+  ipcMain.handle("fauna:settings-import-apply", (_event, backup) => applyPortableSettingsBackup(backup));
   ipcMain.handle("fauna:clear-app-cache", () => clearAppCacheData());
   ipcMain.handle("fauna:reset-app-data", (_event, payload) => resetAppData(payload));
   ipcMain.handle("fauna:window-minimize", () => {
@@ -4532,10 +5517,13 @@ if (!gotSingleInstanceLock) {
     configureMediaPermissions();
     configureAutoUpdater();
     registerIpc();
-    try {
-      await startWorkspaceBridge();
-    } catch (error) {
-      console.warn("Fauna desktop could not start the workspace bridge:", error);
+    if (storageGetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) === "true") {
+      try {
+        await startWorkspaceBridge();
+      } catch (error) {
+        storageSetSync(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "false");
+        console.warn("Fauna desktop could not start the workspace bridge:", error);
+      }
     }
     try {
       await startRemoteAccessServerIfEnabled();
@@ -4558,7 +5546,8 @@ if (!gotSingleInstanceLock) {
 app.on("before-quit", () => {
   app.isQuitting = true;
   stopAllTerminalSessions();
-  if (bridgeProcess && !bridgeProcess.killed) {
+  stopRemoteInternetTunnel();
+  if (bridgeProcess && bridgeProcess.exitCode === null) {
     bridgeProcess.kill();
   }
   if (remoteAccessServer) {

@@ -756,15 +756,24 @@ function normalizeOllamaCatalogRecord(raw = {}) {
     const capability = getOllamaModelCapability(rawId);
     const kind = getOllamaCatalogKind(capability);
     const option = staticOption || raw;
+    const installedRecord = getInstalledOllamaModelRecord(rawId) || getInstalledOllamaModelRecord(id);
+    const modelSource = getOllamaModelSource(rawId);
+    const sourceOwner = modelSource === "huggingface" ? "Hugging Face" : "Ollama";
     return {
         id,
         label: option.label || raw.label || id,
         meta: getLocalModelMeta(option, installed, capability) || kind,
         kind,
         provider: AI_PROVIDER_LOCAL,
-        ownedBy: "Ollama",
+        ownedBy: sourceOwner,
         source: installed ? "installed" : "known",
-        sourceLabel: installed ? "Installed" : "Known",
+        sourceLabel: installed
+            ? `${sourceOwner} · Installed`
+            : (modelSource === "huggingface" ? "Hugging Face" : "Known"),
+        repository: installedRecord?.repoId || "",
+        quantization: installedRecord?.quantization || "",
+        parameterSize: installedRecord?.parameterSize || "",
+        downloadSize: installedRecord?.size || 0,
         installed,
         live: installed,
         inputModalities: Array.isArray(capability.inputModalities) ? capability.inputModalities : ["text"],

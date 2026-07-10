@@ -12,7 +12,7 @@ body,
 /* --- Sidebar: integrated with the chat canvas --- */
 .sidebar {
     background:
-        linear-gradient(180deg, #242424, #202020) !important;
+        linear-gradient(180deg, #242424, #202020);
     border-right: 1px solid rgba(255, 255, 255, 0.045) !important;
     box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.2) !important;
 }
@@ -33,7 +33,7 @@ body,
 
 .sidebar-section-label,
 .history-label {
-    color: rgba(255, 255, 255, 0.28) !important;
+    color: var(--text-muted);
     font-size: 13px !important;
     font-weight: 760 !important;
     line-height: 1.25 !important;

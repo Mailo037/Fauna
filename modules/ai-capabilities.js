@@ -636,9 +636,8 @@ export function createAiCapabilityRegistry(initialModels = DEFAULT_OPENAI_CHAT_M
 
     const ingestOpenRouterModels = (models = []) => {
         models.forEach(model => {
-            const record = normalizeModelRecord(model);
+            const record = addRecord(model);
             if (!record) return;
-            addRecord(record);
             openRouterModelAliases(model).forEach(alias => aliases.set(alias, record.id));
         });
     };

@@ -258,6 +258,20 @@ if (voiceButton) {
     };
 }
 
+function stopLocalVoiceSession() {
+    cancelActiveVoiceTranscription();
+    if (isRecording) stopVoiceInput({ submit: false });
+    activeRealtimeSpeechReply?.cancel();
+    activeRealtimeSpeechReply = null;
+    activeSpeechController?.abort();
+    activeSpeechController = null;
+    if (activeSpeechAudio) clearActiveSpeechAudio(activeSpeechAudio);
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    isSpeechPlaybackActive = false;
+    shouldSpeakNextReply = false;
+    setVoiceChatActive(false);
+}
+
 voiceStopButton?.addEventListener("click", () => {
     const stoppedGeneration = Boolean(activeRequestController);
     activeRequestController?.abort();
@@ -267,10 +281,7 @@ voiceStopButton?.addEventListener("click", () => {
         showToast(stoppedGeneration ? "Voice chat and generation stopped." : "Voice chat stopped.", "info");
         return;
     }
-    if (isRecording) {
-        stopVoiceInput({ submit: false });
-    }
-    setVoiceChatActive(false);
+    stopLocalVoiceSession();
     showToast(stoppedGeneration ? "Voice input and generation stopped." : "Voice input stopped.", "info");
 });
 
@@ -356,6 +367,8 @@ function createRealtimeSpeechReply(generationSignal = null) {
         isSpeechPlaybackActive = false;
         if (isOpenAiProvider() && isOpenAiVoiceSessionActive) {
             scheduleOpenAiVoiceRearm(undefined, { cue: cueReady });
+        } else if (!isOpenAiProvider()) {
+            setVoiceChatActive(false);
         }
     };
 
@@ -489,6 +502,8 @@ function speakReply(text) {
         isSpeechPlaybackActive = false;
         if (isOpenAiProvider() && isOpenAiVoiceSessionActive) {
             scheduleOpenAiVoiceRearm();
+        } else if (!isOpenAiProvider()) {
+            setVoiceChatActive(false);
         }
     });
 }
@@ -926,10 +941,11 @@ function endMediaSourceStream(mediaSource, sourceBuffer) {
     });
 }
 
-async function openAiSpeechFetch(inputText, { signal = null, voice = getOpenAiVoice() } = {}) {
+async function openAiSpeechFetch(inputText, { signal = null, voice = getOpenAiVoice(), streaming = false } = {}) {
     const res = await openAiFetch("/audio/speech", {
         method: "POST",
         signal,
+        streamResponse: Boolean(streaming),
         headers: {
             "Content-Type": "application/json",
             Accept: "audio/mpeg"

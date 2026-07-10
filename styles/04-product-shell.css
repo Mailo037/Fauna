@@ -2095,7 +2095,7 @@ body.voice-chat-active #welcome .suggestion-grid {
     }
 
     .app-window-bar {
-        grid-template-columns: 106px minmax(0, 1fr) minmax(204px, max-content);
+        grid-template-columns: auto minmax(0, 1fr) auto;
         padding: 0 6px;
     }
 

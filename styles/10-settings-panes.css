@@ -1958,9 +1958,63 @@
     margin-top: 2px;
 }
 
+.hf-model-import-card {
+    margin-top: 2px;
+}
+
+.hf-model-import-card .settings-section-heading {
+    align-items: flex-start;
+}
+
+.hf-model-import-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(150px, 0.34fr);
+    gap: 10px;
+}
+
+.hf-model-import-grid .settings-input {
+    box-sizing: border-box;
+    width: 100%;
+}
+
+.hf-model-import-note {
+    margin: 0;
+}
+
+.hf-model-import-actions {
+    padding-top: 0;
+}
+
 .app-info-actions {
     margin-top: 4px;
     padding-top: 10px;
+}
+
+.remote-internet-card .settings-section-heading {
+    align-items: flex-start;
+}
+
+.remote-internet-mode-actions {
+    margin-top: 0;
+    padding-top: 0;
+}
+
+.remote-internet-mode-actions [data-remote-internet-mode][data-active="true"] {
+    border-color: color-mix(in srgb, var(--accent) 48%, rgba(255, 255, 255, 0.14));
+    background: color-mix(in srgb, var(--accent) 18%, rgba(255, 255, 255, 0.035));
+    color: #fff;
+}
+
+.remote-custom-url-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.remote-custom-url-controls .settings-input {
+    min-width: 0;
+    width: 100%;
 }
 
 .settings-control-card .setting-title,
@@ -3155,6 +3209,10 @@
         grid-template-columns: 1fr;
     }
 
+    .hf-model-import-grid {
+        grid-template-columns: 1fr;
+    }
+
     .settings-range-card .settings-range-wrap {
         width: 100%;
         grid-template-columns: auto minmax(0, 1fr);
@@ -3207,6 +3265,14 @@
     .app-info-qr-card {
         grid-template-columns: 1fr;
         justify-items: start;
+    }
+
+    .remote-custom-url-controls {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .remote-custom-url-controls .settings-input {
+        grid-column: 1 / -1;
     }
 
     .local-model-list {

@@ -661,9 +661,7 @@ async function checkOllamaStatus() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json().catch(() => ({}));
         isOllamaReachable = true;
-        installedOllamaModels = Array.isArray(data.models)
-            ? data.models.map(model => normalizeModelId(model?.name || model?.model || model?.id)).filter(Boolean)
-            : [];
+        setInstalledOllamaModelRecords(data.models);
         await refreshOllamaModelCapabilities(installedOllamaModels);
         localModelOptions = getLocalModelSwitcherOptions();
         renderLocalModelChoices();
@@ -676,7 +674,7 @@ async function checkOllamaStatus() {
     } catch (err) {
         const desktopStatus = await getDesktopOllamaStatus();
         isOllamaReachable = false;
-        installedOllamaModels = [];
+        setInstalledOllamaModelRecords([]);
         await refreshOllamaModelCapabilities([]);
         localModelOptions = getLocalModelSwitcherOptions();
         renderLocalModelChoices();
@@ -1093,12 +1091,29 @@ async function readOpenAiResponseStream(response, { signal = null, onTextDelta =
 
 async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MODEL, signal = null, streamOptions = {}) {
     const triedModels = [];
-    const modelsToTry = Array.from(new Set([preferredModel, FALLBACK_MODEL].filter(Boolean)));
+    const requestedModel = normalizeModelId(preferredModel) || OLLAMA_MODEL;
+    const faunaToolContext = options.faunaToolContext || null;
+    const ollamaTools = faunaToolContext ? buildOllamaFaunaTools(faunaToolContext) : [];
+    const needsVision = messages.some(message => Array.isArray(message?.images) && message.images.length > 0);
+    const installedChatFallbacks = installedOllamaModels
+        .filter(model => !ollamaModelMatches(model, requestedModel))
+        .filter(model => {
+            const capability = getOllamaModelCapability(model);
+            if (capability.supportsStreaming === false) return false;
+            if (ollamaTools.length > 0 && capability.supportsToolCalling !== true) return false;
+            if (needsVision && capability.supportsImageInput !== true) return false;
+            return true;
+        });
+    installedChatFallbacks.sort((left, right) => {
+        const leftIsDefault = ollamaModelMatches(left, FALLBACK_MODEL) ? 1 : 0;
+        const rightIsDefault = ollamaModelMatches(right, FALLBACK_MODEL) ? 1 : 0;
+        return rightIsDefault - leftIsDefault;
+    });
+    const modelsToTry = [requestedModel, ...installedChatFallbacks.slice(0, 2)]
+        .filter((model, index, models) => models.findIndex(candidate => ollamaModelMatches(candidate, model)) === index);
     let lastError = null;
     const shouldStream = typeof streamOptions.onTextDelta === "function";
     const preserveActiveModel = streamOptions.preserveActiveModel === true;
-    const faunaToolContext = options.faunaToolContext || null;
-    const ollamaTools = faunaToolContext ? buildOllamaFaunaTools(faunaToolContext) : [];
     const ollamaOptions = { ...options };
     delete ollamaOptions.faunaToolContext;
     delete ollamaOptions.agent_max_steps_at_a_time;
@@ -1142,8 +1157,15 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
                 if (!data?.message?.content && !hasToolCalls) {
                     throw new Error(`${model} returned an empty response`);
                 }
-                if (!preserveActiveModel) {
+                data.model = normalizeModelId(data.model) || model;
+                data.__faunaRequestedModel = requestedModel;
+                data.__faunaModelUsed = model;
+                const usedRequestedModel = ollamaModelMatches(model, requestedModel);
+                if (!preserveActiveModel && usedRequestedModel) {
                     setActiveModel(model);
+                }
+                if (!usedRequestedModel) {
+                    showToast(`${requestedModel} did not respond. Fauna used installed model ${model} for this reply.`, "warning");
                 }
                 return data;
             }
@@ -1157,7 +1179,7 @@ async function sendOllamaChat(messages, options = {}, preferredModel = OLLAMA_MO
                 const desktopStatus = await getDesktopOllamaStatus();
                 hasCheckedOllamaStatus = true;
                 isOllamaReachable = false;
-                installedOllamaModels = [];
+                setInstalledOllamaModelRecords([]);
                 if (desktopStatus?.processRunning) {
                     setServiceStatus("checking", "Ollama app running");
                     setLocalModelsStatus("HTTP not ready", "missing");

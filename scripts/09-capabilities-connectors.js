@@ -454,6 +454,38 @@ function normalizeMcpServerRecord(server) {
     };
 }
 
+async function requireStdioMcpApproval(server, {
+    title = "Run stdio server?",
+    message = "This action can start a local process with the configuration below.",
+    confirmLabel = "Run server",
+    cancelMessage = "stdio server action cancelled because it was not approved.",
+    details = [],
+    signal = null
+} = {}) {
+    const normalized = normalizeMcpServerRecord(server);
+    if (!normalized || normalized.transport !== MCP_TRANSPORT_STDIO) return normalized;
+    if (!normalized.command) throw new Error("stdio servers need a command.");
+    const approved = await showApprovalDialog({
+        title,
+        message,
+        details: [
+            `Command: ${normalized.command}`,
+            `Arguments: ${JSON.stringify(normalized.args)}`,
+            `Working directory: ${normalized.cwd}`,
+            `Environment variables (sensitive values exposed to the process): ${JSON.stringify(normalized.env)}`,
+            ...details
+        ],
+        confirmLabel,
+        cancelLabel: "Cancel",
+        signal
+    });
+    if (!approved) {
+        throwIfAborted(signal);
+        throw new Error(cancelMessage);
+    }
+    return normalized;
+}
+
 function upsertMcpServerRecord(server, { notify = true } = {}) {
     const normalized = normalizeMcpServerRecord(server);
     if (!normalized) throw new Error("Server configuration is required.");
@@ -743,9 +775,23 @@ function renderMcpServers() {
         toggle.className = "provider-btn provider-btn-secondary settings-inline-btn capability-mini-btn";
         toggle.type = "button";
         toggle.textContent = server.enabled ? "Disable" : "Enable";
-        toggle.addEventListener("click", () => {
-            writeMcpServers(readMcpServers().map(item => item.id === server.id ? { ...item, enabled: !item.enabled, updatedAt: new Date().toISOString() } : item));
-            renderCapabilitiesView();
+        toggle.addEventListener("click", async () => {
+            const shouldEnable = !server.enabled;
+            try {
+                if (shouldEnable && server.transport === MCP_TRANSPORT_STDIO) {
+                    await requireStdioMcpApproval({ ...server, enabled: true }, {
+                        title: "Enable stdio server?",
+                        message: "Enabling this server allows Fauna to start the configured local process during discovery and tool calls.",
+                        confirmLabel: "Enable server",
+                        cancelMessage: "stdio server was not enabled because it was not approved."
+                    });
+                }
+                writeMcpServers(readMcpServers().map(item => item.id === server.id ? { ...item, enabled: shouldEnable, updatedAt: new Date().toISOString() } : item));
+                renderCapabilitiesView();
+            } catch (err) {
+                setCapabilitiesStatus(err.message, "warning");
+                showToast(err.message, "warning");
+            }
         });
         const edit = document.createElement("button");
         edit.className = "provider-btn provider-btn-ghost settings-inline-btn capability-mini-btn";
@@ -962,9 +1008,9 @@ function installSkillFromForm() {
     }
 }
 
-function saveMcpServerFromForm() {
+async function saveMcpServerFromForm() {
     try {
-        const server = upsertMcpServerRecord({
+        const candidate = normalizeMcpServerRecord({
             name: getCapabilityElement("mcpNameInput")?.value,
             transport: activeMcpTransport,
             command: getCapabilityElement("mcpCommandInput")?.value,
@@ -975,6 +1021,15 @@ function saveMcpServerFromForm() {
             headers: parseCapabilityJsonObject(getCapabilityElement("mcpHeadersInput")?.value, "Headers json"),
             enabled: true
         });
+        if (candidate?.transport === MCP_TRANSPORT_STDIO && candidate.enabled) {
+            await requireStdioMcpApproval(candidate, {
+                title: "Save active stdio server?",
+                message: "This stores an enabled server that can start the configured local process during discovery and tool calls.",
+                confirmLabel: "Save server",
+                cancelMessage: "stdio server was not saved because it was not approved."
+            });
+        }
+        const server = upsertMcpServerRecord(candidate);
         setCapabilitiesStatus(`Saved server ${server.name}.`, "success");
     } catch (err) {
         setCapabilitiesStatus(err.message, "error");
@@ -1017,17 +1072,26 @@ function normalizeImportedMcpServer(name, server = {}) {
     });
 }
 
-function importMcpServersFromJson(parsed) {
+async function importMcpServersFromJson(parsed) {
     const servers = parsed.mcpServers || parsed.mcp_servers || parsed.servers || {};
     if (!servers || typeof servers !== "object" || Array.isArray(servers)) return 0;
-    let count = 0;
-    Object.entries(servers).forEach(([name, server]) => {
-        const normalized = normalizeImportedMcpServer(name, server || {});
-        if (!normalized) return;
+    const normalizedServers = Object.entries(servers)
+        .map(([name, server]) => normalizeImportedMcpServer(name, server || {}))
+        .filter(Boolean);
+    for (const normalized of normalizedServers) {
+        if (normalized.transport === MCP_TRANSPORT_STDIO && normalized.enabled) {
+            await requireStdioMcpApproval(normalized, {
+                title: "Import active stdio server?",
+                message: "This import stores an enabled server that can start the configured local process.",
+                confirmLabel: "Import server",
+                cancelMessage: "stdio server import cancelled because it was not approved."
+            });
+        }
+    }
+    normalizedServers.forEach(normalized => {
         upsertMcpServerRecord(normalized, { notify: false });
-        count += 1;
     });
-    return count;
+    return normalizedServers.length;
 }
 
 function importApiConnectorsFromJson(parsed) {
@@ -1074,7 +1138,7 @@ function parseTomlValue(rawValue = "") {
     return value;
 }
 
-function importMcpServersFromToml(text = "") {
+async function importMcpServersFromToml(text = "") {
     const servers = {};
     let currentName = "";
     String(text || "").split(/\r?\n/).forEach(line => {
@@ -1094,17 +1158,26 @@ function importMcpServersFromToml(text = "") {
         if (key === "http_headers") servers[currentName].headers = value;
         else servers[currentName][key] = value;
     });
-    let count = 0;
-    Object.entries(servers).forEach(([name, server]) => {
-        const normalized = normalizeImportedMcpServer(name, server);
-        if (!normalized) return;
+    const normalizedServers = Object.entries(servers)
+        .map(([name, server]) => normalizeImportedMcpServer(name, server))
+        .filter(Boolean);
+    for (const normalized of normalizedServers) {
+        if (normalized.transport === MCP_TRANSPORT_STDIO && normalized.enabled) {
+            await requireStdioMcpApproval(normalized, {
+                title: "Import active stdio server?",
+                message: "This import stores an enabled server that can start the configured local process.",
+                confirmLabel: "Import server",
+                cancelMessage: "stdio server import cancelled because it was not approved."
+            });
+        }
+    }
+    normalizedServers.forEach(normalized => {
         upsertMcpServerRecord(normalized, { notify: false });
-        count += 1;
     });
-    return count;
+    return normalizedServers.length;
 }
 
-function importMcpServerFromCodexCommand(text = "") {
+async function importMcpServerFromCodexCommand(text = "") {
     const tokens = splitCapabilityCommandLine(text);
     const addIndex = tokens.findIndex((token, index) => token === "add" && tokens[index - 1] === "mcp");
     if (addIndex < 0) return 0;
@@ -1123,7 +1196,7 @@ function importMcpServerFromCodexCommand(text = "") {
         }
     }
     if (!commandTokens.length) return 0;
-    upsertMcpServerRecord({
+    const server = normalizeMcpServerRecord({
         name,
         transport: MCP_TRANSPORT_STDIO,
         command: commandTokens[0],
@@ -1131,11 +1204,18 @@ function importMcpServerFromCodexCommand(text = "") {
         env,
         cwd: ".",
         enabled: true
-    }, { notify: false });
+    });
+    await requireStdioMcpApproval(server, {
+        title: "Import active stdio server?",
+        message: "This import stores an enabled server that can start the configured local process.",
+        confirmLabel: "Import server",
+        cancelMessage: "stdio server import cancelled because it was not approved."
+    });
+    upsertMcpServerRecord(server, { notify: false });
     return 1;
 }
 
-function importCapabilitiesFromText() {
+async function importCapabilitiesFromText() {
     const textElement = getCapabilityElement("capabilityImportText");
     const text = String(textElement?.value || "").trim();
     if (!text) {
@@ -1146,14 +1226,14 @@ function importCapabilitiesFromText() {
         let imported = 0;
         if (text.startsWith("{")) {
             const parsed = JSON.parse(text);
-            imported += importMcpServersFromJson(parsed);
+            imported += await importMcpServersFromJson(parsed);
             imported += importApiConnectorsFromJson(parsed);
         }
         if (!imported && /\[mcp_servers\./i.test(text)) {
-            imported += importMcpServersFromToml(text);
+            imported += await importMcpServersFromToml(text);
         }
         if (!imported && /\bcodex\s+mcp\s+add\b/i.test(text)) {
-            imported += importMcpServerFromCodexCommand(text);
+            imported += await importMcpServerFromCodexCommand(text);
         }
         if (!imported && (/^---\s*\n/.test(text) || /^#\s+/m.test(text))) {
             upsertSkillRecord({ content: text, source: "import", enabled: true }, { notify: false });
@@ -1257,8 +1337,19 @@ async function discoverMcpServer(serverIdOrName) {
         setCapabilitiesStatus("Server not found.", "error");
         return null;
     }
-    setCapabilitiesStatus(`Discovering ${server.name}...`, "info");
     try {
+        if (server.transport === MCP_TRANSPORT_STDIO) {
+            if (!hasWorkspaceBridgeAccess()) {
+                throw new Error("stdio discovery needs the local workspace bridge.");
+            }
+            await requireStdioMcpApproval(server, {
+                title: "Run stdio server for discovery?",
+                message: "Tool discovery starts the configured local process and asks it to list its available tools.",
+                confirmLabel: "Discover tools",
+                cancelMessage: "stdio server discovery cancelled because it was not approved."
+            });
+        }
+        setCapabilitiesStatus(`Discovering ${server.name}...`, "info");
         let result;
         if (hasWorkspaceBridgeAccess()) {
             result = await requestWorkspaceBridge(MCP_DISCOVER_BRIDGE_PATH, {
@@ -1373,7 +1464,8 @@ async function executeSkillCapabilityToolCall(toolCall) {
     };
 }
 
-async function executeInstallSkillCapabilityToolCall(toolCall) {
+async function executeInstallSkillCapabilityToolCall(toolCall, signal = null) {
+    throwIfAborted(signal);
     const providedContent = String(toolCall.content || toolCall.markdown || toolCall.skill || "").trim();
     const name = normalizeCapabilityName(toolCall.name || toolCall.skillName || "custom-skill", "custom-skill");
     const description = truncateCapabilityText(toolCall.description || toolCall.summary || "Reusable assistant instructions.");
@@ -1385,6 +1477,7 @@ async function executeInstallSkillCapabilityToolCall(toolCall) {
         "---",
         body || "Use this skill when the request matches the description. Follow the user's constraints, keep work scoped, and verify important results."
     ].join("\n");
+    throwIfAborted(signal);
     const skill = upsertSkillRecord({
         name,
         description,
@@ -1401,8 +1494,9 @@ async function executeInstallSkillCapabilityToolCall(toolCall) {
     };
 }
 
-async function executeSaveServerCapabilityToolCall(toolCall) {
-    const server = upsertMcpServerRecord({
+async function executeSaveServerCapabilityToolCall(toolCall, signal = null) {
+    throwIfAborted(signal);
+    const candidate = normalizeMcpServerRecord({
         name: toolCall.server || toolCall.serverName || toolCall.name,
         description: toolCall.description || "",
         transport: toolCall.transport || (toolCall.url ? MCP_TRANSPORT_STREAMABLE_HTTP : MCP_TRANSPORT_STDIO),
@@ -1414,6 +1508,17 @@ async function executeSaveServerCapabilityToolCall(toolCall) {
         headers: toolCall.headers || {},
         enabled: toolCall.enabled !== false
     });
+    if (candidate?.transport === MCP_TRANSPORT_STDIO && candidate.enabled) {
+        await requireStdioMcpApproval(candidate, {
+            title: "Save active stdio server?",
+            message: "The model requested an enabled server configuration that can start this local process during discovery and tool calls.",
+            confirmLabel: "Save server",
+            cancelMessage: "stdio server was not saved because it was not approved.",
+            signal
+        });
+    }
+    throwIfAborted(signal);
+    const server = upsertMcpServerRecord(candidate);
     return {
         text: [
             `Server saved: ${server.name}`,
@@ -1423,7 +1528,8 @@ async function executeSaveServerCapabilityToolCall(toolCall) {
     };
 }
 
-async function executeSaveApiConnectorCapabilityToolCall(toolCall) {
+async function executeSaveApiConnectorCapabilityToolCall(toolCall, signal = null) {
+    throwIfAborted(signal);
     const connector = upsertApiConnectorRecord({
         name: toolCall.api || toolCall.connector || toolCall.name,
         description: toolCall.description || "",
@@ -1456,6 +1562,22 @@ async function executeMcpCapabilityToolCall(toolCall, signal = null) {
         : toolCall.input && typeof toolCall.input === "object" && !Array.isArray(toolCall.input)
             ? toolCall.input
             : {};
+    if (server.transport === MCP_TRANSPORT_STDIO) {
+        if (!hasWorkspaceBridgeAccess()) {
+            throw new Error("stdio calls need the local workspace bridge.");
+        }
+        await requireStdioMcpApproval(server, {
+            title: "Run stdio server tool?",
+            message: "This tool call starts the configured local process and sends it the requested MCP tool input.",
+            confirmLabel: "Call tool",
+            cancelMessage: "stdio server tool call cancelled because it was not approved.",
+            signal,
+            details: [
+                `Tool: ${toolName}`,
+                `Tool input (may be sensitive): ${JSON.stringify(args)}`
+            ]
+        });
+    }
     let result;
     if (hasWorkspaceBridgeAccess()) {
         result = await requestWorkspaceBridge(MCP_CALL_BRIDGE_PATH, {
@@ -1526,9 +1648,9 @@ function isCapabilityToolName(toolName) {
 async function executeCapabilityToolCall(toolCall, signal = null) {
     const tool = normalizeFaunaToolName(toolCall?.tool || toolCall?.name);
     if (tool === "use_skill") return executeSkillCapabilityToolCall(toolCall);
-    if (tool === "install_skill") return executeInstallSkillCapabilityToolCall(toolCall);
-    if (tool === "save_server") return executeSaveServerCapabilityToolCall(toolCall);
-    if (tool === "save_api_connector") return executeSaveApiConnectorCapabilityToolCall(toolCall);
+    if (tool === "install_skill") return executeInstallSkillCapabilityToolCall(toolCall, signal);
+    if (tool === "save_server") return executeSaveServerCapabilityToolCall(toolCall, signal);
+    if (tool === "save_api_connector") return executeSaveApiConnectorCapabilityToolCall(toolCall, signal);
     if (tool === "mcp_call") return executeMcpCapabilityToolCall(toolCall, signal);
     if (tool === "api_call") return executeApiCapabilityToolCall(toolCall, signal);
     throw new Error("Unknown capability tool.");

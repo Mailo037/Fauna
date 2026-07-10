@@ -20,6 +20,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.window.OnBackInvokedCallback;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -42,9 +43,18 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.net.URLEncoder;
 import java.util.regex.Matcher;
@@ -55,7 +65,15 @@ public class MainActivity extends Activity {
     private static final String SERVER_URL_KEY = "server_url";
     private static final String TOKEN_KEY = "token";
     private static final String DEVICE_ID_KEY = "device_id";
+    private static final String CONNECTION_PROFILES_KEY = "connection_profiles_v1";
+    private static final String ACTIVE_PROFILE_ID_KEY = "active_profile_id";
+    private static final String CONNECTION_BACKUP_SCHEMA = "fauna-phone-connections";
+    private static final int CONNECTION_BACKUP_VERSION = 1;
+    private static final int MAX_CONNECTION_PROFILES = 20;
+    private static final int MAX_CONNECTION_BACKUP_BYTES = 1024 * 1024;
     private static final int FILE_CHOOSER_REQUEST_CODE = 42;
+    private static final int EXPORT_CONNECTIONS_REQUEST_CODE = 43;
+    private static final int IMPORT_CONNECTIONS_REQUEST_CODE = 44;
     private static final int COLOR_BG = 0xFF111214;
     private static final int COLOR_PANEL = 0xFF202020;
     private static final int COLOR_PANEL_SOFT = 0xFF242424;
@@ -68,22 +86,25 @@ public class MainActivity extends Activity {
 
     private SharedPreferences prefs;
     private WebView webView;
+    private EditText profileNameInput;
     private EditText serverInput;
     private EditText tokenInput;
     private TextView statusText;
     private ValueCallback<Uri[]> filePathCallback;
+    private OnBackInvokedCallback backInvokedCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         applySystemBarsWindow();
+        registerPredictiveBackCallback();
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        migrateLegacyPairingIfNeeded();
         if (handlePairingIntent(getIntent())) return;
 
-        String serverUrl = prefs.getString(SERVER_URL_KEY, "");
-        String token = prefs.getString(TOKEN_KEY, "");
-        if (!serverUrl.isEmpty() && !token.isEmpty()) {
-            loadRemoteUi(serverUrl, token);
+        ConnectionProfile activeProfile = getActiveProfile();
+        if (activeProfile != null) {
+            loadRemoteUi(activeProfile.serverUrl, activeProfile.token, activeProfile.name);
         } else {
             showConnectionForm("");
         }
@@ -109,6 +130,15 @@ public class MainActivity extends Activity {
         window.setStatusBarColor(COLOR_BG);
         window.setNavigationBarColor(COLOR_BG);
         window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+    }
+
+    private void registerPredictiveBackCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return;
+        backInvokedCallback = this::handleBackNavigation;
+        getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+            android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            backInvokedCallback
+        );
     }
 
     private int dp(float value) {
@@ -184,11 +214,260 @@ public class MainActivity extends Activity {
         parent.addView(child, params);
     }
 
+    private String cleanProfileName(String value, String serverUrl) {
+        String clean = value == null ? "" : value.trim().replaceAll("\\s+", " ");
+        if (clean.isEmpty()) {
+            try {
+                clean = Uri.parse(serverUrl).getHost();
+            } catch (Exception ignored) {
+                clean = "";
+            }
+        }
+        if (clean == null || clean.trim().isEmpty()) clean = "Fauna PC";
+        clean = clean.trim();
+        return clean.length() > 80 ? clean.substring(0, 80) : clean;
+    }
+
+    private boolean isPrivateLanHost(String rawHost) {
+        String host = rawHost == null ? "" : rawHost.trim().toLowerCase(Locale.ROOT);
+        if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
+        if (host.isEmpty()) return false;
+        if (host.equals("localhost") || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".lan") || !host.contains(".")) return true;
+        if (host.equals("::1") || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe8") || host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb")) return true;
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) return false;
+        try {
+            int first = Integer.parseInt(parts[0]);
+            int second = Integer.parseInt(parts[1]);
+            return first == 10
+                || first == 127
+                || (first == 169 && second == 254)
+                || (first == 172 && second >= 16 && second <= 31)
+                || (first == 192 && second == 168);
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
+    private boolean isAllowedServerUrl(String serverUrl) {
+        try {
+            Uri uri = Uri.parse(normalizeServerUrl(serverUrl));
+            String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+            String host = uri.getHost();
+            String path = uri.getPath() == null ? "" : uri.getPath();
+            if (uri.getUserInfo() != null || (!path.isEmpty() && !"/".equals(path))) return false;
+            if ("https".equals(scheme)) return host != null && !host.trim().isEmpty();
+            return "http".equals(scheme) && isPrivateLanHost(host);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private List<ConnectionProfile> loadConnectionProfiles() {
+        List<ConnectionProfile> profiles = new ArrayList<>();
+        try {
+            JSONArray raw = new JSONArray(prefs.getString(CONNECTION_PROFILES_KEY, "[]"));
+            for (int index = 0; index < raw.length() && profiles.size() < MAX_CONNECTION_PROFILES; index += 1) {
+                JSONObject item = raw.optJSONObject(index);
+                if (item == null) continue;
+                String serverUrl = normalizeServerUrl(item.optString("serverUrl", ""));
+                String token = item.optString("token", "").trim();
+                if (!isAllowedServerUrl(serverUrl) || token.isEmpty() || token.length() > 512) continue;
+                String id = item.optString("id", "").trim();
+                if (id.isEmpty() || id.length() > 96) id = "pc-" + UUID.randomUUID();
+                profiles.add(new ConnectionProfile(
+                    id,
+                    cleanProfileName(item.optString("name", ""), serverUrl),
+                    serverUrl,
+                    token
+                ));
+            }
+        } catch (Exception ignored) {
+            return new ArrayList<>();
+        }
+        return profiles;
+    }
+
+    private void saveConnectionProfiles(List<ConnectionProfile> profiles, String activeProfileId) {
+        JSONArray raw = new JSONArray();
+        for (ConnectionProfile profile : profiles) {
+            if (raw.length() >= MAX_CONNECTION_PROFILES) break;
+            try {
+                JSONObject item = new JSONObject();
+                item.put("id", profile.id);
+                item.put("name", profile.name);
+                item.put("serverUrl", profile.serverUrl);
+                item.put("token", profile.token);
+                raw.put(item);
+            } catch (Exception ignored) {
+                // Skip malformed profiles instead of damaging the remaining list.
+            }
+        }
+
+        ConnectionProfile active = null;
+        for (ConnectionProfile profile : profiles) {
+            if (profile.id.equals(activeProfileId)) {
+                active = profile;
+                break;
+            }
+        }
+        if (active == null && !profiles.isEmpty()) active = profiles.get(0);
+
+        SharedPreferences.Editor editor = prefs.edit()
+            .putString(CONNECTION_PROFILES_KEY, raw.toString())
+            .putString(ACTIVE_PROFILE_ID_KEY, active == null ? "" : active.id);
+        if (active == null) {
+            editor.remove(SERVER_URL_KEY).remove(TOKEN_KEY);
+        } else {
+            editor.putString(SERVER_URL_KEY, active.serverUrl).putString(TOKEN_KEY, active.token);
+        }
+        editor.apply();
+    }
+
+    private void migrateLegacyPairingIfNeeded() {
+        if (prefs.contains(CONNECTION_PROFILES_KEY)) return;
+        String serverUrl = normalizeServerUrl(prefs.getString(SERVER_URL_KEY, ""));
+        String token = prefs.getString(TOKEN_KEY, "").trim();
+        List<ConnectionProfile> profiles = new ArrayList<>();
+        String activeId = "";
+        if (isAllowedServerUrl(serverUrl) && !token.isEmpty()) {
+            ConnectionProfile profile = new ConnectionProfile(
+                "pc-" + UUID.randomUUID(),
+                cleanProfileName("", serverUrl),
+                serverUrl,
+                token
+            );
+            profiles.add(profile);
+            activeId = profile.id;
+        }
+        saveConnectionProfiles(profiles, activeId);
+    }
+
+    private ConnectionProfile getActiveProfile() {
+        List<ConnectionProfile> profiles = loadConnectionProfiles();
+        String activeId = prefs.getString(ACTIVE_PROFILE_ID_KEY, "");
+        for (ConnectionProfile profile : profiles) {
+            if (profile.id.equals(activeId)) return profile;
+        }
+        return profiles.isEmpty() ? null : profiles.get(0);
+    }
+
+    private ConnectionProfile upsertConnectionProfile(String name, String serverUrl, String token) {
+        List<ConnectionProfile> profiles = loadConnectionProfiles();
+        String normalizedUrl = normalizeServerUrl(serverUrl);
+        ConnectionProfile updated = null;
+        for (int index = 0; index < profiles.size(); index += 1) {
+            ConnectionProfile existing = profiles.get(index);
+            if (!existing.serverUrl.equalsIgnoreCase(normalizedUrl)) continue;
+            updated = new ConnectionProfile(existing.id, cleanProfileName(name, normalizedUrl), normalizedUrl, token.trim());
+            profiles.set(index, updated);
+            break;
+        }
+        if (updated == null) {
+            if (profiles.size() >= MAX_CONNECTION_PROFILES) throw new IllegalStateException("Remove a saved PC before adding another one.");
+            updated = new ConnectionProfile("pc-" + UUID.randomUUID(), cleanProfileName(name, normalizedUrl), normalizedUrl, token.trim());
+            profiles.add(0, updated);
+        }
+        saveConnectionProfiles(profiles, updated.id);
+        return updated;
+    }
+
+    private void removeConnectionProfile(String profileId) {
+        List<ConnectionProfile> profiles = loadConnectionProfiles();
+        List<ConnectionProfile> next = new ArrayList<>();
+        for (ConnectionProfile profile : profiles) {
+            if (!profile.id.equals(profileId)) next.add(profile);
+        }
+        String currentActive = prefs.getString(ACTIVE_PROFILE_ID_KEY, "");
+        String nextActive = profileId.equals(currentActive) && !next.isEmpty() ? next.get(0).id : currentActive;
+        saveConnectionProfiles(next, nextActive);
+        WebStorage.getInstance().deleteAllData();
+    }
+
+    private View createConnectionProfileCard(ConnectionProfile profile) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(11), dp(12), dp(11));
+        card.setBackground(rounded(COLOR_PANEL, 10, COLOR_BORDER));
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView copy = text(profile.name + "\n" + profile.serverUrl, 14, COLOR_TEXT, Typeface.BOLD);
+        copy.setLineSpacing(dp(2), 1.0f);
+        top.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        if (profile.id.equals(prefs.getString(ACTIVE_PROFILE_ID_KEY, ""))) {
+            TextView active = text("Active", 11, COLOR_ACCENT, Typeface.BOLD);
+            active.setPadding(dp(8), dp(4), dp(8), dp(4));
+            active.setBackground(rounded(0x1A5B7CFA, 999, 0x335B7CFA));
+            top.addView(active);
+        }
+        card.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.END);
+        Button connect = actionButton("Connect", false);
+        Button remove = actionButton("Remove", false);
+        actions.addView(connect, new LinearLayout.LayoutParams(0, dp(42), 1));
+        LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        removeParams.leftMargin = dp(8);
+        actions.addView(remove, removeParams);
+        addWithTopMargin(card, actions, 10);
+
+        copy.setOnClickListener(view -> {
+            if (profileNameInput != null) profileNameInput.setText(profile.name);
+            if (serverInput != null) serverInput.setText(profile.serverUrl);
+            if (tokenInput != null) tokenInput.setText(profile.token);
+        });
+        connect.setOnClickListener(view -> checkAndConnect(profile.serverUrl, profile.token, profile.name, connect));
+        remove.setOnClickListener(view -> showRemoveConnectionDialog(profile));
+        return card;
+    }
+
+    private void showRemoveConnectionDialog(ConnectionProfile profile) {
+        Dialog dialog = new Dialog(this);
+        LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(20), dp(18), dp(20), dp(18));
+        sheet.setBackground(rounded(COLOR_PANEL, 18, COLOR_BORDER));
+        sheet.addView(text("Remove " + profile.name + "?", 18, COLOR_TEXT, Typeface.BOLD));
+        TextView copy = text("The saved URL and Phone Sync token will be deleted from this phone.", 13, COLOR_MUTED, 0);
+        copy.setLineSpacing(dp(3), 1.0f);
+        addWithTopMargin(sheet, copy, 8);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button cancel = actionButton("Cancel", false);
+        Button remove = actionButton("Remove", true);
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(46), 1));
+        LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        removeParams.leftMargin = dp(8);
+        actions.addView(remove, removeParams);
+        addWithTopMargin(sheet, actions, 16);
+        dialog.setContentView(sheet);
+        cancel.setOnClickListener(view -> dialog.dismiss());
+        remove.setOnClickListener(view -> {
+            removeConnectionProfile(profile.id);
+            dialog.dismiss();
+            showConnectionForm("Saved PC removed.");
+        });
+        dialog.setOnShowListener(item -> {
+            Window window = dialog.getWindow();
+            if (window == null) return;
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        });
+        dialog.show();
+    }
+
     private void showConnectionForm(String message) {
         if (webView != null) {
             webView.stopLoading();
+            webView.destroy();
             webView = null;
         }
+        ConnectionProfile activeProfile = getActiveProfile();
+        List<ConnectionProfile> profiles = loadConnectionProfiles();
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -235,31 +514,50 @@ public class MainActivity extends Activity {
         TextView title = text("Phone Sync", 28, COLOR_TEXT, Typeface.BOLD);
         addWithTopMargin(panel, title, 22);
 
-        TextView subtitle = text("Connect to the Phone URL from Fauna Desktop.", 14, COLOR_MUTED, 0);
+        TextView subtitle = text("Switch between several Fauna PCs, on your LAN or through a secure HTTPS tunnel.", 14, COLOR_MUTED, 0);
         subtitle.setLineSpacing(dp(2), 1.0f);
         addWithTopMargin(panel, subtitle, 5);
+
+        if (!profiles.isEmpty()) {
+            addWithTopMargin(panel, label("SAVED PCS"), 24);
+            for (ConnectionProfile profile : profiles) {
+                addWithTopMargin(panel, createConnectionProfileCard(profile), 8);
+            }
+        }
 
         Button scanButton = actionButton("Scan QR with camera", false);
         addWithTopMargin(panel, scanButton, 22);
 
+        addWithTopMargin(panel, label("PC NAME"), 24);
+        profileNameInput = input("Home PC", activeProfile == null ? "" : activeProfile.name);
+        addWithTopMargin(panel, profileNameInput, 7);
+
         addWithTopMargin(panel, label("Phone URL"), 28);
-        serverInput = input("http://192.168.1.20:8899", prefs.getString(SERVER_URL_KEY, ""));
+        serverInput = input("http://192.168.1.20:8899", activeProfile == null ? "" : activeProfile.serverUrl);
         serverInput.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         addWithTopMargin(panel, serverInput, 7);
 
         addWithTopMargin(panel, label("Token"), 14);
-        tokenInput = input("Paste token", prefs.getString(TOKEN_KEY, ""));
-        tokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        tokenInput = input("Paste token", activeProfile == null ? "" : activeProfile.token);
+        tokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         addWithTopMargin(panel, tokenInput, 7);
 
         Button connectButton = actionButton("Connect to PC", true);
         addWithTopMargin(panel, connectButton, 18);
 
-        TextView clearButton = text("Clear saved pairing", 13, COLOR_DIM, Typeface.BOLD);
-        clearButton.setGravity(Gravity.CENTER);
-        clearButton.setMinHeight(dp(42));
-        clearButton.setVisibility((prefs.getString(SERVER_URL_KEY, "").isEmpty() && prefs.getString(TOKEN_KEY, "").isEmpty()) ? View.GONE : View.VISIBLE);
-        addWithTopMargin(panel, clearButton, 8);
+        LinearLayout transferActions = new LinearLayout(this);
+        transferActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button exportButton = actionButton("Export private backup", false);
+        Button importButton = actionButton("Import backup", false);
+        transferActions.addView(exportButton, new LinearLayout.LayoutParams(0, dp(46), 1));
+        LinearLayout.LayoutParams importParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        importParams.leftMargin = dp(8);
+        transferActions.addView(importButton, importParams);
+        addWithTopMargin(panel, transferActions, 10);
+
+        TextView transferHint = text("Private connection backups contain Phone Sync tokens. Store and share them like passwords.", 12, COLOR_DIM, 0);
+        transferHint.setLineSpacing(dp(2), 1.0f);
+        addWithTopMargin(panel, transferHint, 8);
 
         statusText = text(message, 13, COLOR_MUTED, 0);
         statusText.setLineSpacing(dp(2), 1.0f);
@@ -277,21 +575,164 @@ public class MainActivity extends Activity {
                 statusText.setText("URL and token are required.");
                 return;
             }
+            if (!isAllowedServerUrl(pairing.serverUrl)) {
+                statusText.setText("Use HTTPS outside your LAN. HTTP is accepted only for private local addresses.");
+                return;
+            }
             serverInput.setText(pairing.serverUrl);
             tokenInput.setText(pairing.token);
-            checkAndConnect(pairing.serverUrl, pairing.token, connectButton);
+            String profileName = firstNonEmpty(profileNameInput.getText().toString(), pairing.name);
+            checkAndConnect(pairing.serverUrl, pairing.token, profileName, connectButton);
         });
 
-        clearButton.setOnClickListener(view -> {
-            prefs.edit().remove(SERVER_URL_KEY).remove(TOKEN_KEY).apply();
-            WebStorage.getInstance().deleteAllData();
-            serverInput.setText("");
-            tokenInput.setText("");
-            clearButton.setVisibility(View.GONE);
-            statusText.setText("Saved pairing cleared.");
-        });
+        exportButton.setOnClickListener(view -> showExportConnectionsDialog());
+        importButton.setOnClickListener(view -> startImportConnections());
 
         setContentView(scroll);
+    }
+
+    private JSONObject createConnectionsBackup() throws Exception {
+        JSONObject backup = new JSONObject();
+        backup.put("schema", CONNECTION_BACKUP_SCHEMA);
+        backup.put("version", CONNECTION_BACKUP_VERSION);
+        backup.put("exportedAt", System.currentTimeMillis());
+        backup.put("sensitive", true);
+        backup.put("activeProfileId", prefs.getString(ACTIVE_PROFILE_ID_KEY, ""));
+        JSONArray profiles = new JSONArray();
+        for (ConnectionProfile profile : loadConnectionProfiles()) {
+            JSONObject item = new JSONObject();
+            item.put("id", profile.id);
+            item.put("name", profile.name);
+            item.put("serverUrl", profile.serverUrl);
+            item.put("token", profile.token);
+            profiles.put(item);
+        }
+        backup.put("profiles", profiles);
+        return backup;
+    }
+
+    private void showExportConnectionsDialog() {
+        if (loadConnectionProfiles().isEmpty()) {
+            if (statusText != null) statusText.setText("There are no saved PCs to export.");
+            return;
+        }
+        Dialog dialog = new Dialog(this);
+        LinearLayout sheet = new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setPadding(dp(20), dp(18), dp(20), dp(18));
+        sheet.setBackground(rounded(COLOR_PANEL, 18, COLOR_BORDER));
+        sheet.addView(text("Export private connection backup?", 18, COLOR_TEXT, Typeface.BOLD));
+        TextView copy = text("This JSON file contains every saved Phone Sync URL and token. Anyone who has it may access those PCs while the tokens remain valid.", 13, COLOR_MUTED, 0);
+        copy.setLineSpacing(dp(3), 1.0f);
+        addWithTopMargin(sheet, copy, 8);
+        LinearLayout actions = new LinearLayout(this);
+        Button cancel = actionButton("Cancel", false);
+        Button export = actionButton("Export private file", true);
+        actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(46), 1));
+        LinearLayout.LayoutParams exportParams = new LinearLayout.LayoutParams(0, dp(46), 1);
+        exportParams.leftMargin = dp(8);
+        actions.addView(export, exportParams);
+        addWithTopMargin(sheet, actions, 16);
+        dialog.setContentView(sheet);
+        cancel.setOnClickListener(view -> dialog.dismiss());
+        export.setOnClickListener(view -> {
+            dialog.dismiss();
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TITLE, "Fauna-private-connections.json");
+            startActivityForResult(intent, EXPORT_CONNECTIONS_REQUEST_CODE);
+        });
+        dialog.setOnShowListener(item -> {
+            Window window = dialog.getWindow();
+            if (window == null) return;
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        });
+        dialog.show();
+    }
+
+    private void startImportConnections() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        startActivityForResult(intent, IMPORT_CONNECTIONS_REQUEST_CODE);
+    }
+
+    private byte[] readDocumentBytes(Uri uri, int maxBytes) throws Exception {
+        InputStream stream = getContentResolver().openInputStream(uri);
+        if (stream == null) throw new IllegalArgumentException("Could not open the selected backup.");
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            int count;
+            while ((count = stream.read(buffer)) != -1) {
+                total += count;
+                if (total > maxBytes) throw new IllegalArgumentException("The connection backup must be smaller than 1 MB.");
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
+        } finally {
+            stream.close();
+        }
+    }
+
+    private int importConnectionsBackup(Uri uri) throws Exception {
+        String json = new String(readDocumentBytes(uri, MAX_CONNECTION_BACKUP_BYTES), StandardCharsets.UTF_8);
+        JSONObject backup = new JSONObject(json);
+        if (!CONNECTION_BACKUP_SCHEMA.equals(backup.optString("schema")) || backup.optInt("version", 0) != CONNECTION_BACKUP_VERSION) {
+            throw new IllegalArgumentException("This is not a supported Fauna Phone connection backup.");
+        }
+        JSONArray incoming = backup.optJSONArray("profiles");
+        if (incoming == null) throw new IllegalArgumentException("The connection backup does not contain any PC profiles.");
+
+        List<ConnectionProfile> merged = loadConnectionProfiles();
+        int imported = 0;
+        String firstImportedId = "";
+        for (int index = 0; index < incoming.length(); index += 1) {
+            JSONObject item = incoming.optJSONObject(index);
+            if (item == null) continue;
+            String serverUrl = normalizeServerUrl(item.optString("serverUrl", ""));
+            String token = item.optString("token", "").trim();
+            if (!isAllowedServerUrl(serverUrl) || token.isEmpty() || token.length() > 512) continue;
+            String name = cleanProfileName(item.optString("name", ""), serverUrl);
+            int existingIndex = -1;
+            for (int cursor = 0; cursor < merged.size(); cursor += 1) {
+                if (merged.get(cursor).serverUrl.equalsIgnoreCase(serverUrl)) {
+                    existingIndex = cursor;
+                    break;
+                }
+            }
+            ConnectionProfile profile;
+            if (existingIndex >= 0) {
+                ConnectionProfile existing = merged.get(existingIndex);
+                profile = new ConnectionProfile(existing.id, name, serverUrl, token);
+                merged.set(existingIndex, profile);
+            } else {
+                if (merged.size() >= MAX_CONNECTION_PROFILES) continue;
+                profile = new ConnectionProfile("pc-" + UUID.randomUUID(), name, serverUrl, token);
+                merged.add(profile);
+            }
+            if (firstImportedId.isEmpty()) firstImportedId = profile.id;
+            imported += 1;
+        }
+        if (imported == 0) throw new IllegalArgumentException("The backup contains no valid HTTPS or private-LAN PC profiles.");
+        String activeId = prefs.getString(ACTIVE_PROFILE_ID_KEY, "");
+        if (activeId.isEmpty()) activeId = firstImportedId;
+        saveConnectionProfiles(merged, activeId);
+        return imported;
+    }
+
+    private void writeConnectionsBackup(Uri uri) throws Exception {
+        OutputStream stream = getContentResolver().openOutputStream(uri, "wt");
+        if (stream == null) throw new IllegalArgumentException("Could not create the backup file.");
+        try {
+            stream.write((createConnectionsBackup().toString(2) + "\n").getBytes(StandardCharsets.UTF_8));
+            stream.flush();
+        } finally {
+            stream.close();
+        }
     }
 
     private void startQrScanner() {
@@ -310,7 +751,12 @@ public class MainActivity extends Activity {
                 }
                 if (serverInput != null) serverInput.setText(pairing.serverUrl);
                 if (tokenInput != null) tokenInput.setText(pairing.token);
-                checkAndConnect(pairing.serverUrl, pairing.token, null);
+                if (profileNameInput != null && !pairing.name.isEmpty()) profileNameInput.setText(pairing.name);
+                if (!isAllowedServerUrl(pairing.serverUrl)) {
+                    if (statusText != null) statusText.setText("Use HTTPS outside your LAN. HTTP is accepted only for private local addresses.");
+                    return;
+                }
+                checkAndConnect(pairing.serverUrl, pairing.token, pairing.name, null);
             })
             .addOnCanceledListener(() -> {
                 if (statusText != null) statusText.setText("QR scan cancelled.");
@@ -370,6 +816,11 @@ public class MainActivity extends Activity {
             firstNonEmpty(data.getQueryParameter("u"), data.getQueryParameter("url")),
             firstNonEmpty(data.getQueryParameter("t"), data.getQueryParameter("token"))
         );
+        pairing = new PairingDetails(
+            pairing.serverUrl,
+            pairing.token,
+            firstNonEmpty(firstNonEmpty(data.getQueryParameter("n"), data.getQueryParameter("name")), pairing.name)
+        );
         if (pairing.serverUrl.isEmpty() || pairing.token.isEmpty()) {
             showConnectionForm("The QR code did not include a complete Fauna pairing.");
             return true;
@@ -377,14 +828,20 @@ public class MainActivity extends Activity {
         showConnectionForm("Checking pairing...");
         if (serverInput != null) serverInput.setText(pairing.serverUrl);
         if (tokenInput != null) tokenInput.setText(pairing.token);
-        checkAndConnect(pairing.serverUrl, pairing.token, null);
+        if (profileNameInput != null && !pairing.name.isEmpty()) profileNameInput.setText(pairing.name);
+        if (!isAllowedServerUrl(pairing.serverUrl)) {
+            if (statusText != null) statusText.setText("Use HTTPS outside your LAN. HTTP is accepted only for private local addresses.");
+            return true;
+        }
+        checkAndConnect(pairing.serverUrl, pairing.token, pairing.name, null);
         return true;
     }
 
     private String normalizeServerUrl(String raw) {
         String value = raw == null ? "" : raw.trim();
         if (value.isEmpty()) return "";
-        if (!value.startsWith("http://") && !value.startsWith("https://")) {
+        String lowerValue = value.toLowerCase(Locale.ROOT);
+        if (!lowerValue.startsWith("http://") && !lowerValue.startsWith("https://")) {
             value = "http://" + value;
         }
         int hashIndex = value.indexOf('#');
@@ -423,14 +880,19 @@ public class MainActivity extends Activity {
             if ("fauna".equalsIgnoreCase(uri.getScheme()) && "pair".equalsIgnoreCase(uri.getHost())) {
                 return new PairingDetails(
                     normalizeServerUrl(firstNonEmpty(uri.getQueryParameter("u"), uri.getQueryParameter("url"))),
-                    firstNonEmpty(uri.getQueryParameter("t"), uri.getQueryParameter("token"))
+                    firstNonEmpty(uri.getQueryParameter("t"), uri.getQueryParameter("token")),
+                    firstNonEmpty(uri.getQueryParameter("n"), uri.getQueryParameter("name"))
                 );
             }
             String fragment = uri.getFragment();
             String fragmentToken = getParamFromQueryLikeString(fragment, "token");
             if (fragmentToken.isEmpty()) fragmentToken = getParamFromQueryLikeString(fragment, "t");
             if (!fragmentToken.isEmpty()) {
-                return new PairingDetails(normalizeServerUrl(clean), fragmentToken);
+                return new PairingDetails(
+                    normalizeServerUrl(clean),
+                    fragmentToken,
+                    firstNonEmpty(getParamFromQueryLikeString(fragment, "connectionName"), getParamFromQueryLikeString(fragment, "name"))
+                );
             }
         } catch (Exception ignored) {
             return null;
@@ -459,7 +921,8 @@ public class MainActivity extends Activity {
         if (fromUrl != null && (!fromUrl.serverUrl.isEmpty() || !fromUrl.token.isEmpty())) {
             return new PairingDetails(
                 firstNonEmpty(fromUrl.serverUrl, normalizeServerUrl(urlText)),
-                firstNonEmpty(fromUrl.token, tokenText)
+                firstNonEmpty(fromUrl.token, tokenText),
+                fromUrl.name
             );
         }
 
@@ -469,7 +932,8 @@ public class MainActivity extends Activity {
 
         return new PairingDetails(
             normalizeServerUrl(firstNonEmpty(pastedUrl, urlText)),
-            trimPastedValue(firstNonEmpty(pastedToken, tokenText))
+            trimPastedValue(firstNonEmpty(pastedToken, tokenText)),
+            ""
         );
     }
 
@@ -496,14 +960,11 @@ public class MainActivity extends Activity {
         return created;
     }
 
-    private void savePairing(String serverUrl, String token) {
-        prefs.edit()
-            .putString(SERVER_URL_KEY, serverUrl)
-            .putString(TOKEN_KEY, token)
-            .apply();
-    }
-
-    private void checkAndConnect(String serverUrl, String token, Button connectButton) {
+    private void checkAndConnect(String serverUrl, String token, String profileName, Button connectButton) {
+        if (!isAllowedServerUrl(serverUrl)) {
+            if (statusText != null) statusText.setText("Use HTTPS outside your LAN. HTTP is accepted only for private local addresses.");
+            return;
+        }
         if (statusText != null) statusText.setText("Checking connection...");
         if (connectButton != null) connectButton.setEnabled(false);
 
@@ -515,8 +976,12 @@ public class MainActivity extends Activity {
                     if (statusText != null) statusText.setText(result.message);
                     return;
                 }
-                savePairing(serverUrl, token);
-                loadRemoteUi(serverUrl, token);
+                try {
+                    ConnectionProfile profile = upsertConnectionProfile(profileName, serverUrl, token);
+                    loadRemoteUi(profile.serverUrl, profile.token, profile.name);
+                } catch (Exception error) {
+                    if (statusText != null) statusText.setText(error.getMessage());
+                }
             });
         }).start();
     }
@@ -542,7 +1007,7 @@ public class MainActivity extends Activity {
             String body = readResponseSnippet(connection);
             return new ConnectionResult(false, body.isEmpty() ? "PC answered with HTTP " + code + "." : body);
         } catch (Exception error) {
-            return new ConnectionResult(false, "Could not reach the PC. Make sure both devices are on the same Wi-Fi and Phone Sync is enabled.");
+            return new ConnectionResult(false, "Could not reach the PC. Check the LAN connection or secure HTTPS tunnel, then confirm Phone Sync is enabled.");
         } finally {
             if (connection != null) connection.disconnect();
         }
@@ -568,8 +1033,32 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean handleWebNavigation(Uri uri, String serverUrl) {
+        if (uri == null) return false;
+        if ("fauna".equalsIgnoreCase(uri.getScheme()) && ("connections".equalsIgnoreCase(uri.getHost()) || "manage".equalsIgnoreCase(uri.getHost()))) {
+            runOnUiThread(() -> showConnectionForm("Choose or add a PC."));
+            return true;
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (!"http".equals(scheme) && !"https".equals(scheme)) return false;
+        Uri allowed = Uri.parse(normalizeServerUrl(serverUrl));
+        int requestPort = uri.getPort() >= 0 ? uri.getPort() : ("https".equals(scheme) ? 443 : 80);
+        String allowedScheme = allowed.getScheme() == null ? "" : allowed.getScheme().toLowerCase(Locale.ROOT);
+        int allowedPort = allowed.getPort() >= 0 ? allowed.getPort() : ("https".equals(allowedScheme) ? 443 : 80);
+        boolean sameOrigin = scheme.equals(allowedScheme)
+            && String.valueOf(uri.getHost()).equalsIgnoreCase(String.valueOf(allowed.getHost()))
+            && requestPort == allowedPort;
+        if (sameOrigin) return false;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (Exception ignored) {
+            // Leave the remote page in place when no external handler is available.
+        }
+        return true;
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
-    private void loadRemoteUi(String serverUrl, String token) {
+    private void loadRemoteUi(String serverUrl, String token, String profileName) {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(21, 23, 26));
 
@@ -580,7 +1069,10 @@ public class MainActivity extends Activity {
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        settings.setAllowFileAccess(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(false);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         webView.clearCache(true);
         webView.clearFormData();
 
@@ -607,6 +1099,17 @@ public class MainActivity extends Activity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return handleWebNavigation(request == null ? null : request.getUrl(), serverUrl);
+            }
+
+            @Override
+            @SuppressWarnings("deprecation")
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return handleWebNavigation(url == null ? null : Uri.parse(url), serverUrl);
+            }
+
+            @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 WebResourceResponse response = serveBundledMobileAsset(request);
                 return response != null ? response : super.shouldInterceptRequest(view, request);
@@ -615,14 +1118,14 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request != null && request.isForMainFrame()) {
-                    showConnectionForm("Could not reach the PC. Check the URL, Wi-Fi, and remote access toggle.");
+                    showConnectionForm("Could not reach the PC. Check the LAN connection or HTTPS tunnel and the Phone Sync toggle.");
                 }
             }
 
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
                 handler.cancel();
-                showConnectionForm("Secure connection failed. Use the HTTP Phone URL shown by Fauna Desktop.");
+                showConnectionForm("Secure connection failed. Use a valid HTTPS tunnel certificate or the private HTTP LAN URL shown by Fauna Desktop.");
             }
         });
 
@@ -630,13 +1133,36 @@ public class MainActivity extends Activity {
         String encodedToken = encodeUrlPart(token);
         String encodedDeviceId = encodeUrlPart(getFaunaDeviceId());
         String encodedDeviceName = encodeUrlPart(getDeviceName());
+        String encodedConnectionName = encodeUrlPart(cleanProfileName(profileName, serverUrl));
         String cacheBust = String.valueOf(System.currentTimeMillis());
-        webView.loadUrl(normalizeServerUrl(serverUrl) + "/mobile/?native=android&shell=0.3.2&ts=" + cacheBust + "#token=" + encodedToken + "&deviceId=" + encodedDeviceId + "&deviceName=" + encodedDeviceName + "&platform=android");
+        webView.loadUrl(normalizeServerUrl(serverUrl) + "/mobile/?native=android&shell=0.4.0&ts=" + cacheBust + "#token=" + encodedToken + "&deviceId=" + encodedDeviceId + "&deviceName=" + encodedDeviceName + "&platform=android&connectionName=" + encodedConnectionName);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EXPORT_CONNECTIONS_REQUEST_CODE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                try {
+                    writeConnectionsBackup(data.getData());
+                    showConnectionForm("Private connection backup exported.");
+                } catch (Exception error) {
+                    showConnectionForm("Export failed: " + error.getMessage());
+                }
+            }
+            return;
+        }
+        if (requestCode == IMPORT_CONNECTIONS_REQUEST_CODE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                try {
+                    int imported = importConnectionsBackup(data.getData());
+                    showConnectionForm(imported + (imported == 1 ? " PC imported." : " PCs imported."));
+                } catch (Exception error) {
+                    showConnectionForm("Import failed: " + error.getMessage());
+                }
+            }
+            return;
+        }
         if (requestCode != FILE_CHOOSER_REQUEST_CODE || filePathCallback == null) return;
         Uri[] results = null;
         if (resultCode == RESULT_OK && data != null) {
@@ -692,8 +1218,7 @@ public class MainActivity extends Activity {
         return "application/octet-stream";
     }
 
-    @Override
-    public void onBackPressed() {
+    private void handleBackNavigation() {
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
             return;
@@ -702,14 +1227,51 @@ public class MainActivity extends Activity {
             showConnectionForm("");
             return;
         }
-        super.onBackPressed();
+        finishAfterTransition();
+    }
+
+    @Override
+    @SuppressLint("GestureBackNavigation")
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        handleBackNavigation();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backInvokedCallback != null) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backInvokedCallback);
+            backInvokedCallback = null;
+        }
+        if (webView != null) {
+            webView.stopLoading();
+            webView.destroy();
+            webView = null;
+        }
+        super.onDestroy();
     }
 
     private static class PairingDetails {
         final String serverUrl;
         final String token;
+        final String name;
 
-        PairingDetails(String serverUrl, String token) {
+        PairingDetails(String serverUrl, String token, String name) {
+            this.serverUrl = serverUrl == null ? "" : serverUrl.trim();
+            this.token = token == null ? "" : token.trim();
+            this.name = name == null ? "" : name.trim();
+        }
+    }
+
+    private static class ConnectionProfile {
+        final String id;
+        final String name;
+        final String serverUrl;
+        final String token;
+
+        ConnectionProfile(String id, String name, String serverUrl, String token) {
+            this.id = id == null ? "" : id.trim();
+            this.name = name == null ? "Fauna PC" : name.trim();
             this.serverUrl = serverUrl == null ? "" : serverUrl.trim();
             this.token = token == null ? "" : token.trim();
         }

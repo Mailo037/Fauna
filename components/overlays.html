@@ -34,7 +34,7 @@
         <div class="library-picker-controls">
             <label class="library-picker-search-wrap" for="libraryPickerSearch">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-                <input id="libraryPickerSearch" class="library-picker-search" type="search" autocomplete="off" placeholder="Search Library">
+                <input id="libraryPickerSearch" class="library-picker-search" type="search" autocomplete="off" placeholder="Search Library" aria-label="Search Library">
             </label>
             <div class="library-picker-filter-row library-picker-type-row" aria-label="Library item type">
                 <button class="library-picker-chip active" type="button" data-library-picker-type="all" aria-pressed="true">All</button>
@@ -216,7 +216,7 @@
                         </div>
                         <div class="settings-range-wrap">
                             <span id="tempValue" class="setting-value">0.7</span>
-                            <input type="range" id="paramTemp" min="0" max="1.5" step="0.1" value="0.7" class="param-slider">
+                            <input type="range" id="paramTemp" min="0" max="1.5" step="0.1" value="0.7" class="param-slider" aria-label="Temperature" aria-describedby="temperatureStatus">
                         </div>
                     </div>
                     <div class="settings-control-card settings-control-card-stacked ai-call-settings-card">
@@ -450,13 +450,12 @@
                 <section class="voice-local-pipeline" aria-label="Local voice pipeline">
                     <div class="settings-section-heading settings-model-heading">
                         <p class="provider-section-label">Local voice pipeline</p>
-                        <button id="localVoiceInstallBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">
+                        <button id="localVoiceInstallBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button" aria-label="Check local voice pipeline">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M12 3v12"></path>
-                                <path d="m7 10 5 5 5-5"></path>
-                                <path d="M5 21h14"></path>
+                                <circle cx="12" cy="12" r="9"></circle>
+                                <path d="m8 12 2.5 2.5L16 9"></path>
                             </svg>
-                            Install
+                            Check
                         </button>
                     </div>
                     <div class="provider-model-grid">
@@ -555,6 +554,30 @@
                             <input type="checkbox" id="localModelsAutoStartToggle">
                             <span class="toggle-slider"></span>
                         </label>
+                    </div>
+                    <div class="settings-control-card settings-control-card-stacked hf-model-import-card">
+                        <div class="settings-section-heading">
+                            <div class="setting-info">
+                                <span class="setting-title">Hugging Face GGUF</span>
+                                <span class="setting-desc">Pull a public GGUF repository through your local Ollama service.</span>
+                            </div>
+                            <span id="hfModelImportStatus" class="settings-status-badge">Ready</span>
+                        </div>
+                        <div class="hf-model-import-grid">
+                            <label class="settings-field-label">
+                                <span>Repository</span>
+                                <input id="hfModelRepoInput" class="settings-input" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="owner/model-GGUF">
+                            </label>
+                            <label class="settings-field-label">
+                                <span>Quantization</span>
+                                <input id="hfModelQuantInput" class="settings-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Q4_K_M (optional)">
+                            </label>
+                        </div>
+                        <p class="settings-section-desc hf-model-import-note">Public GGUF repositories only. Review the model license and available disk space first. Gated or private repositories require a manual authenticated import.</p>
+                        <div class="provider-actions hf-model-import-actions">
+                            <button id="hfModelPullBtn" class="provider-btn provider-btn-primary" type="button">Pull &amp; use</button>
+                            <button id="hfModelClearBtn" class="provider-btn provider-btn-secondary" type="button">Clear</button>
+                        </div>
                     </div>
                 </div>
 
@@ -947,11 +970,11 @@
                         <div class="workspace-policy-options" role="radiogroup" aria-label="Desktop agent access policy">
                             <button class="workspace-policy-option" type="button" data-workspace-access-policy="chat-output" aria-pressed="true">
                                 <span>Output folder</span>
-                                <small>Use only this chat's output folder for files and commands.</small>
+                                <small>File tools stay in this chat's output folder. Commands require approval but are not OS-sandboxed.</small>
                             </button>
                             <button class="workspace-policy-option workspace-policy-option-danger" type="button" data-workspace-access-policy="full-machine" aria-pressed="false">
                                 <span>Full machine</span>
-                                <small>Allow absolute paths and unblocked terminal commands.</small>
+                                <small>Allow absolute file paths and unblocked commands after explicit approval.</small>
                             </button>
                         </div>
                     </div>
@@ -1001,6 +1024,31 @@
                                 <input type="checkbox" id="appInfoRemoteToggle">
                                 <span class="toggle-slider"></span>
                             </label>
+                        </div>
+                        <div class="settings-control-card settings-control-card-stacked remote-internet-card">
+                            <div class="settings-section-heading">
+                                <div class="setting-info">
+                                    <span class="setting-title">Internet access</span>
+                                    <span id="appInfoRemoteInternetStatus" class="setting-desc">Off. LAN pairing stays local to this network.</span>
+                                </div>
+                                <span id="appInfoRemoteInternetBadge" class="settings-status-badge">Off</span>
+                            </div>
+                            <div class="provider-actions remote-internet-mode-actions" role="group" aria-label="Internet access mode">
+                                <button class="provider-btn provider-btn-secondary settings-inline-btn" type="button" data-remote-internet-mode="off">Off</button>
+                                <button class="provider-btn provider-btn-secondary settings-inline-btn" type="button" data-remote-internet-mode="quick">Quick Tunnel</button>
+                                <button class="provider-btn provider-btn-secondary settings-inline-btn" type="button" data-remote-internet-mode="custom">Custom HTTPS</button>
+                            </div>
+                        </div>
+                        <div class="settings-control-card settings-control-card-stacked remote-custom-url-card">
+                            <div class="setting-info">
+                                <span class="setting-title">Custom tunnel URL</span>
+                                <span class="setting-desc">For your own Cloudflare Tunnel, Tailscale Funnel, or reverse proxy. Public HTTP URLs are rejected.</span>
+                            </div>
+                            <div class="remote-custom-url-controls">
+                                <input id="appInfoRemoteCustomUrlInput" class="settings-input" type="url" autocomplete="off" spellcheck="false" placeholder="https://fauna.example.com" aria-label="Custom public HTTPS URL">
+                                <button id="appInfoRemoteCustomUrlSaveBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Save URL</button>
+                                <button id="appInfoRemoteCustomUrlClearBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Clear</button>
+                            </div>
                         </div>
                         <div class="app-info-path-list">
                             <div class="app-info-path-row">
@@ -1071,6 +1119,26 @@
                     </div>
                     <div class="provider-actions app-info-actions">
                         <button id="appInfoOnboardingBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Run onboarding</button>
+                    </div>
+                </div>
+
+                <div class="provider-model-section settings-panel-section">
+                    <div class="settings-section-heading">
+                        <div>
+                            <p class="provider-section-label">Settings transfer</p>
+                            <p class="settings-section-desc">Move portable preferences between Fauna installations. Chats, API keys, tokens, workspace paths, and local endpoints are excluded.</p>
+                        </div>
+                        <span class="settings-status-badge">Private-safe</span>
+                    </div>
+                    <div class="settings-control-card settings-control-card-stacked">
+                        <div class="setting-info">
+                            <span class="setting-title">Portable settings backup</span>
+                            <span class="setting-desc">Exports appearance, model choices, response controls, notifications, performance, and personalization.</span>
+                        </div>
+                        <div class="provider-actions app-info-actions">
+                            <button id="appSettingsExportBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Export settings</button>
+                            <button id="appSettingsImportBtn" class="provider-btn provider-btn-secondary settings-inline-btn" type="button">Import settings</button>
+                        </div>
                     </div>
                 </div>
 
@@ -1379,7 +1447,7 @@
         <div class="model-catalog-controls">
             <label class="model-catalog-search" for="openAiCatalogSearchInput">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-                <input id="openAiCatalogSearchInput" type="search" autocomplete="off" placeholder="Search models or capabilities">
+                <input id="openAiCatalogSearchInput" type="search" autocomplete="off" placeholder="Search models or capabilities" aria-label="Search OpenAI models">
             </label>
             <div class="model-catalog-toolbar">
                 <div class="model-catalog-sort" role="group" aria-label="Sort model catalog">

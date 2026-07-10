@@ -193,6 +193,7 @@ function wrapCodeBlock(pre, lang, code, kind, allowSandbox = true, options = {})
 
     const closeAll = () => {
         if (consolePanel) {
+            consolePanel.faunaSandboxCleanup?.();
             consolePanel.style.display = "none";
             consolePanel.innerHTML = "";
         }
@@ -292,89 +293,124 @@ function wrapCodeBlock(pre, lang, code, kind, allowSandbox = true, options = {})
 }
 
 function executeJsSandboxed(code, outputDiv) {
+    outputDiv.faunaSandboxCleanup?.();
     outputDiv.innerHTML = "<div class='console-loading'>Running...</div>";
     outputDiv.style.display = "block";
-    
+
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
     iframe.sandbox = 'allow-scripts';
-    
+
     const channelId = 'sandbox_' + Math.random().toString(36).substr(2, 9);
-    
-    const onMessage = (event) => {
-        if (event.data && event.data.channelId === channelId) {
-            if (event.data.type === 'log') {
-                const logLine = document.createElement('div');
-                logLine.className = 'console-log-line ' + event.data.level;
-                logLine.textContent = event.data.args.join(' ');
-                outputDiv.appendChild(logLine);
-            } else if (event.data.type === 'error') {
-                const logLine = document.createElement('div');
-                logLine.className = 'console-log-line error';
-                logLine.textContent = event.data.message;
-                outputDiv.appendChild(logLine);
-            } else if (event.data.type === 'done') {
-                const loading = outputDiv.querySelector('.console-loading');
-                if (loading) loading.remove();
-                if (outputDiv.children.length === 0) {
-                    outputDiv.innerHTML = "<div class='console-log-line info'>[Executed successfully with no console output]</div>";
-                }
-                window.removeEventListener('message', onMessage);
-                iframe.remove();
-            }
-            scrollChatToBottom();
+    let timeoutId = null;
+    let settled = false;
+
+    const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) window.clearTimeout(timeoutId);
+        window.removeEventListener('message', onMessage);
+        iframe.remove();
+        if (outputDiv.faunaSandboxCleanup === cleanup) {
+            delete outputDiv.faunaSandboxCleanup;
         }
     };
-    
+
+    const finish = () => {
+        const loading = outputDiv.querySelector('.console-loading');
+        if (loading) loading.remove();
+        if (outputDiv.children.length === 0) {
+            outputDiv.innerHTML = "<div class='console-log-line info'>[Executed successfully with no console output]</div>";
+        }
+        cleanup();
+    };
+
+    const appendConsoleLine = (level, text) => {
+        const safeLevel = ['log', 'info', 'warn', 'error'].includes(level) ? level : 'log';
+        const logLine = document.createElement('div');
+        logLine.className = `console-log-line ${safeLevel}`;
+        logLine.textContent = String(text ?? '');
+        outputDiv.appendChild(logLine);
+    };
+
+    const onMessage = (event) => {
+        if (settled || event.source !== iframe.contentWindow || event.data?.channelId !== channelId) return;
+        if (event.data.type === 'log') {
+            const args = Array.isArray(event.data.args) ? event.data.args : [];
+            appendConsoleLine(event.data.level, args.join(' '));
+        } else if (event.data.type === 'error') {
+            appendConsoleLine('error', event.data.message || 'Sandbox execution failed.');
+        } else if (event.data.type === 'done') {
+            finish();
+        }
+        scrollChatToBottom();
+    };
+
     window.addEventListener('message', onMessage);
-    
+    outputDiv.faunaSandboxCleanup = cleanup;
+
     const iframeHtml = `
-        <!DOCTYPE html>
-        <html>
+        <!doctype html>
+        <html lang="en">
+        <head><meta charset="utf-8"></head>
         <body>
             ${getPreviewBootstrapScript()}
             <script>
-                const channelId = "${channelId}";
-                const send = (type, data) => {
-                    window.parent.postMessage({ channelId, type, ...data }, '*');
-                };
-                
-                const oldConsole = { ...console };
-                const formatArg = (arg) => {
-                    if (arg === null) return 'null';
-                    if (arg === undefined) return 'undefined';
-                    if (typeof arg === 'object') {
-                        try { return JSON.stringify(arg); } catch(e) { return String(arg); }
-                    }
-                    return String(arg);
-                };
-                
-                ['log', 'info', 'warn', 'error'].forEach(level => {
-                    console[level] = (...args) => {
-                        send('log', { level, args: args.map(formatArg) });
-                        oldConsole[level](...args);
-                    };
-                });
-                
-                window.onerror = (message, source, lineno, colno, error) => {
-                    send('error', { message: message + " (Line " + lineno + ")" });
-                    return true;
-                };
-                
-                try {
-                    \${code}
-                } catch (err) {
-                    send('error', { message: err.name + ": " + err.message });
-                }
-                
-                setTimeout(() => send('done', {}), 50);
+                (() => {
+                    window.addEventListener('message', async event => {
+                        if (event.source !== window.parent || event.data?.type !== 'fauna-js-sandbox-run') return;
+                        const channelId = String(event.data.channelId || '');
+                        if (!channelId) return;
+                        const send = (type, data = {}) => {
+                            window.parent.postMessage({ channelId, type, ...data }, '*');
+                        };
+                        const oldConsole = { ...console };
+                        const formatArg = arg => {
+                            if (arg === null) return 'null';
+                            if (arg === undefined) return 'undefined';
+                            if (typeof arg === 'object') {
+                                try { return JSON.stringify(arg); } catch { return String(arg); }
+                            }
+                            return String(arg);
+                        };
+                        ['log', 'info', 'warn', 'error'].forEach(level => {
+                            console[level] = (...args) => {
+                                send('log', { level, args: args.map(formatArg) });
+                                oldConsole[level](...args);
+                            };
+                        });
+                        try {
+                            const result = (0, eval)(String(event.data.code || ''));
+                            if (result && typeof result.then === 'function') await result;
+                        } catch (err) {
+                            send('error', { message: (err?.name || 'Error') + ': ' + (err?.message || String(err)) });
+                        } finally {
+                            send('done');
+                        }
+                    }, { once: true });
+                })();
             <\/script>
         </body>
         </html>
     `;
-    
-    document.body.appendChild(iframe);
+
+    iframe.addEventListener('load', () => {
+        iframe.contentWindow?.postMessage({
+            type: 'fauna-js-sandbox-run',
+            channelId,
+            code: String(code ?? '')
+        }, '*');
+    }, { once: true });
+
+    timeoutId = window.setTimeout(() => {
+        if (settled) return;
+        appendConsoleLine('error', 'Execution timed out after 10 seconds.');
+        finish();
+        scrollChatToBottom();
+    }, 10_000);
+
     iframe.srcdoc = iframeHtml;
+    document.body.appendChild(iframe);
 }
 
 function setupCodeSandbox(container) {
@@ -1720,11 +1756,20 @@ function getRemoteAccessPrimaryUrl(remote = {}) {
     return String(remote?.endpoint || "");
 }
 
-function createRemotePairingDeepLink(url = "", token = "") {
+function createRemotePairingDeepLink(url = "", token = "", computerName = "") {
     const cleanUrl = String(url || "").trim();
     const cleanToken = String(token || "").trim();
     if (!cleanUrl || !cleanToken) return "";
-    return `fauna://pair?u=${encodeURIComponent(cleanUrl)}&t=${encodeURIComponent(cleanToken)}`;
+    const cleanName = String(computerName || "").replace(/\s+/g, " ").trim().slice(0, 24);
+    return `fauna://pair?u=${encodeURIComponent(cleanUrl)}&t=${encodeURIComponent(cleanToken)}${cleanName ? `&n=${encodeURIComponent(cleanName)}` : ""}`;
+}
+
+function createRemotePairingQrPayload(url = "", token = "") {
+    const deepLink = createRemotePairingDeepLink(url, token);
+    if (new TextEncoder().encode(deepLink).length <= 106) return deepLink;
+    const cleanUrl = String(url || "").trim().replace(/\/$/, "");
+    const cleanToken = String(token || "").trim();
+    return cleanUrl && cleanToken ? `${cleanUrl}/mobile/#token=${cleanToken}` : "";
 }
 
 function getQrGaloisTables() {
@@ -1918,9 +1963,12 @@ function renderRemotePairingQr(payload = "") {
 function renderAppInfoRemoteAccess(remote = {}, isDesktop = false) {
     const enabled = Boolean(remote?.enabled);
     const running = Boolean(remote?.running);
+    const internet = remote?.internet && typeof remote.internet === "object" ? remote.internet : {};
+    const internetMode = String(internet.mode || "off");
+    const internetReady = Boolean(internet.running && internet.externalUrl);
     const url = getRemoteAccessPrimaryUrl(remote);
     const token = String(remote?.token || "");
-    const pairingLink = enabled && running && url && token ? createRemotePairingDeepLink(url, token) : "";
+    const pairingLink = enabled && running && url && token ? createRemotePairingQrPayload(url, token) : "";
 
     if (appInfoRemoteToggle) {
         appInfoRemoteToggle.checked = enabled;
@@ -1930,12 +1978,54 @@ function renderAppInfoRemoteAccess(remote = {}, isDesktop = false) {
         appInfoRemoteStatus.textContent = !isDesktop
             ? "Use the desktop app to pair an Android phone."
             : enabled && running
-                ? "Ready for the Android app on this Wi-Fi network."
+                ? internetReady
+                    ? "Ready on this network and through secure Internet access."
+                    : "Ready for the Android app on this Wi-Fi network."
                 : enabled
                     ? "Starting remote access."
                     : "Off until you enable it on this PC.";
     }
-    setAppInfoText(appInfoRemoteUrl, enabled ? url : "", enabled ? "No LAN URL found" : "Enable remote access");
+    appInfoRemoteInternetModeButtons.forEach(button => {
+        const mode = String(button.dataset.remoteInternetMode || "off");
+        button.dataset.active = String(mode === internetMode);
+        button.setAttribute("aria-pressed", String(mode === internetMode));
+        button.disabled = !isDesktop || !enabled || !running;
+    });
+    if (appInfoRemoteInternetBadge) {
+        const labels = {
+            ready: "Online",
+            starting: "Starting",
+            unavailable: "Unavailable",
+            error: "Error",
+            stopped: "Stopped",
+            off: "Off"
+        };
+        const status = String(internet.status || "off");
+        appInfoRemoteInternetBadge.textContent = internetMode === "custom" && status === "ready" ? "Configured" : labels[status] || "Off";
+        appInfoRemoteInternetBadge.dataset.state = internetReady ? "configured" : status === "error" || status === "unavailable" ? "missing" : "missing";
+    }
+    if (appInfoRemoteInternetStatus) {
+        if (!isDesktop) {
+            appInfoRemoteInternetStatus.textContent = "Configure secure Internet access in the desktop app.";
+        } else if (internetMode === "quick") {
+            appInfoRemoteInternetStatus.textContent = internetReady
+                ? `Quick Tunnel ready at ${internet.externalUrl}`
+                : internet.error || (internet.cloudflaredAvailable ? "Starting a temporary Cloudflare Quick Tunnel." : "Install cloudflared or use a custom HTTPS URL.");
+        } else if (internetMode === "custom") {
+            appInfoRemoteInternetStatus.textContent = internetReady
+                ? `Using ${internet.externalUrl}`
+                : "Save a reachable public HTTPS tunnel URL.";
+        } else {
+            appInfoRemoteInternetStatus.textContent = "Off. LAN pairing stays local to this network.";
+        }
+    }
+    if (appInfoRemoteCustomUrlInput && document.activeElement !== appInfoRemoteCustomUrlInput) {
+        appInfoRemoteCustomUrlInput.value = String(internet.customUrl || "");
+    }
+    if (appInfoRemoteCustomUrlInput) appInfoRemoteCustomUrlInput.disabled = !isDesktop;
+    if (appInfoRemoteCustomUrlSaveBtn) appInfoRemoteCustomUrlSaveBtn.disabled = !isDesktop || !enabled || !running;
+    if (appInfoRemoteCustomUrlClearBtn) appInfoRemoteCustomUrlClearBtn.disabled = !isDesktop || !internet.customUrl;
+    setAppInfoText(appInfoRemoteUrl, enabled ? url : "", enabled ? "No Phone URL found" : "Enable remote access");
     setAppInfoText(appInfoRemoteToken, isDesktop ? token : "", isDesktop ? "Token unavailable" : "Desktop only");
     renderRemotePairingQr(isDesktop ? pairingLink : "");
     if (appInfoRemoteCopyBtn) appInfoRemoteCopyBtn.disabled = !isDesktop || !enabled || !url || !token;
@@ -2186,6 +2276,113 @@ async function setRemoteAccessFromSettings(enabled) {
     }
 }
 
+async function setRemoteInternetModeFromSettings(mode = "off") {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.remote?.setInternetMode) {
+        showToast("Internet phone access is available in the desktop app.", "warning");
+        return;
+    }
+    const normalizedMode = ["quick", "custom"].includes(String(mode)) ? String(mode) : "off";
+    if (normalizedMode === "custom" && !String(appInfoRemoteCustomUrlInput?.value || "").trim()) {
+        showToast("Save a public HTTPS tunnel URL first.", "warning");
+        appInfoRemoteCustomUrlInput?.focus();
+        return;
+    }
+    if (normalizedMode !== "off") {
+        const approved = await showApprovalDialog({
+            title: "Enable Internet phone access?",
+            message: normalizedMode === "quick"
+                ? "Fauna will start cloudflared and publish the token-protected Phone Sync endpoint through a temporary HTTPS address."
+                : "Fauna will advertise your custom HTTPS tunnel as the Phone Sync address.",
+            details: [
+                "Anyone with both the public URL and current Phone Sync token can use the remote API.",
+                "The Local Workspace Bridge remains localhost-only and is not forwarded by this setting.",
+                "Use New token immediately if a pairing link or backup is exposed."
+            ],
+            confirmLabel: normalizedMode === "quick" ? "Start Quick Tunnel" : "Use custom HTTPS"
+        });
+        if (!approved) {
+            await updatePhoneSyncPane();
+            return;
+        }
+    }
+
+    appInfoRemoteInternetModeButtons.forEach(button => { button.disabled = true; });
+    try {
+        const info = await desktopApi.remote.setInternetMode(normalizedMode);
+        renderAppInfoRemoteAccess(info?.remoteAccess || {}, true);
+        showToast(normalizedMode === "off" ? "Internet phone access disabled." : "Secure Internet phone access enabled.", normalizedMode === "off" ? "info" : "success");
+    } catch (err) {
+        showToast(`Internet access failed: ${err.message}`, "error");
+        await updatePhoneSyncPane();
+    }
+}
+
+async function saveRemoteCustomHttpsUrlFromSettings(value = "") {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.remote?.setCustomHttpsUrl) {
+        showToast("Custom tunnel URLs are available in the desktop app.", "warning");
+        return;
+    }
+    if (appInfoRemoteCustomUrlSaveBtn) appInfoRemoteCustomUrlSaveBtn.disabled = true;
+    try {
+        const info = await desktopApi.remote.setCustomHttpsUrl(value);
+        renderAppInfoRemoteAccess(info?.remoteAccess || {}, true);
+        showToast(value ? "Custom HTTPS URL saved." : "Custom HTTPS URL cleared.", value ? "success" : "info");
+    } catch (err) {
+        showToast(`Could not save tunnel URL: ${err.message}`, "error");
+        await updatePhoneSyncPane();
+    }
+}
+
+async function exportPortableSettingsFromSettings() {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.settings?.exportPortable) {
+        showToast("Settings export is available in the desktop app.", "warning");
+        return;
+    }
+    if (appSettingsExportBtn) appSettingsExportBtn.disabled = true;
+    try {
+        const result = await desktopApi.settings.exportPortable();
+        if (!result?.canceled) showToast(`${result?.settingCount || 0} portable settings exported.`, "success");
+    } catch (err) {
+        showToast(`Settings export failed: ${err.message}`, "error");
+    } finally {
+        if (appSettingsExportBtn) appSettingsExportBtn.disabled = false;
+    }
+}
+
+async function importPortableSettingsFromSettings() {
+    const desktopApi = getFaunaDesktopApi();
+    if (!desktopApi?.settings?.chooseImport || !desktopApi?.settings?.applyImport) {
+        showToast("Settings import is available in the desktop app.", "warning");
+        return;
+    }
+    if (appSettingsImportBtn) appSettingsImportBtn.disabled = true;
+    try {
+        const selection = await desktopApi.settings.chooseImport();
+        if (selection?.canceled || !selection?.backup) return;
+        const approved = await showApprovalDialog({
+            title: "Import portable settings?",
+            message: `Apply ${selection.settingCount || 0} settings from ${selection.sourceName || "the selected backup"}.`,
+            details: [
+                "Current values for compatible portable settings will be replaced.",
+                "Chats, API keys, tokens, workspace paths, and local service endpoints are never imported.",
+                "Fauna will reload after the import so every control uses the new values."
+            ],
+            confirmLabel: "Import settings"
+        });
+        if (!approved) return;
+        const result = await desktopApi.settings.applyImport(selection.backup);
+        showToast(`${result?.imported || selection.settingCount || 0} settings imported. Reloading Fauna.`, "success");
+        window.setTimeout(() => window.location.reload(), 650);
+    } catch (err) {
+        showToast(`Settings import failed: ${err.message}`, "error");
+    } finally {
+        if (appSettingsImportBtn) appSettingsImportBtn.disabled = false;
+    }
+}
+
 async function rotateRemoteAccessTokenFromSettings() {
     const desktopApi = getFaunaDesktopApi();
     if (!desktopApi?.remote?.rotateToken) {
@@ -2214,7 +2411,7 @@ async function copyRemoteAccessPairingFromSettings() {
             showToast("Enable Android remote access before copying pairing details.", "warning");
             return;
         }
-        const pairingLink = createRemotePairingDeepLink(url, token);
+        const pairingLink = createRemotePairingDeepLink(url, token, remote?.computerName);
         const alternateUrls = Array.isArray(remote?.lanUrls)
             ? remote.lanUrls.map(item => String(item || "").trim()).filter(item => item && item !== url)
             : [];
@@ -3098,6 +3295,27 @@ appInfoRemoteToggle?.addEventListener("change", event => {
     void setRemoteAccessFromSettings(Boolean(event.target.checked));
 });
 
+appInfoRemoteInternetModeButtons.forEach(button => {
+    button.addEventListener("click", () => {
+        void setRemoteInternetModeFromSettings(button.dataset.remoteInternetMode || "off");
+    });
+});
+
+appInfoRemoteCustomUrlSaveBtn?.addEventListener("click", () => {
+    void saveRemoteCustomHttpsUrlFromSettings(String(appInfoRemoteCustomUrlInput?.value || "").trim());
+});
+
+appInfoRemoteCustomUrlClearBtn?.addEventListener("click", () => {
+    if (appInfoRemoteCustomUrlInput) appInfoRemoteCustomUrlInput.value = "";
+    void saveRemoteCustomHttpsUrlFromSettings("");
+});
+
+appInfoRemoteCustomUrlInput?.addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void saveRemoteCustomHttpsUrlFromSettings(String(event.currentTarget.value || "").trim());
+});
+
 appInfoRemoteCopyBtn?.addEventListener("click", () => {
     void copyRemoteAccessPairingFromSettings();
 });
@@ -3110,8 +3328,20 @@ appPhoneDevicesRefreshBtn?.addEventListener("click", () => {
     void refreshPhoneDevices();
 });
 
+appSettingsExportBtn?.addEventListener("click", () => {
+    void exportPortableSettingsFromSettings();
+});
+
+appSettingsImportBtn?.addEventListener("click", () => {
+    void importPortableSettingsFromSettings();
+});
+
 getFaunaDesktopApi()?.remote?.onDevicesChanged?.(payload => {
     renderPhoneDeviceList(payload?.devices || []);
+});
+
+getFaunaDesktopApi()?.remote?.onAccessChanged?.(remote => {
+    renderAppInfoRemoteAccess(remote || {}, true);
 });
 
 localModelsAutoStartToggle?.addEventListener("change", event => {
@@ -3327,14 +3557,47 @@ potatoReduceMotionToggle?.addEventListener("change", event => {
     setPotatoPreference("motion", event.target.checked, { notify: true });
 });
 
-if (toggleWorkspaceBridge) {
-    toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
-    toggleWorkspaceBridge.onchange = (e) => {
-        isWorkspaceBridgeEnabled = e.target.checked;
-        safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, isWorkspaceBridgeEnabled ? "true" : "false");
+async function setWorkspaceBridgeEnabledState(enabled, { notify = false } = {}) {
+    const nextEnabled = Boolean(enabled);
+    const previousEnabled = isWorkspaceBridgeEnabled;
+    let desktopManaged = false;
+    try {
+        const desktopApi = getFaunaDesktopApi();
+        if (desktopApi?.setWorkspaceBridgeEnabled) {
+            desktopManaged = true;
+            await desktopApi.setWorkspaceBridgeEnabled(nextEnabled);
+        }
+        isWorkspaceBridgeEnabled = nextEnabled;
+        safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, nextEnabled ? "true" : "false");
+        if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = nextEnabled;
         updateWorkspaceBridgeSettingsUi();
         updateProviderSettingsUi();
         if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
+        if (typeof updateComposerProjectContextBar === "function") updateComposerProjectContextBar();
+        if (notify) {
+            showToast(nextEnabled ? "Local workspace access enabled." : "Local workspace access disabled.", nextEnabled ? "success" : "info");
+        }
+        return true;
+    } catch (error) {
+        const fallbackEnabled = desktopManaged && nextEnabled ? false : previousEnabled;
+        isWorkspaceBridgeEnabled = fallbackEnabled;
+        safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, fallbackEnabled ? "true" : "false");
+        if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = fallbackEnabled;
+        updateWorkspaceBridgeSettingsUi();
+        updateProviderSettingsUi();
+        if (typeof syncProjectPageChatToolToggles === "function") syncProjectPageChatToolToggles();
+        showToast(`Workspace bridge ${nextEnabled ? "start" : "stop"} failed: ${error?.message || "unknown error"}`, "error");
+        return false;
+    }
+}
+
+if (toggleWorkspaceBridge) {
+    toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
+    toggleWorkspaceBridge.onchange = async (e) => {
+        const nextEnabled = e.target.checked;
+        toggleWorkspaceBridge.disabled = true;
+        await setWorkspaceBridgeEnabledState(nextEnabled, { notify: true });
+        toggleWorkspaceBridge.disabled = false;
     };
 }
 
@@ -4360,7 +4623,7 @@ function createOllamaPullRequestId(modelId) {
     return `pull:${String(modelId || "model")}:${suffix}`;
 }
 
-async function pullOllamaModelThroughDesktop(modelId, requestId) {
+async function pullOllamaModelThroughDesktop(modelId, requestId, options = {}) {
     const desktopApi = getFaunaDesktopApi();
     if (!desktopApi?.pullOllamaModel) return null;
     const unsubscribe = desktopApi.onOllamaPullProgress?.(event => {
@@ -4368,7 +4631,13 @@ async function pullOllamaModelThroughDesktop(modelId, requestId) {
         applyOllamaPullProgress(modelId, event);
     });
     try {
-        const result = await desktopApi.pullOllamaModel({ modelId, requestId });
+        const result = await desktopApi.pullOllamaModel({
+            modelId,
+            requestId,
+            source: options.source,
+            repoId: options.repoId,
+            quantization: options.quantization
+        });
         if (result?.error) throw new Error(result.error);
         return result;
     } finally {
@@ -4401,8 +4670,12 @@ async function pullOllamaModelThroughFetch(modelId, options = {}) {
 }
 
 async function pullOllamaModel(modelId, options = {}) {
+    const source = options.source === "huggingface" || getOllamaModelSource(modelId) === "huggingface"
+        ? "huggingface"
+        : "ollama";
+    const sourceLabel = source === "huggingface" ? "Hugging Face through Ollama" : "Ollama";
     const requestId = createOllamaPullRequestId(modelId);
-    const taskId = startModelDownloadTask(modelId, options.resume ? "Resuming Ollama pull" : "Waiting for Ollama", {
+    const taskId = startModelDownloadTask(modelId, options.resume ? `Resuming ${sourceLabel} pull` : `Connecting to ${sourceLabel}`, {
         requestId,
         resume: Boolean(options.resume)
     });
@@ -4410,10 +4683,13 @@ async function pullOllamaModel(modelId, options = {}) {
     setModelDownloadAbortController(taskId, controller);
     try {
         setLocalModelsStatus(`Pulling ${modelId}`, "missing");
-        const data = await pullOllamaModelThroughDesktop(modelId, requestId)
+        const data = await pullOllamaModelThroughDesktop(modelId, requestId, {
+            ...options,
+            source
+        })
             || await pullOllamaModelThroughFetch(modelId, { signal: controller.signal });
         if (data?.error) throw new Error(data.error);
-        finishModelDownloadTask(taskId, { ok: true, detail: "Installed" });
+        finishModelDownloadTask(taskId, { ok: true, detail: `Installed from ${source === "huggingface" ? "Hugging Face" : "Ollama"}` });
         return data;
     } catch (err) {
         if (isModelDownloadTaskCancelled(taskId)) {
@@ -4633,26 +4909,325 @@ async function installMissingTaskOllamaModels() {
     }
 }
 
-async function installLocalVoicePipeline() {
+function normalizeHuggingFaceImportSpec(repositoryValue = "", quantizationValue = "") {
+    let repository = String(repositoryValue || "").trim();
+    if (!repository) throw new Error("Enter a Hugging Face repository id.");
+
+    if (/^https?:\/\//i.test(repository)) {
+        let parsed;
+        try {
+            parsed = new URL(repository);
+        } catch {
+            throw new Error("Enter a valid Hugging Face repository URL.");
+        }
+        const hostname = parsed.hostname.toLowerCase();
+        if (parsed.protocol !== "https:" || !["huggingface.co", "www.huggingface.co", "hf.co"].includes(hostname)) {
+            throw new Error("Only HTTPS repository links from huggingface.co or hf.co are accepted.");
+        }
+        if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+            throw new Error("The repository URL cannot contain credentials, a query, or a fragment.");
+        }
+        repository = parsed.pathname.replace(/^\/+|\/+$/g, "");
+    }
+
+    repository = repository
+        .replace(/^hf\.co\//i, "")
+        .replace(/^huggingface\.co\//i, "")
+        .replace(/^\/+|\/+$/g, "");
+
+    let inlineQuantization = "";
+    const slashIndex = repository.indexOf("/");
+    const tagIndex = repository.lastIndexOf(":");
+    if (tagIndex > slashIndex) {
+        inlineQuantization = repository.slice(tagIndex + 1);
+        repository = repository.slice(0, tagIndex);
+    }
+
+    const segments = repository.split("/");
+    if (segments.length !== 2 || segments.some(segment => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(segment))) {
+        throw new Error("Use a repository id in owner/model-GGUF format.");
+    }
+
+    const quantization = String(quantizationValue || inlineQuantization || "").trim().replace(/^:/, "");
+    if (quantization && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(quantization)) {
+        throw new Error("Quantization may contain letters, numbers, dots, underscores, and hyphens only.");
+    }
+
+    const repoId = segments.join("/");
+    return {
+        repoId,
+        quantization,
+        modelId: `hf.co/${repoId}${quantization ? `:${quantization}` : ""}`
+    };
+}
+
+function setHfModelImportStatus(text, state = "missing") {
+    if (!hfModelImportStatus) return;
+    hfModelImportStatus.textContent = text;
+    hfModelImportStatus.dataset.state = state;
+}
+
+function setHfModelImportBusy(isBusy) {
+    if (hfModelPullBtn) hfModelPullBtn.disabled = isBusy;
+    if (hfModelClearBtn) hfModelClearBtn.disabled = isBusy;
+    if (hfModelRepoInput) hfModelRepoInput.disabled = isBusy;
+    if (hfModelQuantInput) hfModelQuantInput.disabled = isBusy;
+}
+
+async function pullHuggingFaceModelFromSettings() {
+    let spec;
+    try {
+        spec = normalizeHuggingFaceImportSpec(hfModelRepoInput?.value, hfModelQuantInput?.value);
+    } catch (error) {
+        setHfModelImportStatus("Check input", "missing");
+        showToast(error.message, "error");
+        hfModelRepoInput?.focus();
+        return;
+    }
+
+    if (hfModelRepoInput) hfModelRepoInput.value = spec.repoId;
+    if (hfModelQuantInput) hfModelQuantInput.value = spec.quantization;
+    setHfModelImportBusy(true);
+    setHfModelImportStatus("Checking Ollama", "missing");
+
+    try {
+        await checkOllamaStatus();
+        if (!isOllamaReachable) {
+            setHfModelImportStatus("Ollama offline", "missing");
+            showToast("Start Ollama, then pull the Hugging Face model again.", "warning");
+            return;
+        }
+
+        const existingDownloadState = getModelDownloadTaskState(getModelDownloadTaskId(spec.modelId));
+        if (["active", "queued"].includes(existingDownloadState)) {
+            setHfModelImportStatus(existingDownloadState === "queued" ? "Queued" : "Pulling", "missing");
+            openModelDownloadMenu();
+            showToast(`${spec.modelId} is already ${existingDownloadState === "queued" ? "queued" : "downloading"}.`, "info");
+            return;
+        }
+
+        if (isOllamaModelInstalled(spec.modelId)) {
+            setActiveModel(spec.modelId, { provider: AI_PROVIDER_LOCAL });
+            setHfModelImportStatus("Installed", "configured");
+            showToast(`${spec.modelId} is already installed and selected.`, "success");
+            return;
+        }
+
+        const approved = await showApprovalDialog({
+            title: "Pull Hugging Face model?",
+            message: "Fauna will ask Ollama to download this public GGUF repository. Model files can be large and the repository license still applies.",
+            details: [
+                `Repository: ${spec.repoId}`,
+                `Ollama reference: ${spec.modelId}`,
+                spec.quantization ? `Quantization: ${spec.quantization}` : "Quantization: repository default",
+                "Gated or private repositories are not supported by this in-app flow."
+            ],
+            confirmLabel: "Pull model"
+        });
+        if (!approved) {
+            setHfModelImportStatus("Ready", "missing");
+            return;
+        }
+
+        setHfModelImportStatus("Pulling", "missing");
+        const result = await pullOllamaModel(spec.modelId, {
+            source: "huggingface",
+            repoId: spec.repoId,
+            quantization: spec.quantization
+        });
+        if (result?.cancelled) {
+            setHfModelImportStatus("Stopped", "missing");
+            return;
+        }
+
+        await checkOllamaStatus();
+        setActiveModel(spec.modelId, { provider: AI_PROVIDER_LOCAL });
+        setHfModelImportStatus("Installed", "configured");
+        showToast(`${spec.modelId} was installed from Hugging Face and selected.`, "success");
+    } catch (error) {
+        setHfModelImportStatus("Pull failed", "missing");
+        showToast(`Hugging Face pull failed: ${error.message}`, "error");
+    } finally {
+        setHfModelImportBusy(false);
+    }
+}
+
+async function ensureLocalModelReadyForChat(modelId, options = {}) {
+    if (isOpenAiProvider()) return true;
+    const normalizedModel = normalizeModelId(modelId) || OLLAMA_MODEL;
+
+    const existingDownloadState = getModelDownloadTaskState(getModelDownloadTaskId(normalizedModel));
+    if (["active", "queued"].includes(existingDownloadState)) {
+        openModelDownloadMenu();
+        showToast(
+            `${normalizedModel} is ${existingDownloadState === "queued" ? "queued" : "still downloading"}. Your request remains ready.`,
+            "info"
+        );
+        return false;
+    }
+
+    if (!hasCheckedOllamaStatus || !isOllamaReachable) {
+        await checkOllamaStatus();
+    }
+    if (!isOllamaReachable) {
+        const canStartOllama = Boolean(getFaunaDesktopApi()?.startOllama || hasWorkspaceBridgeAccess());
+        if (canStartOllama) {
+            const approved = await showApprovalDialog({
+                title: "Start Ollama before sending?",
+                message: "The local Ollama service is offline. Fauna can start it now without clearing your current request.",
+                details: [
+                    "The service stays on this PC.",
+                    "No model is downloaded unless it is missing and you approve that separately."
+                ],
+                confirmLabel: "Start Ollama"
+            });
+            if (approved && await startOllamaHttpService({ remember: false })) {
+                await checkOllamaStatus();
+            }
+        }
+        if (!isOllamaReachable) {
+            const retainedRequest = options.promptIsPreserved === false ? "Retry remains available." : "Your prompt remains in the composer.";
+            showToast(`Ollama is offline. Start it from Settings. ${retainedRequest}`, "warning");
+            return false;
+        }
+    }
+
+    if (isOllamaModelInstalled(normalizedModel)) {
+        if (getOllamaModelCapability(normalizedModel).supportsStreaming === false) {
+            showToast(`${normalizedModel} cannot be used for chat. Choose an installed chat model.`, "warning");
+            return false;
+        }
+        return true;
+    }
+
+    const source = getOllamaModelSource(normalizedModel);
+    const sourceLabel = getOllamaModelSourceLabel(normalizedModel);
+    const retainedRequest = options.promptIsPreserved === false
+        ? "The retry remains available after the download."
+        : "Fauna will keep your prompt and attachments in the composer.";
+    const approved = await showApprovalDialog({
+        title: "Download model before sending?",
+        message: `${normalizedModel} is not installed. Fauna can start the download now. ${retainedRequest}`,
+        details: [
+            `Source: ${sourceLabel}`,
+            `Model: ${normalizedModel}`,
+            "Downloads can be large and continue in the model downloads menu.",
+            options.promptIsPreserved === false
+                ? "After it finishes, retry the request again."
+                : "After it finishes, send the preserved prompt again."
+        ],
+        confirmLabel: "Start download"
+    });
+    if (!approved) return false;
+
+    setLocalModelsStatus(`Pulling ${normalizedModel}`, "missing");
+    void pullOllamaModel(normalizedModel, { source }).then(async result => {
+        if (result?.cancelled) return;
+        await checkOllamaStatus();
+        if (options.selectWhenReady === true) {
+            setActiveModel(normalizedModel, { provider: AI_PROVIDER_LOCAL });
+        }
+        showToast(
+            options.promptIsPreserved === false
+                ? `${normalizedModel} is ready. Retry the request again.`
+                : `${normalizedModel} is ready. Send your preserved prompt again.`,
+            "success"
+        );
+    }).catch(error => {
+        setLocalModelsStatus("Download failed", "missing");
+        showToast(`Model download failed: ${error.message}`, "error");
+    });
+    window.setTimeout(openModelDownloadMenu, 0);
+    return false;
+}
+
+function getLocalVoiceOptionLabel(options = [], id = "", fallback = "Local voice") {
+    return options.find(option => option.id === id)?.label || id || fallback;
+}
+
+function getLocalVoiceEndpointTargets() {
+    const targets = new Map();
+    const addTarget = ({ label, endpoint }) => {
+        const normalizedEndpoint = String(endpoint || "").trim();
+        if (!normalizedEndpoint) return;
+        const key = normalizedEndpoint.replace(/\/+$/, "").toLowerCase();
+        const existing = targets.get(key) || {
+            labels: [],
+            endpoint: normalizedEndpoint
+        };
+        if (label && !existing.labels.includes(label)) existing.labels.push(label);
+        targets.set(key, existing);
+    };
+
+    const transcription = getLocalVoiceTranscription();
+    if (transcription === LOCAL_VOICE_TRANSCRIPTION_WHISPER) {
+        addTarget({
+            label: getLocalVoiceOptionLabel(LOCAL_VOICE_TRANSCRIPTION_OPTIONS, transcription, "Whisper"),
+            endpoint: getLocalVoiceTranscriptionEndpoint()
+        });
+    }
+
+    const replyModel = getLocalVoiceReplyModel();
+    if (replyModel !== LOCAL_VOICE_REPLY_BROWSER) {
+        addTarget({
+            label: getLocalVoiceOptionLabel(LOCAL_VOICE_REPLY_MODEL_OPTIONS, replyModel, "Reply voice"),
+            endpoint: getLocalVoiceReplyEndpoint()
+        });
+    }
+
+    return Array.from(targets.values());
+}
+
+async function checkLocalVoiceEndpoint(target) {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 7_000);
+    try {
+        const response = await localAiFetch(target.endpoint, {
+            method: "GET",
+            headers: { Accept: "application/json,text/plain,audio/*" },
+            signal: controller.signal
+        });
+        return {
+            ...target,
+            ok: true,
+            status: response.status
+        };
+    } catch (error) {
+        return {
+            ...target,
+            ok: false,
+            error: error?.name === "AbortError" ? "request timed out" : error?.message || "connection failed"
+        };
+    } finally {
+        window.clearTimeout(timeoutId);
+    }
+}
+
+async function checkLocalVoicePipeline() {
     if (localVoiceInstallBtn) localVoiceInstallBtn.disabled = true;
     try {
-        const approved = await showApprovalDialog({
-            title: "Install local voice support?",
-            message: "Fauna can start Ollama and install the local models it uses. Whisper and local voice endpoints still need to run on your machine.",
-            details: [
-                "Starts the Ollama HTTP service if Ollama is installed.",
-                "Pulls missing local Ollama models used by chat and vision.",
-                "Whisper and Moshi/Qwen3-Omni endpoints remain self-hosted at the configured URLs."
-            ],
-            confirmLabel: "Continue"
-        });
-        if (!approved) return;
-
-        if (!isOllamaReachable) {
-            await startOllamaHttpService();
+        const targets = getLocalVoiceEndpointTargets();
+        if (targets.length === 0) {
+            showToast("Local voice uses browser speech only. No local endpoint needs checking.", "info");
+            return;
         }
-        await installMissingOllamaModels();
-        showToast("Local voice setup action finished. Check your Whisper and voice endpoint servers before starting voice chat.", "info");
+        if (!hasWorkspaceBridgeAccess()) {
+            throw new Error("Enable the Local Workspace Bridge before checking local voice endpoints.");
+        }
+
+        const results = await Promise.all(targets.map(checkLocalVoiceEndpoint));
+        const failures = results.filter(result => !result.ok);
+        if (failures.length === 0) {
+            const labels = results.flatMap(result => result.labels).join(" and ");
+            showToast(`${labels || "Local voice"} ${results.length === 1 ? "endpoint is" : "endpoints are"} reachable.`, "success");
+            return;
+        }
+
+        const firstFailure = failures[0];
+        const label = firstFailure.labels.join(" / ") || "Local voice";
+        showToast(`${label} endpoint is unreachable: ${firstFailure.error}`, "error");
+    } catch (error) {
+        showToast(error?.message || "Local voice endpoint check failed.", "error");
     } finally {
         if (localVoiceInstallBtn) localVoiceInstallBtn.disabled = false;
     }
@@ -4751,6 +5326,26 @@ localModelsRefreshBtn?.addEventListener("click", async () => {
     await checkOllamaStatus();
 });
 
+hfModelPullBtn?.addEventListener("click", () => {
+    void pullHuggingFaceModelFromSettings();
+});
+
+hfModelClearBtn?.addEventListener("click", () => {
+    if (hfModelRepoInput) hfModelRepoInput.value = "";
+    if (hfModelQuantInput) hfModelQuantInput.value = "";
+    setHfModelImportStatus("Ready", "missing");
+    hfModelRepoInput?.focus();
+});
+
+[hfModelRepoInput, hfModelQuantInput].forEach(field => {
+    field?.addEventListener("input", () => setHfModelImportStatus("Ready", "missing"));
+    field?.addEventListener("keydown", event => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        void pullHuggingFaceModelFromSettings();
+    });
+});
+
 localTaskModelsResetBtn?.addEventListener("click", resetLocalTaskModels);
 
 localTaskModelsInstallBtn?.addEventListener("click", () => {
@@ -4766,7 +5361,7 @@ localModelsInstallBtn?.addEventListener("click", () => {
 });
 
 localVoiceInstallBtn?.addEventListener("click", () => {
-    void installLocalVoicePipeline();
+    void checkLocalVoicePipeline();
 });
 
 openAiSaveBtn?.addEventListener("click", () => {
@@ -4861,9 +5456,11 @@ function updateWorkspaceBridgeSettingsUi() {
     if (workspaceBridgeDesktopCard) workspaceBridgeDesktopCard.hidden = !isDesktop;
     if (workspaceBridgeDesktopStatus) {
         workspaceBridgeDesktopStatus.textContent = isDesktop
-            ? (token
-                ? `Auto-started on ${endpoint || "local endpoint"} with ${getWorkspaceAccessPolicyLabel(policy)} access.`
-                : "Fauna Desktop can start the workspace bridge and save the token automatically.")
+            ? (isWorkspaceBridgeEnabled && token
+                ? `Enabled for ${endpoint || "local endpoint"} with ${getWorkspaceAccessPolicyLabel(policy)} access.`
+                : token
+                    ? "Workspace bridge is configured but stopped."
+                    : "Fauna Desktop can start the workspace bridge and save the token automatically.")
             : "Start local-bridge.py manually in the browser.";
     }
     updateWorkspaceAccessPolicyUi(policy);
@@ -4871,7 +5468,7 @@ function updateWorkspaceBridgeSettingsUi() {
     if (!token) {
         setWorkspaceBridgeStatus(isDesktop ? "Start needed" : "Token needed", "missing");
     } else if (isWorkspaceBridgeEnabled) {
-        setWorkspaceBridgeStatus(isDesktop ? `Auto-started · ${getWorkspaceAccessPolicyLabel(policy)}` : "Ready", "configured");
+        setWorkspaceBridgeStatus(isDesktop ? `Enabled · ${getWorkspaceAccessPolicyLabel(policy)}` : "Ready", "configured");
     } else {
         setWorkspaceBridgeStatus("Saved off", "missing");
     }
@@ -4887,9 +5484,11 @@ let isDesktopWorkspaceBridgeStarting = false;
 function syncDesktopWorkspaceBridgeInfo(info = {}) {
     if (info?.bridgeEndpoint) safeLocalStorageSet(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY, info.bridgeEndpoint);
     if (info?.workspaceAccessPolicy) safeLocalStorageSet(WORKSPACE_ACCESS_POLICY_STORAGE_KEY, normalizeWorkspaceAccessPolicy(info.workspaceAccessPolicy));
-    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
-    isWorkspaceBridgeEnabled = true;
-    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = true;
+    if (typeof info?.bridgeEnabled === "boolean") {
+        isWorkspaceBridgeEnabled = info.bridgeEnabled;
+        safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, info.bridgeEnabled ? "true" : "false");
+        if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = info.bridgeEnabled;
+    }
 }
 
 async function ensureDesktopWorkspaceBridgeForCheckpoints({ silent = false, refresh = true, force = false } = {}) {
@@ -5016,7 +5615,11 @@ function shouldRestartDesktopBridgeForCheckpointError(error) {
     return isFaunaDesktopApp() && /Workspace bridge is unreachable|Unknown endpoint|checkpoints/i.test(error?.message || "");
 }
 
-async function refreshWorkspaceCheckpointList({ silent = false, retryStarted = false, allowDesktopStart = areWorkspaceCheckpointsEnabled } = {}) {
+async function refreshWorkspaceCheckpointList({
+    silent = false,
+    retryStarted = false,
+    allowDesktopStart = areWorkspaceCheckpointsEnabled && isWorkspaceBridgeEnabled
+} = {}) {
     if (!workspaceCheckpointList) return;
     if (!hasWorkspaceBridgeAccess()) {
         if (allowDesktopStart && isFaunaDesktopApp() && await ensureDesktopWorkspaceBridgeForCheckpoints({ silent, refresh: false })) {
@@ -5120,6 +5723,8 @@ async function applyWorkspaceAccessPolicy(policy) {
         void refreshWorkspaceCheckpointList({ silent: true });
         showToast(`Desktop agent access set to ${getWorkspaceAccessPolicyLabel(normalized)}.`, normalized === WORKSPACE_ACCESS_POLICY_FULL_MACHINE ? "warning" : "success");
     } catch (err) {
+        isWorkspaceBridgeEnabled = safeLocalStorageGet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY) === "true";
+        if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
         updateWorkspaceBridgeSettingsUi();
         showToast(`Could not change desktop agent access: ${err.message}`, "error");
     }
@@ -5223,7 +5828,7 @@ function syncRemoteSettingIntoDesktopUi(payload = {}) {
     showToast("Mobile settings synced.", "info");
 }
 
-workspaceBridgeSaveBtn?.addEventListener("click", () => {
+workspaceBridgeSaveBtn?.addEventListener("click", async () => {
     const endpoint = normalizeEndpointInputValue(workspaceBridgeEndpointInput?.value, DEFAULT_WORKSPACE_BRIDGE_URL);
     const token = (workspaceBridgeTokenInput?.value || "").trim();
 
@@ -5235,19 +5840,17 @@ workspaceBridgeSaveBtn?.addEventListener("click", () => {
 
     safeLocalStorageSet(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY, endpoint);
     safeLocalStorageSet(WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY, token);
-    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
-    isWorkspaceBridgeEnabled = true;
-    updateWorkspaceBridgeSettingsUi();
-    updateProviderSettingsUi();
+    const enabled = await setWorkspaceBridgeEnabledState(true);
+    if (!enabled) return;
     void refreshWorkspaceCheckpointList({ silent: true });
     showToast("Workspace bridge saved and enabled.", "success");
 });
 
-workspaceBridgeClearBtn?.addEventListener("click", () => {
+workspaceBridgeClearBtn?.addEventListener("click", async () => {
+    const disabled = await setWorkspaceBridgeEnabledState(false);
+    if (!disabled) return;
     safeLocalStorageRemove(WORKSPACE_BRIDGE_ENDPOINT_STORAGE_KEY);
     safeLocalStorageRemove(WORKSPACE_BRIDGE_TOKEN_STORAGE_KEY);
-    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "false");
-    isWorkspaceBridgeEnabled = false;
     updateWorkspaceBridgeSettingsUi();
     updateProviderSettingsUi();
     renderWorkspaceCheckpointList([]);

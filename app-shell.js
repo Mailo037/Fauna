@@ -175,7 +175,7 @@ async function bootApp() {
     createBootLoader();
     try {
         await loadIncludes();
-        await import("./script.js?v=20260706-phone-qr");
+        await import("./script.js?v=20260710-hf-model-readiness");
         const remainingBootMs = Math.max(0, MIN_BOOT_MS - (performance.now() - bootStartedAt));
         if (remainingBootMs > 0) {
             await new Promise(resolve => window.setTimeout(resolve, remainingBootMs));

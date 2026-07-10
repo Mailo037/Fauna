@@ -27,10 +27,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 VERSION = "1.0.2"
@@ -70,6 +70,9 @@ WEB_FETCH_MAX_BYTES = 160_000
 WEB_FETCH_TIMEOUT_SECONDS = 20
 WEB_FETCH_MAX_REDIRECTS = 5
 WEB_FETCH_USER_AGENT = f"Fauna-Bridge/{VERSION} (+local user-requested fetch)"
+HTTP_REDIRECT_CODES = {301, 302, 303, 307, 308}
+CROSS_ORIGIN_SAFE_HEADERS = {"accept", "content-type", "user-agent"}
+NETWORK_READ_CHUNK_BYTES = 64_000
 MAX_GIT_BRANCHES = 240
 BRIDGE_REQUEST_QUEUE_SIZE = 96
 BRIDGE_SLOT_WAIT_SECONDS = 5.0
@@ -123,6 +126,117 @@ class NoRedirectHandler(HTTPRedirectHandler):
 
 
 WEB_FETCH_OPENER = build_opener(NoRedirectHandler)
+
+
+def http_url_origin(url: str) -> tuple[str, str, int | None]:
+    parsed = urlparse(url)
+    default_port = 443 if parsed.scheme.lower() == "https" else 80 if parsed.scheme.lower() == "http" else None
+    return parsed.scheme.lower(), (parsed.hostname or "").lower(), parsed.port or default_port
+
+
+def strip_cross_origin_headers(headers: dict[str, str]) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in headers.items()
+        if key.lower() in CROSS_ORIGIN_SAFE_HEADERS
+    }
+
+
+def remaining_http_deadline(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("HTTP request deadline exceeded")
+    return max(0.001, remaining)
+
+
+def redirected_request(request: Request, target_url: str, status: int) -> Request:
+    method = request.get_method().upper()
+    data = request.data
+    headers = dict(request.header_items())
+    origin_changed = http_url_origin(request.full_url) != http_url_origin(target_url)
+    if origin_changed:
+        headers = strip_cross_origin_headers(headers)
+
+    if (status == 303 and method != "HEAD") or (status in {301, 302} and method == "POST"):
+        method = "GET"
+        data = None
+        headers = {
+            key: value
+            for key, value in headers.items()
+            if key.lower() not in {"content-length", "content-type"}
+        }
+    elif data is None:
+        blocked_headers = {"content-length"}
+        if origin_changed:
+            blocked_headers.add("content-type")
+        headers = {
+            key: value
+            for key, value in headers.items()
+            if key.lower() not in blocked_headers
+        }
+
+    return Request(target_url, headers=headers, data=data, method=method)
+
+
+def open_validated_http_request(
+    request: Request,
+    validate_url: Callable[[Any], str],
+    timeout_seconds: float,
+    *,
+    max_redirects: int = WEB_FETCH_MAX_REDIRECTS,
+    deadline: float | None = None,
+    opener: Any = None,
+) -> tuple[Any, float]:
+    request_deadline = deadline if deadline is not None else time.monotonic() + timeout_seconds
+    active_opener = opener or WEB_FETCH_OPENER
+    current_request = Request(
+        validate_url(request.full_url),
+        headers=dict(request.header_items()),
+        data=request.data,
+        method=request.get_method(),
+    )
+
+    for redirect_index in range(max_redirects + 1):
+        was_http_error = False
+        try:
+            response = active_opener.open(
+                current_request,
+                timeout=remaining_http_deadline(request_deadline),
+            )
+        except HTTPError as exc:
+            response = exc
+            was_http_error = True
+
+        status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
+        if status in HTTP_REDIRECT_CODES:
+            location = response.headers.get("Location")
+            response.close()
+            if not location:
+                raise ValueError("Redirect response did not include a Location header")
+            if redirect_index >= max_redirects:
+                raise PermissionError("Too many HTTP redirects")
+            target_url = validate_url(urljoin(current_request.full_url, location))
+            current_request = redirected_request(current_request, target_url, status)
+            continue
+
+        if was_http_error:
+            raise response
+        return response, request_deadline
+
+    raise PermissionError("Too many HTTP redirects")
+
+
+def read_limited_http_body(response: Any, max_bytes: int, deadline: float) -> tuple[bytes, bool]:
+    body = bytearray()
+    reader = getattr(response, "read1", None) or response.read
+    while len(body) <= max_bytes:
+        remaining_http_deadline(deadline)
+        chunk = reader(min(NETWORK_READ_CHUNK_BYTES, max_bytes + 1 - len(body)))
+        if not chunk:
+            break
+        body.extend(chunk)
+    truncated = len(body) > max_bytes
+    return bytes(body[:max_bytes]), truncated
 
 
 class BridgeBusyError(RuntimeError):
@@ -486,7 +600,8 @@ def read_text_file(config: BridgeConfig, requested: str, max_bytes: int, scope: 
         raise IsADirectoryError("Path is not a file")
 
     max_bytes = clamp_int(max_bytes, 1, 1, MAX_TEXT_BYTES)
-    raw = target.read_bytes()
+    with target.open("rb") as handle:
+        raw = handle.read(max_bytes + 1)
     truncated = len(raw) > max_bytes
     raw = raw[:max_bytes]
     text = raw.decode("utf-8", errors="replace")
@@ -830,14 +945,7 @@ def handle_checkpoint_action(config: BridgeConfig, payload: dict[str, Any]) -> d
 
 def public_ip_allowed(address: str) -> bool:
     ip = ipaddress.ip_address(address)
-    return not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+    return ip.is_global and not ip.is_multicast
 
 
 def local_ai_ip_allowed(address: str) -> bool:
@@ -1001,7 +1109,7 @@ def connector_ip_allowed(address: str, allow_local: bool) -> bool:
     return allow_local and (ip.is_private or ip.is_loopback or ip.is_link_local)
 
 
-def validate_connector_http_url(raw_url: Any, allow_local: bool = True) -> str:
+def validate_connector_http_url(raw_url: Any, allow_local: bool = False) -> str:
     url = str(raw_url or "").strip()
     if not url:
         raise ValueError("Connector URL is required")
@@ -1056,7 +1164,7 @@ def sanitize_connector_headers(headers: Any) -> dict[str, str]:
     return sanitized
 
 
-def build_connector_url(base_url: str, requested_path: Any, query: Any = None, allow_local: bool = True) -> str:
+def build_connector_url(base_url: str, requested_path: Any, query: Any = None, allow_local: bool = False) -> str:
     base = validate_connector_http_url(base_url, allow_local=allow_local).rstrip("/")
     path = str(requested_path or "/").strip()
     if re.match(r"^https?://", path, re.IGNORECASE):
@@ -1108,20 +1216,26 @@ def execute_api_call(payload: dict[str, Any]) -> dict[str, Any]:
     }
     data = None if method in {"GET", "DELETE"} else encode_api_request_body(payload.get("body"), headers)
     request = Request(url, headers=headers, data=data, method=method)
+    deadline = time.monotonic() + API_CALL_TIMEOUT_SECONDS
     try:
-        response = urlopen(request, timeout=API_CALL_TIMEOUT_SECONDS)
+        response, deadline = open_validated_http_request(
+            request,
+            lambda value: validate_connector_http_url(value, allow_local=allow_local),
+            API_CALL_TIMEOUT_SECONDS,
+            deadline=deadline,
+        )
     except HTTPError as exc:
         response = exc
     except URLError as exc:
         raise ValueError(f"API call failed: {exc.reason}") from exc
 
     with response:
-        body, truncated = read_limited_web_body(response, MAX_API_CALL_RESPONSE_BYTES)
+        body, truncated = read_limited_http_body(response, MAX_API_CALL_RESPONSE_BYTES, deadline)
         content_type = response.headers.get("Content-Type", "")
         text_body = decode_web_body(body, content_type)
         return {
             "ok": True,
-            "url": url,
+            "url": response.geturl() or url,
             "status": int(getattr(response, "status", getattr(response, "code", 0)) or 0),
             "contentType": content_type,
             "headers": {
@@ -1191,8 +1305,14 @@ def http_json_rpc_request(url: str, headers: dict[str, str], payload: dict[str, 
         **headers,
     }
     request = Request(url, headers=request_headers, data=body, method="POST")
+    deadline = time.monotonic() + MCP_REQUEST_TIMEOUT_SECONDS
     try:
-        response = urlopen(request, timeout=MCP_REQUEST_TIMEOUT_SECONDS)
+        response, deadline = open_validated_http_request(
+            request,
+            lambda value: validate_connector_http_url(value, allow_local=True),
+            MCP_REQUEST_TIMEOUT_SECONDS,
+            deadline=deadline,
+        )
     except HTTPError as exc:
         response = exc
     except URLError as exc:
@@ -1200,7 +1320,7 @@ def http_json_rpc_request(url: str, headers: dict[str, str], payload: dict[str, 
 
     with response:
         status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
-        raw_body, truncated = read_limited_web_body(response, MAX_MCP_RESULT_BYTES)
+        raw_body, truncated = read_limited_http_body(response, MAX_MCP_RESULT_BYTES, deadline)
         if status < 200 or status >= 300:
             detail = decode_web_body(raw_body, response.headers.get("Content-Type", ""))
             raise ValueError(f"MCP HTTP request failed with {status}: {detail[:400]}")
@@ -1219,9 +1339,10 @@ def http_json_rpc_request(url: str, headers: dict[str, str], payload: dict[str, 
         return parsed, response_headers
 
 
-def read_legacy_sse_endpoint(url: str, headers: dict[str, str]) -> str:
+def read_legacy_sse_endpoint(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
+    source_url = validate_connector_http_url(url, allow_local=True)
     request = Request(
-        validate_connector_http_url(url, allow_local=True),
+        source_url,
         headers={
             "Accept": "text/event-stream",
             "User-Agent": WEB_FETCH_USER_AGENT,
@@ -1229,11 +1350,22 @@ def read_legacy_sse_endpoint(url: str, headers: dict[str, str]) -> str:
         },
         method="GET",
     )
+    deadline = time.monotonic() + MCP_REQUEST_TIMEOUT_SECONDS
     try:
-        with urlopen(request, timeout=MCP_REQUEST_TIMEOUT_SECONDS) as response:
-            raw = response.read(64_000).decode("utf-8", errors="replace")
+        response, deadline = open_validated_http_request(
+            request,
+            lambda value: validate_connector_http_url(value, allow_local=True),
+            MCP_REQUEST_TIMEOUT_SECONDS,
+            deadline=deadline,
+        )
+        with response:
+            response_url = response.geturl() or source_url
+            response_body, truncated = read_limited_http_body(response, 64_000, deadline)
     except URLError as exc:
         raise ValueError(f"Legacy MCP SSE endpoint discovery failed: {exc.reason}") from exc
+    if truncated:
+        raise ValueError("Legacy MCP SSE discovery response exceeded the bridge response limit")
+    raw = response_body.decode("utf-8", errors="replace")
     for event in re.split(r"\r?\n\r?\n", raw):
         endpoint_lines = [
             line[5:].strip()
@@ -1242,7 +1374,11 @@ def read_legacy_sse_endpoint(url: str, headers: dict[str, str]) -> str:
         ]
         event_name = next((line[6:].strip() for line in event.splitlines() if line.startswith("event:")), "")
         if event_name == "endpoint" and endpoint_lines:
-            return urljoin(url, endpoint_lines[0])
+            endpoint_url = validate_connector_http_url(urljoin(response_url, endpoint_lines[0]), allow_local=True)
+            endpoint_headers = headers
+            if http_url_origin(source_url) != http_url_origin(endpoint_url):
+                endpoint_headers = strip_cross_origin_headers(headers)
+            return endpoint_url, endpoint_headers
     raise ValueError("Legacy MCP server did not advertise a POST endpoint")
 
 
@@ -1250,7 +1386,7 @@ def run_mcp_http(server: dict[str, Any], method: str, params: dict[str, Any] | N
     url = validate_connector_http_url(server.get("url"), allow_local=True)
     headers = server.get("headers") or {}
     if server.get("transport") == "legacy_sse":
-        url = read_legacy_sse_endpoint(url, headers)
+        url, headers = read_legacy_sse_endpoint(url, headers)
 
     init_id = int(time.time() * 1000)
     initialized_id = init_id + 1
@@ -1689,6 +1825,23 @@ def normalize_openai_path(value: Any) -> str:
     return path
 
 
+def validate_openai_http_url(raw_url: Any) -> str:
+    url = validate_public_http_url(raw_url)
+    parsed = urlparse(url)
+    base = urlparse(OPENAI_API_BASE_URL)
+    if http_url_origin(url) != http_url_origin(OPENAI_API_BASE_URL):
+        return url
+
+    base_path = base.path.rstrip("/")
+    if not base_path or not parsed.path.startswith(f"{base_path}/"):
+        raise PermissionError("OpenAI redirect left the allowed API path")
+    request_path = parsed.path[len(base_path):]
+    if parsed.query:
+        request_path = f"{request_path}?{parsed.query}"
+    normalize_openai_path(request_path)
+    return url
+
+
 def openai_passthrough_headers(payload_headers: Any, api_key: str) -> dict[str, str]:
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -1760,12 +1913,6 @@ def build_openai_request_body(body_payload: Any) -> tuple[bytes | None, dict[str
     raise ValueError("Unsupported OpenAI body type")
 
 
-def read_limited_openai_body(response: Any) -> tuple[bytes, bool]:
-    body = response.read(MAX_OPENAI_RESPONSE_BYTES + 1)
-    truncated = len(body) > MAX_OPENAI_RESPONSE_BYTES
-    return body[:MAX_OPENAI_RESPONSE_BYTES], truncated
-
-
 def build_openai_proxy_request(payload: dict[str, Any]) -> Request:
     api_key = str(payload.get("apiKey") or "").strip()
     if not api_key:
@@ -1788,16 +1935,24 @@ def build_openai_proxy_request(payload: dict[str, Any]) -> Request:
 
 def proxy_openai_request(payload: dict[str, Any]) -> dict[str, Any]:
     request = build_openai_proxy_request(payload)
+    deadline = time.monotonic() + OPENAI_PROXY_TIMEOUT_SECONDS
 
     try:
-        with urlopen(request, timeout=OPENAI_PROXY_TIMEOUT_SECONDS) as response:
-            response_body, truncated = read_limited_openai_body(response)
+        response, deadline = open_validated_http_request(
+            request,
+            validate_openai_http_url,
+            OPENAI_PROXY_TIMEOUT_SECONDS,
+            deadline=deadline,
+        )
+        with response:
+            response_body, truncated = read_limited_http_body(response, MAX_OPENAI_RESPONSE_BYTES, deadline)
             response_headers = dict(response.headers.items())
             status = int(response.status)
     except HTTPError as exc:
-        response_body, truncated = read_limited_openai_body(exc)
-        response_headers = dict(exc.headers.items())
-        status = int(exc.code)
+        with exc:
+            response_body, truncated = read_limited_http_body(exc, MAX_OPENAI_RESPONSE_BYTES, deadline)
+            response_headers = dict(exc.headers.items())
+            status = int(exc.code)
     except URLError as exc:
         return {"ok": False, "error": f"OpenAI request failed: {exc.reason}"}
 
@@ -1827,13 +1982,21 @@ def send_openai_stream_headers(handler: BaseHTTPRequestHandler, status: int, res
 
 def stream_openai_request(payload: dict[str, Any], handler: BaseHTTPRequestHandler) -> None:
     request = build_openai_proxy_request(payload)
+    deadline = time.monotonic() + OPENAI_PROXY_TIMEOUT_SECONDS
 
     try:
-        response = urlopen(request, timeout=OPENAI_PROXY_TIMEOUT_SECONDS)
+        response, deadline = open_validated_http_request(
+            request,
+            validate_openai_http_url,
+            OPENAI_PROXY_TIMEOUT_SECONDS,
+            deadline=deadline,
+        )
     except HTTPError as exc:
-        response_body, _truncated = read_limited_openai_body(exc)
-        response_headers = dict(exc.headers.items())
-        handler.send_response(int(exc.code))
+        with exc:
+            response_body, _truncated = read_limited_http_body(exc, MAX_OPENAI_RESPONSE_BYTES, deadline)
+            response_headers = dict(exc.headers.items())
+            status = int(exc.code)
+        handler.send_response(status)
         set_cors_headers(handler)
         for key, value in response_headers.items():
             if key.lower() in {"content-type", "openai-request-id", "x-request-id"}:
@@ -1849,21 +2012,24 @@ def stream_openai_request(payload: dict[str, Any], handler: BaseHTTPRequestHandl
 
     with response:
         send_openai_stream_headers(handler, int(response.status), dict(response.headers.items()))
+        bytes_sent = 0
+        reader = getattr(response, "read1", None) or response.read
         while True:
-            chunk = response.read(8192)
+            try:
+                remaining_http_deadline(deadline)
+                chunk = reader(min(8192, MAX_OPENAI_RESPONSE_BYTES + 1 - bytes_sent))
+            except (TimeoutError, socket.timeout):
+                break
             if not chunk:
+                break
+            if bytes_sent + len(chunk) > MAX_OPENAI_RESPONSE_BYTES:
                 break
             try:
                 handler.wfile.write(chunk)
                 handler.wfile.flush()
+                bytes_sent += len(chunk)
             except (BrokenPipeError, ConnectionResetError):
                 break
-
-
-def read_limited_local_ai_body(response: Any) -> tuple[bytes, bool]:
-    body = response.read(MAX_LOCAL_AI_RESPONSE_BYTES + 1)
-    truncated = len(body) > MAX_LOCAL_AI_RESPONSE_BYTES
-    return body[:MAX_LOCAL_AI_RESPONSE_BYTES], truncated
 
 
 def local_ai_passthrough_headers(payload_headers: Any) -> dict[str, str]:
@@ -1893,16 +2059,24 @@ def build_local_ai_proxy_request(payload: dict[str, Any]) -> Request:
 
 def proxy_local_ai_request(payload: dict[str, Any]) -> dict[str, Any]:
     request = build_local_ai_proxy_request(payload)
+    deadline = time.monotonic() + LOCAL_AI_PROXY_TIMEOUT_SECONDS
 
     try:
-        with urlopen(request, timeout=LOCAL_AI_PROXY_TIMEOUT_SECONDS) as response:
-            response_body, truncated = read_limited_local_ai_body(response)
+        response, deadline = open_validated_http_request(
+            request,
+            validate_local_ai_url,
+            LOCAL_AI_PROXY_TIMEOUT_SECONDS,
+            deadline=deadline,
+        )
+        with response:
+            response_body, truncated = read_limited_http_body(response, MAX_LOCAL_AI_RESPONSE_BYTES, deadline)
             response_headers = dict(response.headers.items())
             status = int(response.status)
     except HTTPError as exc:
-        response_body, truncated = read_limited_local_ai_body(exc)
-        response_headers = dict(exc.headers.items())
-        status = int(exc.code)
+        with exc:
+            response_body, truncated = read_limited_http_body(exc, MAX_LOCAL_AI_RESPONSE_BYTES, deadline)
+            response_headers = dict(exc.headers.items())
+            status = int(exc.code)
     except URLError as exc:
         return {"ok": False, "error": f"Local AI request failed: {exc.reason}"}
 
@@ -2020,6 +2194,9 @@ class FaunaBridgeHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
+        if length < 0:
+            json_response(self, 400, {"ok": False, "error": "Content-Length must not be negative"})
+            return
         max_body_bytes = MAX_BODY_BYTES
         if parsed.path == "/openai":
             max_body_bytes = MAX_OPENAI_BODY_BYTES
@@ -2104,6 +2281,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind. Keep 127.0.0.1 unless you know why.")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind.")
     parser.add_argument("--token", default="", help="Bridge token. Generated when omitted.")
+    parser.add_argument("--no-print-token", action="store_true", help="Do not print the bridge token at startup.")
     parser.add_argument("--shell", choices=["powershell", "cmd", "system"], default="powershell" if os.name == "nt" else "system")
     parser.add_argument("--access-policy", choices=["workspace", "machine"], default="workspace", help="Path policy. workspace keeps paths under --root; machine also allows absolute local paths.")
     parser.add_argument("--projects-json", default="{}", help="JSON object mapping registered project ids to absolute project roots.")
@@ -2138,7 +2316,8 @@ def main() -> None:
     if not root.exists() or not root.is_dir():
         raise SystemExit(f"Workspace root does not exist or is not a directory: {root}")
 
-    token = args.token or secrets.token_urlsafe(24)
+    managed_token = os.environ.pop("FAUNA_BRIDGE_TOKEN", "")
+    token = args.token or managed_token or secrets.token_urlsafe(24)
     projects = parse_project_roots(args.projects_json)
     FaunaBridgeHandler.config = BridgeConfig(root, token, args.shell, args.allow_dangerous, args.access_policy, projects)
     server = FaunaThreadingHTTPServer((args.host, args.port), FaunaBridgeHandler)
@@ -2157,8 +2336,9 @@ def main() -> None:
         f"{MAX_CONCURRENT_NETWORK_REQUESTS} network, "
         f"{MAX_CONCURRENT_MCP_REQUESTS} MCP"
     )
-    print(f"Token: {token}")
-    print("Paste the URL and token into Fauna Settings > Local Workspace Bridge.")
+    if not args.no_print_token:
+        print(f"Token: {token}")
+        print("Paste the URL and token into Fauna Settings > Local Workspace Bridge.")
     print("Press Ctrl+C to stop.")
     server.serve_forever()
 

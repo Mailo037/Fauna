@@ -35,6 +35,10 @@ export function createModelSwitcher({
         host.replaceChildren(select);
     }
 
+    if (button && dropdown?.id) {
+        button.setAttribute("aria-controls", dropdown.id);
+    }
+
     const normalizeModelOption = (model) => {
         if (typeof model === "string") {
             return { id: model, label: model };

@@ -828,6 +828,7 @@ function stopOpenAiVoiceSession({ silent = false } = {}) {
     isOpenAiVoiceSessionActive = false;
     clearOpenAiVoiceRearmTimer();
     shouldSpeakNextReply = false;
+    cancelActiveVoiceTranscription();
     cleanupOpenAiRealtimeSession();
 
     if (voiceMediaRecorder && voiceMediaRecorder.state !== "inactive") {
@@ -1129,8 +1130,14 @@ function stopOpenAiVoiceRecording({ submit = true } = {}) {
     }
 }
 
+function cancelActiveVoiceTranscription() {
+    activeVoiceTranscriptionController?.abort();
+    activeVoiceTranscriptionController = null;
+}
+
 async function startOpenAiVoiceRecording({ rearm = false } = {}) {
     if (isRecording) return;
+    cancelActiveVoiceTranscription();
     const usingOpenAiVoice = isOpenAiProvider();
 
     if (usingOpenAiVoice && !getOpenAiApiKey()) {
@@ -1222,6 +1229,9 @@ async function startOpenAiVoiceRecording({ rearm = false } = {}) {
             return;
         }
 
+        cancelActiveVoiceTranscription();
+        const transcriptionController = new AbortController();
+        activeVoiceTranscriptionController = transcriptionController;
         try {
             setVoiceSessionStatus("Transcribing", 0.34);
             showToast(usingOpenAiVoice ? "Transcribing voice input..." : "Transcribing with Whisper...", "info");
@@ -1229,9 +1239,12 @@ async function startOpenAiVoiceRecording({ rearm = false } = {}) {
             let voiceRecording = await saveVoiceRecordingBlob(audioBlob, {
                 provider: usingOpenAiVoice ? "openai" : "local"
             });
+            throwIfAborted(transcriptionController.signal);
             const transcript = usingOpenAiVoice
-                ? await transcribeOpenAiAudio(audioBlob, null, voiceRecording)
-                : await transcribeLocalAudio(audioBlob, null, voiceRecording);
+                ? await transcribeOpenAiAudio(audioBlob, transcriptionController.signal, voiceRecording)
+                : await transcribeLocalAudio(audioBlob, transcriptionController.signal, voiceRecording);
+            throwIfAborted(transcriptionController.signal);
+            if (activeVoiceTranscriptionController !== transcriptionController) return;
             if (!transcript.trim()) {
                 if (usingOpenAiVoice) scheduleOpenAiVoiceRearm();
                 else setVoiceChatActive(false);
@@ -1254,9 +1267,14 @@ async function startOpenAiVoiceRecording({ rearm = false } = {}) {
                 else setVoiceChatActive(false);
             }
         } catch (err) {
+            if (err?.name === "AbortError" || transcriptionController.signal.aborted) return;
             showToast(`${usingOpenAiVoice ? "OpenAI voice" : "Whisper voice"} failed: ${err.message}`, "error");
             if (usingOpenAiVoice) scheduleOpenAiVoiceRearm();
             else setVoiceChatActive(false);
+        } finally {
+            if (activeVoiceTranscriptionController === transcriptionController) {
+                activeVoiceTranscriptionController = null;
+            }
         }
     };
 

@@ -4,6 +4,9 @@ const DEVICE_NAME_KEY = "faunaRemoteDeviceName";
 const DEVICE_PLATFORM_KEY = "faunaRemoteDevicePlatform";
 const POLL_MS = 2600;
 const AUTO_INSTALL_SETTING_KEY = "faunaAutoInstallUpdates";
+const REMOTE_AI_PROVIDER_SETTING_KEY = "faunaAiProvider";
+const REMOTE_LOCAL_MODEL_SETTING_KEY = "faunaLocalChatModel";
+const REMOTE_OPENAI_MODEL_SETTING_KEY = "faunaOpenAiChatModel";
 const MAX_MOBILE_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const MAX_MOBILE_ATTACHMENT_TOTAL_BYTES = 16 * 1024 * 1024;
 const MAX_MOBILE_ATTACHMENTS = 8;
@@ -22,6 +25,7 @@ const state = {
     deviceId: "",
     deviceName: "",
     devicePlatform: "mobile",
+    connectionName: "",
     composerLoaded: false,
     activeSettingsPane: "general",
     chatListSignature: "",
@@ -32,7 +36,9 @@ const state = {
     attachments: [],
     libraryAttachments: [],
     libraryPickerItems: [],
-    libraryPickerSelectedKeys: new Set()
+    libraryPickerSelectedKeys: new Set(),
+    modelState: null,
+    modelSwitcher: null
 };
 
 const loadingView = document.getElementById("loadingView");
@@ -43,6 +49,8 @@ const tokenInput = document.getElementById("tokenInput");
 const saveTokenButton = document.getElementById("saveTokenButton");
 const pairingStatus = document.getElementById("pairingStatus");
 const connectionStatus = document.getElementById("connectionStatus");
+const pcSwitcherButton = document.getElementById("pcSwitcherButton");
+const activePcName = document.getElementById("activePcName");
 const settingsButton = document.getElementById("settingsButton");
 const refreshButton = document.getElementById("refreshButton");
 const disconnectButton = document.getElementById("disconnectButton");
@@ -76,6 +84,12 @@ const mobileSettingsLists = new Map(Array.from(document.querySelectorAll("[data-
 const disconnectPhoneButton = document.getElementById("disconnectPhoneButton");
 const phoneDeviceName = document.getElementById("phoneDeviceName");
 const phoneDeviceMeta = document.getElementById("phoneDeviceMeta");
+const phoneActivePcName = document.getElementById("phoneActivePcName");
+const phoneActivePcUrl = document.getElementById("phoneActivePcUrl");
+const managePcConnectionsButton = document.getElementById("managePcConnectionsButton");
+const mobileSettingsExportButton = document.getElementById("mobileSettingsExportButton");
+const mobileSettingsImportButton = document.getElementById("mobileSettingsImportButton");
+const mobileSettingsImportInput = document.getElementById("mobileSettingsImportInput");
 let messageInput = null;
 let sendButton = null;
 let composerFileInput = null;
@@ -130,6 +144,18 @@ function tokenFromHash() {
     return getHashParams().get("token") || "";
 }
 
+function isNativeAndroidShell() {
+    return new URLSearchParams(window.location.search).get("native") === "android";
+}
+
+function getActivePcDisplayName() {
+    return normalizeDeviceLabel(state.connectionName, window.location.hostname || "Fauna PC");
+}
+
+function getActivePcUrl() {
+    return /^https?:$/i.test(window.location.protocol) ? window.location.origin : "";
+}
+
 function createDeviceId() {
     return `phone-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -146,6 +172,7 @@ function loadDeviceIdentity() {
     state.deviceId = normalizeDeviceLabel(hashDeviceId || localStorage.getItem(DEVICE_ID_KEY), createDeviceId());
     state.deviceName = normalizeDeviceLabel(hashName || localStorage.getItem(DEVICE_NAME_KEY), "Fauna Phone");
     state.devicePlatform = normalizeDeviceLabel(hashPlatform || localStorage.getItem(DEVICE_PLATFORM_KEY), "mobile").toLowerCase();
+    state.connectionName = normalizeDeviceLabel(params.get("connectionName") || params.get("pcName"), window.location.hostname || "Fauna PC");
     localStorage.setItem(DEVICE_ID_KEY, state.deviceId);
     localStorage.setItem(DEVICE_NAME_KEY, state.deviceName);
     localStorage.setItem(DEVICE_PLATFORM_KEY, state.devicePlatform);
@@ -181,7 +208,17 @@ function showApp() {
     if (loadingView) loadingView.hidden = true;
     pairingView.hidden = true;
     appView.hidden = false;
+    updateActivePcUi();
     updateMobileChatModeClass();
+}
+
+function updateActivePcUi() {
+    const name = getActivePcDisplayName();
+    const url = getActivePcUrl();
+    if (activePcName) activePcName.textContent = name;
+    if (phoneActivePcName) phoneActivePcName.textContent = name;
+    if (phoneActivePcUrl) phoneActivePcUrl.textContent = url || "Current Phone URL";
+    if (pcSwitcherButton) pcSwitcherButton.dataset.native = String(isNativeAndroidShell());
 }
 
 function storeToken(token) {
@@ -561,20 +598,157 @@ function attachSelectedMobileLibraryItems() {
     setComposerStatus(`${accepted.length} Library item${accepted.length === 1 ? "" : "s"} attached`);
 }
 
+function formatRemoteModelSize(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let amount = bytes;
+    let unitIndex = 0;
+    while (amount >= 1024 && unitIndex < units.length - 1) {
+        amount /= 1024;
+        unitIndex += 1;
+    }
+    return `${amount >= 10 || unitIndex === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function getRemoteModelShortLabel(modelId = "") {
+    const id = String(modelId || "").trim();
+    const short = id.split("/").pop() || id;
+    return short.length > 26 ? `${short.slice(0, 23)}...` : short;
+}
+
+function remoteOllamaModelIdsMatch(left = "", right = "") {
+    const normalize = value => String(value || "").trim().replace(/:latest$/i, "");
+    const normalizedLeft = normalize(left);
+    const normalizedRight = normalize(right);
+    return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function getRemoteComposerModelOptions(modelState = {}) {
+    const allRecords = Array.isArray(modelState.installedOllamaModelRecords)
+        ? modelState.installedOllamaModelRecords
+        : (Array.isArray(modelState.installedOllamaModels)
+            ? modelState.installedOllamaModels.map(id => ({ id, name: id }))
+            : []);
+    const records = allRecords.filter(record => record?.chatCapable !== false);
+    const localModels = records.map(record => {
+        const id = String(record?.id || record?.name || "").trim();
+        const source = record?.source === "huggingface" || /^hf\.co\//i.test(id) ? "Hugging Face" : "Ollama";
+        const meta = [source, record?.parameterSize, record?.quantization, formatRemoteModelSize(record?.size)]
+            .map(value => String(value || "").trim())
+            .filter(Boolean)
+            .join(" · ");
+        return {
+            id,
+            label: id,
+            shortLabel: getRemoteModelShortLabel(id),
+            meta: meta || source,
+            state: "installed",
+            provider: "local"
+        };
+    }).filter(model => model.id);
+
+    const localModel = String(modelState.localModel || "").trim();
+    const matchingActiveLocalModel = localModels.find(model => remoteOllamaModelIdsMatch(model.id, localModel));
+    if (modelState.provider === "local" && matchingActiveLocalModel) {
+        matchingActiveLocalModel.id = localModel;
+        matchingActiveLocalModel.shortLabel = getRemoteModelShortLabel(localModel);
+    }
+    if (modelState.provider === "local" && localModel && !matchingActiveLocalModel) {
+        const activeRuntimeRecord = allRecords.find(record => remoteOllamaModelIdsMatch(record?.id || record?.name, localModel));
+        const isUnavailable = activeRuntimeRecord?.chatCapable === false;
+        localModels.unshift({
+            id: localModel,
+            label: localModel,
+            shortLabel: getRemoteModelShortLabel(localModel),
+            meta: `${/^hf\.co\//i.test(localModel) ? "Hugging Face" : "Ollama"} · ${isUnavailable ? "No chat" : "Missing on PC"}`,
+            state: isUnavailable ? "unavailable" : "missing",
+            provider: "local"
+        });
+    }
+
+    const openAiModel = String(modelState.openAiModel || "").trim();
+    if (openAiModel && !localModels.some(model => model.id === openAiModel)) {
+        localModels.push({
+            id: openAiModel,
+            label: openAiModel,
+            shortLabel: getRemoteModelShortLabel(openAiModel),
+            meta: "OpenAI · Connected PC",
+            state: "installed",
+            provider: "openai"
+        });
+    }
+
+    const activeModel = String(modelState.modelId || "").trim();
+    return localModels.sort((left, right) => Number(right.id === activeModel) - Number(left.id === activeModel));
+}
+
+function syncRemoteModelSwitcherFromSettings() {
+    if (!state.modelSwitcher || !state.settings.length) return;
+    const provider = String(getSetting(REMOTE_AI_PROVIDER_SETTING_KEY)?.value || state.modelState?.provider || "local");
+    const settingKey = provider === "openai" ? REMOTE_OPENAI_MODEL_SETTING_KEY : REMOTE_LOCAL_MODEL_SETTING_KEY;
+    const modelId = String(getSetting(settingKey)?.value || state.modelState?.modelId || "").trim();
+    if (!modelId) return;
+    state.modelState = { ...(state.modelState || {}), provider, modelId };
+    state.modelSwitcher.setActive(modelId);
+}
+
+async function selectRemoteComposerModel(modelId, option = {}) {
+    const previousModel = String(state.modelState?.modelId || "").trim();
+    const provider = option.provider === "openai" ? "openai" : "local";
+    const modelSettingKey = provider === "openai" ? REMOTE_OPENAI_MODEL_SETTING_KEY : REMOTE_LOCAL_MODEL_SETTING_KEY;
+    try {
+        setStatus(`Switching to ${getRemoteModelShortLabel(modelId)}`);
+        const data = await api("/api/settings", {
+            method: "POST",
+            body: JSON.stringify({
+                settings: {
+                    [REMOTE_AI_PROVIDER_SETTING_KEY]: provider,
+                    [modelSettingKey]: modelId
+                }
+            })
+        });
+        state.settings = Array.isArray(data.settings) ? data.settings : state.settings;
+        state.modelState = {
+            ...(state.modelState || {}),
+            provider,
+            modelId,
+            ...(provider === "openai" ? { openAiModel: modelId } : { localModel: modelId })
+        };
+        state.modelSwitcher?.setActive(modelId);
+        setStatus(`Using ${getRemoteModelShortLabel(modelId)} on PC`);
+    } catch (error) {
+        if (previousModel) state.modelSwitcher?.setActive(previousModel);
+        setStatus(error.message || "Could not switch the PC model", "error");
+    }
+}
+
+async function refreshRemoteModelSwitcher() {
+    const modelState = await api("/api/models");
+    state.modelState = modelState;
+    const models = getRemoteComposerModelOptions(modelState);
+    state.modelSwitcher?.setModels(models, modelState.modelId);
+    return modelState;
+}
+
 async function installRemoteModelSwitcher() {
     const host = document.getElementById("modelSwitcherHost");
     if (!host) return;
     try {
-        const { createModelSwitcher } = await import("/modules/model-switcher.js");
-        createModelSwitcher({
+        const [{ createModelSwitcher }, modelState] = await Promise.all([
+            import("/modules/model-switcher.js"),
+            api("/api/models")
+        ]);
+        state.modelState = modelState;
+        state.modelSwitcher = createModelSwitcher({
             host,
-            models: [{ id: "desktop-model", label: "Desktop model", shortLabel: "PC model", meta: "Selected on the PC app" }],
-            activeModel: "desktop-model",
-            reasoningModes: [{ id: "remote", label: "Remote", shortLabel: "Remote" }],
-            activeReasoning: "remote"
+            models: getRemoteComposerModelOptions(modelState),
+            activeModel: modelState.modelId,
+            onSelect: (modelId, option) => void selectRemoteComposerModel(modelId, option),
+            idPrefix: "mobile"
         });
     } catch {
-        host.textContent = "";
+        host.textContent = "PC model";
     }
 }
 
@@ -669,7 +843,7 @@ async function api(path, options = {}) {
             }
         });
     } catch {
-        throw new Error("Could not reach the PC. Make sure both devices are on the same Wi-Fi and Phone Sync is enabled.");
+        throw new Error("Could not reach the PC. Check the LAN connection or secure HTTPS tunnel and confirm Phone Sync is enabled.");
     }
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok === false) {
@@ -678,7 +852,8 @@ async function api(path, options = {}) {
             : data.error || `HTTP ${response.status}`;
         if (response.status === 401) {
             storeToken("");
-            showPairing();
+            if (isNativeAndroidShell()) openConnectionManager();
+            else showPairing();
         }
         throw new Error(message);
     }
@@ -716,6 +891,7 @@ function setMobileSettingsPane(pane = "general") {
 }
 
 function updatePhoneSettingsPanel() {
+    updateActivePcUi();
     if (phoneDeviceName) phoneDeviceName.textContent = state.deviceName || "Fauna Phone";
     if (phoneDeviceMeta) {
         phoneDeviceMeta.textContent = [
@@ -1111,6 +1287,7 @@ async function loadRemoteSettings() {
         const data = await api("/api/settings");
         state.settings = Array.isArray(data.settings) ? data.settings : [];
         state.update = data.update || state.update;
+        syncRemoteModelSwitcherFromSettings();
         renderRemoteSettingsList();
         setSettingsStatus("Synced");
     } catch (error) {
@@ -1764,6 +1941,121 @@ async function writeTextToClipboard(value = "") {
     if (!ok) throw new Error("Copy failed.");
 }
 
+function validatePortableSettingsBackup(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("The file is not a Fauna settings backup.");
+    if (value.schema !== "fauna-portable-settings" || Number(value.version) !== 1) throw new Error("This Fauna settings backup format is not supported.");
+    if (!value.settings || typeof value.settings !== "object" || Array.isArray(value.settings)) throw new Error("The backup does not contain a settings map.");
+    const settingCount = Object.keys(value.settings).length;
+    if (!settingCount) throw new Error("The backup does not contain portable settings.");
+    return { backup: value, settingCount };
+}
+
+function downloadPortableSettingsBackup(json) {
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `Fauna-settings-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function openPortableSettingsExportDialog() {
+    if (mobileSettingsExportButton) mobileSettingsExportButton.disabled = true;
+    try {
+        setSettingsStatus("Preparing portable settings");
+        const data = await api("/api/settings/portable");
+        const { backup, settingCount } = validatePortableSettingsBackup(data.backup);
+        const json = `${JSON.stringify(backup, null, 2)}\n`;
+        const { overlay, dialog } = createMobileDialog("Export PC settings");
+        const copy = document.createElement("p");
+        copy.className = "mobile-dialog-subtitle";
+        copy.textContent = `${settingCount} portable settings. Chats, API keys, tokens, paths, and local endpoints are excluded.`;
+        const area = document.createElement("textarea");
+        area.className = "mobile-backup-textarea";
+        area.readOnly = true;
+        area.value = json;
+        area.setAttribute("aria-label", "Portable Fauna settings JSON");
+        const closeButton = createDialogButton("Close");
+        const copyButton = createDialogButton("Copy JSON", "primary");
+        closeButton.addEventListener("click", () => closeMobileDialog(overlay));
+        copyButton.addEventListener("click", async () => {
+            try {
+                await writeTextToClipboard(json);
+                copyButton.textContent = "Copied";
+                setSettingsStatus("Settings backup copied", "success");
+            } catch (error) {
+                setSettingsStatus(error.message, "error");
+            }
+        });
+        const buttons = [closeButton];
+        if (!isNativeAndroidShell()) {
+            const downloadButton = createDialogButton("Download");
+            downloadButton.addEventListener("click", () => downloadPortableSettingsBackup(json));
+            buttons.push(downloadButton);
+        }
+        buttons.push(copyButton);
+        dialog.append(copy, area, createMobileDialogActions(...buttons));
+        setSettingsStatus("Portable settings ready", "success");
+    } catch (error) {
+        setSettingsStatus(error.message, "error");
+    } finally {
+        if (mobileSettingsExportButton) mobileSettingsExportButton.disabled = false;
+    }
+}
+
+function openPortableSettingsImportConfirmation(value, sourceName = "selected backup") {
+    let normalized;
+    try {
+        normalized = validatePortableSettingsBackup(value);
+    } catch (error) {
+        setSettingsStatus(error.message, "error");
+        return;
+    }
+    const { overlay, dialog } = createMobileDialog("Import PC settings");
+    const copy = document.createElement("p");
+    copy.className = "mobile-dialog-subtitle";
+    copy.textContent = `Apply ${normalized.settingCount} compatible settings from ${sourceName}. Current portable values on this PC will be replaced.`;
+    const privacy = document.createElement("p");
+    privacy.className = "mobile-dialog-subtitle mobile-dialog-note";
+    privacy.textContent = "The import cannot add chats, API keys, Phone Sync tokens, workspace paths, or local endpoints.";
+    const cancelButton = createDialogButton("Cancel");
+    const importButton = createDialogButton("Import", "primary");
+    cancelButton.addEventListener("click", () => closeMobileDialog(overlay));
+    importButton.addEventListener("click", async () => {
+        importButton.disabled = true;
+        try {
+            const data = await api("/api/settings/portable", {
+                method: "POST",
+                body: JSON.stringify({ backup: normalized.backup })
+            });
+            closeMobileDialog(overlay);
+            await loadRemoteSettings();
+            setSettingsStatus(`${data.imported || normalized.settingCount} settings imported`, "success");
+        } catch (error) {
+            importButton.disabled = false;
+            setSettingsStatus(error.message, "error");
+        }
+    });
+    dialog.append(copy, privacy, createMobileDialogActions(cancelButton, importButton));
+}
+
+async function importPortableSettingsFile(file) {
+    if (!file) return;
+    if (file.size > 1024 * 1024) {
+        setSettingsStatus("The settings backup must be smaller than 1 MB.", "error");
+        return;
+    }
+    try {
+        const value = JSON.parse(await file.text());
+        openPortableSettingsImportConfirmation(value, file.name || "selected backup");
+    } catch (error) {
+        setSettingsStatus(error instanceof SyntaxError ? "The selected file is not valid JSON." : error.message, "error");
+    }
+}
+
 function createMobileMessageActions(message, historyIndex, textToCopy) {
     const role = message.role === "user" ? "user" : "assistant";
     const canAssistantActions = message.role === "assistant";
@@ -2384,10 +2676,13 @@ async function loadChat(chatId, { force = false, scroll = "preserve" } = {}) {
     });
 }
 
-async function refresh({ silent = false } = {}) {
+async function refresh({ silent = false, models = false } = {}) {
     try {
         if (!silent) setStatus("Syncing");
-        await loadChats({ keepSelection: true });
+        await Promise.all([
+            loadChats({ keepSelection: true }),
+            ...(models ? [refreshRemoteModelSwitcher()] : [])
+        ]);
         if (!silent) setStatus("Connected");
     } catch (error) {
         setStatus(error.message, "error");
@@ -2509,6 +2804,10 @@ async function connectWithToken() {
 }
 
 function disconnect() {
+    if (isNativeAndroidShell()) {
+        openConnectionManager();
+        return;
+    }
     storeToken("");
     state.chats = [];
     state.activeChat = null;
@@ -2517,6 +2816,17 @@ function disconnect() {
     clearMobileAttachments();
     showPairing();
     setPairingStatus("Disconnected.");
+}
+
+function openConnectionManager() {
+    window.clearInterval(state.polling);
+    state.polling = 0;
+    closeSettingsPanel();
+    if (isNativeAndroidShell()) {
+        window.location.href = "fauna://connections";
+        return;
+    }
+    disconnect();
 }
 
 function startNewChat() {
@@ -2573,9 +2883,18 @@ async function boot() {
     });
     checkUpdateButton?.addEventListener("click", () => void checkForUpdates());
     installUpdateButton?.addEventListener("click", () => void installUpdate());
-    refreshButton.addEventListener("click", () => void refresh());
+    refreshButton.addEventListener("click", () => void refresh({ models: true }));
     disconnectButton.addEventListener("click", disconnect);
     disconnectPhoneButton?.addEventListener("click", disconnect);
+    pcSwitcherButton?.addEventListener("click", openConnectionManager);
+    managePcConnectionsButton?.addEventListener("click", openConnectionManager);
+    mobileSettingsExportButton?.addEventListener("click", () => void openPortableSettingsExportDialog());
+    mobileSettingsImportButton?.addEventListener("click", () => mobileSettingsImportInput?.click());
+    mobileSettingsImportInput?.addEventListener("change", event => {
+        const [file] = Array.from(event.target.files || []);
+        event.target.value = "";
+        void importPortableSettingsFile(file);
+    });
     chatSidebarButton?.addEventListener("click", () => {
         setChatSidebarOpen(!document.body.classList.contains("chat-sidebar-open"));
     });

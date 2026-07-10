@@ -1,7 +1,7 @@
 :root {
     color-scheme: dark;
-    --mobile-panel: rgba(255, 255, 255, 0.025);
-    --mobile-panel-strong: color-mix(in srgb, var(--surface-2) 88%, transparent);
+    --mobile-panel: color-mix(in srgb, var(--surface) 92%, var(--bg));
+    --mobile-panel-strong: var(--surface-2);
     --mobile-line: rgba(255, 255, 255, 0.07);
     --mobile-line-strong: color-mix(in srgb, var(--accent) 34%, rgba(255, 255, 255, 0.12));
     --mobile-muted: rgba(255, 255, 255, 0.42);
@@ -275,9 +275,7 @@ button {
     display: grid;
     place-items: center;
     padding: 24px;
-    background:
-        linear-gradient(180deg, color-mix(in srgb, var(--surface) 54%, var(--bg)), var(--bg) 52%),
-        var(--bg);
+    background: var(--bg);
 }
 
 .pairing-panel {
@@ -289,7 +287,6 @@ button {
     border-radius: 10px;
     background: var(--mobile-panel);
     box-shadow: var(--shadow);
-    backdrop-filter: blur(18px);
 }
 
 .pairing-mark {
@@ -431,8 +428,7 @@ button {
     gap: 10px;
     padding: 6px 10px;
     border-bottom: 1px solid var(--mobile-line);
-    background: color-mix(in srgb, var(--bg) 92%, transparent);
-    backdrop-filter: blur(16px);
+    background: var(--surface);
 }
 
 .sidebar-toggle {
@@ -444,6 +440,40 @@ button {
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+.pc-switcher {
+    width: fit-content;
+    max-width: 100%;
+    padding: 3px 7px 3px 3px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.pc-switcher:hover,
+.pc-switcher:focus-visible {
+    border-color: var(--mobile-line);
+    background: rgba(255, 255, 255, 0.045);
+    outline: 0;
+}
+
+.pc-switcher > div {
+    min-width: 0;
+}
+
+.pc-switcher-chevron {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    fill: none;
+    stroke: var(--mobile-muted);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 .brand-lockup strong,
@@ -500,7 +530,7 @@ button {
 .chat-list-pane {
     grid-template-rows: auto minmax(0, 1fr);
     border-right: 1px solid var(--mobile-line);
-    background: color-mix(in srgb, var(--surface) 46%, var(--bg));
+    background: var(--surface);
 }
 
 .pane-header,
@@ -1147,6 +1177,39 @@ button {
     line-height: 1.45;
 }
 
+.mobile-dialog-note {
+    padding: 9px 10px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.025);
+    color: var(--mobile-muted);
+}
+
+.mobile-backup-textarea {
+    width: 100%;
+    min-height: 190px;
+    max-height: 42dvh;
+    resize: vertical;
+    padding: 10px;
+    border: 1px solid var(--mobile-line);
+    border-radius: 9px;
+    outline: 0;
+    background: var(--surface-input);
+    color: var(--mobile-soft);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.mobile-active-pc-card,
+.mobile-settings-transfer-card {
+    align-items: stretch !important;
+}
+
+.mobile-active-pc-card .small-button {
+    justify-self: start;
+}
+
 .mobile-dialog-field {
     display: grid;
     gap: 7px;
@@ -1160,6 +1223,7 @@ button {
 
 .mobile-dialog-actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
 }
@@ -1379,6 +1443,11 @@ button {
     .brand-lockup span {
         max-width: 42vw;
         font-size: 11px;
+    }
+
+    .pc-switcher {
+        min-width: 0;
+        padding-right: 4px;
     }
 
     .workspace {
@@ -1737,6 +1806,10 @@ button {
 
     .brand-lockup span {
         max-width: 28vw;
+    }
+
+    .pc-switcher-chevron {
+        display: none;
     }
 
     .topbar-actions {

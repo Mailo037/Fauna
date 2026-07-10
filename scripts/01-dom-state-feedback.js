@@ -257,6 +257,11 @@ const localModelsStartBtn = document.getElementById("localModelsStartBtn");
 const localModelsInstallBtn = document.getElementById("localModelsInstallBtn");
 const localModelsAutoStartToggle = document.getElementById("localModelsAutoStartToggle");
 const localModelsAutoStartStatus = document.getElementById("localModelsAutoStartStatus");
+const hfModelRepoInput = document.getElementById("hfModelRepoInput");
+const hfModelQuantInput = document.getElementById("hfModelQuantInput");
+const hfModelPullBtn = document.getElementById("hfModelPullBtn");
+const hfModelClearBtn = document.getElementById("hfModelClearBtn");
+const hfModelImportStatus = document.getElementById("hfModelImportStatus");
 const localTaskModelsStatus = document.getElementById("localTaskModelsStatus");
 const localTaskModelsResetBtn = document.getElementById("localTaskModelsResetBtn");
 const localTaskModelsMissingCard = document.getElementById("localTaskModelsMissingCard");
@@ -378,6 +383,12 @@ const appInfoBridgeEndpoint = document.getElementById("appInfoBridgeEndpoint");
 const appInfoWorkspaceAccessPolicy = document.getElementById("appInfoWorkspaceAccessPolicy");
 const appInfoRemoteStatus = document.getElementById("appInfoRemoteStatus");
 const appInfoRemoteToggle = document.getElementById("appInfoRemoteToggle");
+const appInfoRemoteInternetStatus = document.getElementById("appInfoRemoteInternetStatus");
+const appInfoRemoteInternetBadge = document.getElementById("appInfoRemoteInternetBadge");
+const appInfoRemoteInternetModeButtons = Array.from(document.querySelectorAll("[data-remote-internet-mode]"));
+const appInfoRemoteCustomUrlInput = document.getElementById("appInfoRemoteCustomUrlInput");
+const appInfoRemoteCustomUrlSaveBtn = document.getElementById("appInfoRemoteCustomUrlSaveBtn");
+const appInfoRemoteCustomUrlClearBtn = document.getElementById("appInfoRemoteCustomUrlClearBtn");
 const appInfoRemoteUrl = document.getElementById("appInfoRemoteUrl");
 const appInfoRemoteToken = document.getElementById("appInfoRemoteToken");
 const appInfoRemoteQrCard = document.getElementById("appInfoRemoteQrCard");
@@ -393,6 +404,8 @@ const appPhoneDeviceEmpty = document.getElementById("appPhoneDeviceEmpty");
 const appInfoChatCount = document.getElementById("appInfoChatCount");
 const appInfoStoredKeys = document.getElementById("appInfoStoredKeys");
 const appInfoOnboardingBtn = document.getElementById("appInfoOnboardingBtn");
+const appSettingsExportBtn = document.getElementById("appSettingsExportBtn");
+const appSettingsImportBtn = document.getElementById("appSettingsImportBtn");
 const appCacheClearBtn = document.getElementById("appCacheClearBtn");
 const appResetBtn = document.getElementById("appResetBtn");
 const potatoModeToggle = document.getElementById("potatoModeToggle");
@@ -550,12 +563,26 @@ const MARKDOWN_MEDIA_DATA_URL_RE = /!\[([^\]]*)\]\((data:(?:image|video|audio)\/
 const MEDIA_DATA_URL_RE = /data:(?:image|video|audio)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=_-]+/gi;
 const GREETING_REFRESH_MS = 5 * 60 * 1000;
 const appStartedAt = new Date();
-const FAUNA_APP_VERSION = "0.3.2";
-const FAUNA_APP_BUILD_ID = "20260706-phone-sync-fix";
+const FAUNA_APP_VERSION = "0.4.0";
+const FAUNA_APP_BUILD_ID = "20260710-remote-models-hf";
 const FAUNA_VERSION_MANIFEST_URL = "version.json";
 const FAUNA_REMOTE_VERSION_MANIFEST_URL = "https://raw.githubusercontent.com/Mailo037/Fauna/main/version.json";
 const FAUNA_RELEASES_URL = "https://github.com/Mailo037/Fauna/releases/latest";
 const FAUNA_CHANGELOG_ENTRIES = [
+    {
+        version: "0.4.0",
+        date: "2026-07-10",
+        commit: "v0.4.0",
+        title: "Remote access, multi-PC sync, and model integrations",
+        changes: [
+            "Added opt-in secure Internet access for Phone Sync through Cloudflare Quick Tunnels or a custom public HTTPS origin while keeping token authentication enabled.",
+            "Expanded the Android companion with desktop-style navigation, multiple saved PC profiles, safer pairing, and explicit connection backup import and export.",
+            "Added portable desktop and mobile settings transfer that excludes API keys, tokens, workspace paths, and machine-local service configuration.",
+            "Added approved public Hugging Face GGUF pulls through local Ollama with quantization, provenance, download progress, and catalog integration.",
+            "Improved chat model readiness, prompt and attachment preservation, compatible installed fallbacks, and clear offline or missing-model recovery.",
+            "Synced chat-capable PC models into the mobile composer and strengthened workspace bridge, agent, connector, voice, and media integration behavior."
+        ]
+    },
     {
         version: "0.3.2",
         date: "2026-07-06",
@@ -1492,6 +1519,7 @@ let voiceRecordingStartedAt = 0;
 let voiceLastSpeechAt = 0;
 let voiceDetectedSpeech = false;
 let voiceShouldSubmitRecording = false;
+let activeVoiceTranscriptionController = null;
 let openAiVoiceRearmTimer = null;
 let activeSpeechAudio = null;
 let activeSpeechController = null;
@@ -2717,6 +2745,15 @@ function getFriendlyError(error, fallbackTitle = "Something went wrong") {
         };
     }
 
+    if (/model\s+['"]?[^'"\n]+['"]?\s+(?:not found|does not exist)|model is not installed|pull (?:the )?model/i.test(rawMessage)) {
+        return {
+            title: "Local model is missing",
+            message: "Open Settings > AI Provider to pull the selected Ollama or Hugging Face GGUF model, then retry your prompt.",
+            detail: rawMessage,
+            canCheckOllama: true
+        };
+    }
+
     if (/No available model|Failed to fetch|Ollama|models? (?:is|are) loaded|localhost:11434/i.test(rawMessage)) {
         return {
             title: "Ollama is not reachable",
@@ -3460,9 +3497,14 @@ function showApprovalDialog({
     message = "",
     details = [],
     confirmLabel = "Approve",
-    cancelLabel = "Cancel"
+    cancelLabel = "Cancel",
+    signal = null
 } = {}) {
     return new Promise(resolve => {
+        if (signal?.aborted) {
+            resolve(false);
+            return;
+        }
         const overlay = document.createElement("div");
         overlay.className = "approval-modal";
         overlay.setAttribute("role", "presentation");
@@ -3471,10 +3513,11 @@ function showApprovalDialog({
         dialog.className = "approval-dialog";
         dialog.setAttribute("role", "dialog");
         dialog.setAttribute("aria-modal", "true");
-        dialog.setAttribute("aria-labelledby", "approvalDialogTitle");
+        const titleId = `approvalDialogTitle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        dialog.setAttribute("aria-labelledby", titleId);
 
         const titleNode = document.createElement("h2");
-        titleNode.id = "approvalDialogTitle";
+        titleNode.id = titleId;
         titleNode.textContent = title;
 
         const messageNode = document.createElement("p");
@@ -3503,9 +3546,12 @@ function showApprovalDialog({
 
         const close = (approved) => {
             document.removeEventListener("keydown", onKeyDown);
+            signal?.removeEventListener?.("abort", onAbort);
             overlay.remove();
             resolve(approved);
         };
+
+        const onAbort = () => close(false);
 
         const onKeyDown = (event) => {
             if (event.key === "Escape") close(false);
@@ -3517,6 +3563,7 @@ function showApprovalDialog({
             if (event.target === overlay) close(false);
         });
         document.addEventListener("keydown", onKeyDown);
+        signal?.addEventListener?.("abort", onAbort, { once: true });
 
         actions.append(cancelButton, confirmButton);
         dialog.append(titleNode, messageNode);
@@ -3527,4 +3574,20 @@ function showApprovalDialog({
         window.setTimeout(() => confirmButton.focus(), 0);
     });
 }
+
+function labelCustomSwitchInputs(root = document) {
+    root.querySelectorAll("label.switch input").forEach(input => {
+        if (input.hasAttribute("aria-label") || input.hasAttribute("aria-labelledby")) return;
+        let container = input.closest("label.switch")?.parentElement || null;
+        let title = null;
+        for (let depth = 0; container && depth < 4 && !title; depth += 1) {
+            title = container.querySelector(":scope > .setting-info .setting-title, :scope > .setting-title");
+            container = container.parentElement;
+        }
+        const label = title?.textContent?.trim();
+        if (label) input.setAttribute("aria-label", label);
+    });
+}
+
+labelCustomSwitchInputs();
 

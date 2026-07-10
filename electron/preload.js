@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const MAX_GENERATED_MEDIA_BYTES = 100 * 1024 * 1024;
 
 function invokeSync(channel, ...args) {
   return ipcRenderer.sendSync(channel, ...args);
@@ -14,6 +15,10 @@ function getFilePath(file) {
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
+    if (!(blob instanceof Blob) || blob.size > MAX_GENERATED_MEDIA_BYTES) {
+      reject(new Error("Generated media exceeds the 100 MB save limit."));
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const value = String(reader.result || "");
@@ -30,6 +35,7 @@ async function saveGeneratedMedia(payload = {}) {
     const response = await fetch(sourceUrl);
     if (!response.ok) throw new Error(`Could not read generated media blob: ${response.status}`);
     const blob = await response.blob();
+    if (blob.size > MAX_GENERATED_MEDIA_BYTES) throw new Error("Generated media exceeds the 100 MB save limit.");
     return ipcRenderer.invoke("fauna:save-generated-media", {
       ...payload,
       sourceUrl: "",
@@ -96,6 +102,12 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
     rotateToken() {
       return ipcRenderer.invoke("fauna:remote-access-rotate-token");
     },
+    setInternetMode(mode) {
+      return ipcRenderer.invoke("fauna:remote-internet-set-mode", String(mode || "off"));
+    },
+    setCustomHttpsUrl(url) {
+      return ipcRenderer.invoke("fauna:remote-internet-set-custom-url", String(url || ""));
+    },
     listDevices() {
       return ipcRenderer.invoke("fauna:remote-devices-list");
     },
@@ -107,6 +119,20 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
     },
     onDevicesChanged(handler) {
       return onRendererEvent("fauna:remote-devices-changed", handler);
+    },
+    onAccessChanged(handler) {
+      return onRendererEvent("fauna:remote-access-changed", handler);
+    }
+  },
+  settings: {
+    exportPortable() {
+      return ipcRenderer.invoke("fauna:settings-export-portable");
+    },
+    chooseImport() {
+      return ipcRenderer.invoke("fauna:settings-import-choose");
+    },
+    applyImport(backup = {}) {
+      return ipcRenderer.invoke("fauna:settings-import-apply", backup);
     }
   },
   skills: {
@@ -143,6 +169,9 @@ contextBridge.exposeInMainWorld("faunaDesktop", {
   },
   ensureWorkspaceBridge() {
     return ipcRenderer.invoke("fauna:workspace-bridge-ensure");
+  },
+  setWorkspaceBridgeEnabled(enabled) {
+    return ipcRenderer.invoke("fauna:workspace-bridge-set-enabled", Boolean(enabled));
   },
   setWorkspaceAccessPolicy(policy) {
     return ipcRenderer.invoke("fauna:set-workspace-access-policy", policy);

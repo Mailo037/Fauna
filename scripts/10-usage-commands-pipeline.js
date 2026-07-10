@@ -1084,15 +1084,43 @@ async function processWorkspaceEntry(options = {}) {
     }
 
     try {
-        welcome.style.display = "none";
-        chat.style.display = "block";
-        isChatPinnedToBottom = true;
-
         const currentFiles = [
             ...sourceFiles,
             ...await getRecentGeneratedImageReferenceFiles(textValue, sourceFiles)
         ];
         await ensurePersistentImagePreviewSources(currentFiles);
+        const useLocalVisionTask = shouldUseLocalVisionTaskForFiles(currentFiles);
+        const filesForModelRouting = useLocalVisionTask
+            ? currentFiles.filter(file => !file.type?.startsWith("image/"))
+            : currentFiles;
+        const routedModel = chooseModelForRequest(textValue, filesForModelRouting, imagePrompt, videoPrompt, {
+            imageTaskHandled: useLocalVisionTask
+        });
+        const imageEditRequest = isImageEditRequest(textValue, currentFiles);
+        const needsLocalChatModel = !isOpenAiProvider()
+            && videoPrompt === null
+            && imagePrompt === null
+            && !imageEditRequest;
+        if (needsLocalChatModel) {
+            const requiredModels = Array.from(new Set([
+                ...(useLocalVisionTask ? [getLocalTaskModel("vision")] : []),
+                routedModel
+            ].map(normalizeModelId).filter(Boolean)));
+            for (const requiredModel of requiredModels) {
+                const ready = await ensureLocalModelReadyForChat(requiredModel, {
+                    selectWhenReady: ollamaModelMatches(requiredModel, OLLAMA_MODEL),
+                    promptIsPreserved: !hasRetryPayload
+                });
+                if (!ready) {
+                    shouldSpeakNextReply = speakThisReply;
+                    return;
+                }
+            }
+        }
+
+        welcome.style.display = "none";
+        chat.style.display = "block";
+        isChatPinnedToBottom = true;
         if (!hasRetryPayload) {
             input.value = "";
             input.style.height = "auto";
@@ -1103,13 +1131,6 @@ async function processWorkspaceEntry(options = {}) {
             scheduleComposerSafeAreaUpdate();
         }
 
-        const useLocalVisionTask = shouldUseLocalVisionTaskForFiles(currentFiles);
-        const filesForModelRouting = useLocalVisionTask
-            ? currentFiles.filter(file => !file.type?.startsWith("image/"))
-            : currentFiles;
-        const routedModel = chooseModelForRequest(textValue, filesForModelRouting, imagePrompt, videoPrompt, {
-            imageTaskHandled: useLocalVisionTask
-        });
         if (isOpenAiProvider()) {
             updateModelSwitcherForProvider();
         }
@@ -1151,7 +1172,7 @@ async function processWorkspaceEntry(options = {}) {
             return;
         }
 
-        if (isImageEditRequest(textValue, currentFiles)) {
+        if (imageEditRequest) {
             await processImageEdit(textValue, currentFiles, generationSignal, {
                 userCreatedAt: userMessageCreatedAt,
                 sessionId: generationSessionId,
@@ -1691,7 +1712,10 @@ async function handleDesktopQuickPromptRequest(payload = {}) {
         showToast(`Quick attachment failed: ${err.message}`, "error");
     }
 
-    if (!prompt && files.length === 0) return;
+    previewContainer.innerHTML = "";
+    attachedFiles = [];
+    addAttachedFiles(files);
+    if (!prompt && attachedFiles.length === 0) return;
     input.value = prompt;
     input.style.height = "auto";
     input.style.height = `${input.scrollHeight}px`;
@@ -1699,10 +1723,7 @@ async function handleDesktopQuickPromptRequest(payload = {}) {
     scheduleComposerDraftSave({ render: true });
     window.setTimeout(() => {
         if (isGenerating) return;
-        input.value = "";
-        input.style.height = "auto";
-        scheduleComposerDraftSave({ immediate: true, render: true });
-        void processWorkspaceEntry({ textValue: prompt, files });
+        void processWorkspaceEntry();
     }, 0);
 }
 

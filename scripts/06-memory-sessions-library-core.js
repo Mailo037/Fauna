@@ -1261,12 +1261,12 @@ function openCreateGitBranchDialog(defaultBranch = "") {
 }
 
 function enableWorkspaceBridgeForProject() {
-    if (isWorkspaceBridgeEnabled) return;
-    isWorkspaceBridgeEnabled = true;
-    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, "true");
-    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = true;
-    updateWorkspaceBridgeSettingsUi?.();
-    updateComposerProjectContextBar();
+    void setWorkspaceBridgeEnabledState(true).then(enabled => {
+        if (!enabled) return;
+        updateComposerProjectContextBar();
+        const root = getSessionProjectRoot();
+        if (root) void refreshProjectBranchSummary(root);
+    });
 }
 
 function ensureProjectAssignableSession() {
@@ -4709,16 +4709,13 @@ composerProjectBtn?.addEventListener("click", event => {
     closeComposerBranchMenu();
     toggleComposerProjectMenu();
 });
-composerLocalWorkBtn?.addEventListener("click", event => {
+composerLocalWorkBtn?.addEventListener("click", async event => {
     event.stopPropagation();
-    isWorkspaceBridgeEnabled = !isWorkspaceBridgeEnabled;
-    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, isWorkspaceBridgeEnabled ? "true" : "false");
-    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
-    updateWorkspaceBridgeSettingsUi?.();
-    updateProviderSettingsUi?.();
-    updateComposerProjectContextBar();
-    if (isWorkspaceBridgeEnabled && getSessionProjectRoot()) void refreshProjectBranchSummary(getSessionProjectRoot());
-    showToast(isWorkspaceBridgeEnabled ? "Local workspace access enabled." : "Local workspace access disabled.", isWorkspaceBridgeEnabled ? "success" : "info");
+    const nextEnabled = !isWorkspaceBridgeEnabled;
+    composerLocalWorkBtn.disabled = true;
+    const changed = await setWorkspaceBridgeEnabledState(nextEnabled, { notify: true });
+    composerLocalWorkBtn.disabled = false;
+    if (changed && nextEnabled && getSessionProjectRoot()) void refreshProjectBranchSummary(getSessionProjectRoot());
 });
 composerBranchBtn?.addEventListener("click", event => {
     event.stopPropagation();
@@ -4927,13 +4924,11 @@ projectPageChatToggleApproxLocation?.addEventListener("change", event => {
     if (typeof updatePotatoSettingsUi === "function") updatePotatoSettingsUi();
     syncProjectPageChatToolToggles();
 });
-projectPageChatToggleWorkspaceBridge?.addEventListener("change", event => {
-    isWorkspaceBridgeEnabled = event.target.checked;
-    if (toggleWorkspaceBridge) toggleWorkspaceBridge.checked = isWorkspaceBridgeEnabled;
-    safeLocalStorageSet(WORKSPACE_BRIDGE_ENABLED_STORAGE_KEY, isWorkspaceBridgeEnabled ? "true" : "false");
-    if (typeof updateWorkspaceBridgeSettingsUi === "function") updateWorkspaceBridgeSettingsUi();
-    if (typeof updateProviderSettingsUi === "function") updateProviderSettingsUi();
-    syncProjectPageChatToolToggles();
+projectPageChatToggleWorkspaceBridge?.addEventListener("change", async event => {
+    const nextEnabled = event.target.checked;
+    projectPageChatToggleWorkspaceBridge.disabled = true;
+    await setWorkspaceBridgeEnabledState(nextEnabled, { notify: true });
+    projectPageChatToggleWorkspaceBridge.disabled = false;
 });
 projectPageChatVoiceButton?.addEventListener("click", () => {
     voiceButton?.click();
